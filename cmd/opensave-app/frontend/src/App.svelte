@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { initApi, connectWS, native } from './lib/api.js';
   import { applyMessage, wsConnected, view, appUpdate, toast, showAbout } from './lib/stores.js';
+  import { t } from './lib/i18n.js';
 
   import logoUrl from './assets/logo.png';
   import TitleBar from './components/TitleBar.svelte';
@@ -129,7 +130,7 @@
         {/if}
         {#if update.assetUrl}
           <button class="link" disabled={installStarted} on:click={installRelease}>
-            {installStarted ? 'Starting…' : 'Install & restart'}
+            {installStarted ? $t('app.updateStarting') : 'Install & restart'}
           </button>
         {:else if update.flatpak}
           <button class="link" on:click={() => native.openExternal(update.url)}>Get .flatpak</button>
@@ -163,10 +164,10 @@
     {#if bootError}
       <div class="boot-error">
         <img class="boot-logo" src={logoUrl} alt="OpenSave" />
-        <h2>OpenSave failed to start</h2>
+        <h2>{$t('app.failedToStart', { app: 'OpenSave' })}</h2>
         <p>{bootError}</p>
         <button class="btn primary" disabled={retrying} on:click={boot}>
-          {retrying ? 'Retrying…' : 'Retry'}
+          {retrying ? $t('app.retrying') : $t('app.retry')}
         </button>
         <p class="boot-hint">
           Details are saved to <code>.opensave\opensave.log</code> in your user folder.
@@ -180,7 +181,7 @@
     {:else}
       <div class="boot-loading">
         <img class="boot-logo pulse" src={logoUrl} alt="OpenSave" />
-        <span>Starting OpenSave…</span>
+        <span>{$t('app.starting', { app: 'OpenSave' })}</span>
       </div>
     {/if}
   </div>

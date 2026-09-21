@@ -1,15 +1,16 @@
 <script>
   import { view, navigate, settings, gameList, conflictCount, pairingRequests, syncActivity } from '../lib/stores.js';
+  import { t } from '../lib/i18n.js';
 
   let filter = '';
 
   const nav = [
-    { id: 'home', label: 'Home', icon: 'M3 10.5 L10 4 L17 10.5 M5 9 V16 H8.5 V12 H11.5 V16 H15 V9' },
-    { id: 'devices', label: 'Devices', icon: 'M3 6 h9 v7 H3 z M5 15.5 h5 M7.5 13 v2.5 M14 9 h3 v6.5 h-3 z' },
-    { id: 'cloud', label: 'Cloud Backup', icon: 'M6 14 a3.5 3.5 0 0 1 0 -7 a4.5 4.5 0 0 1 8.6 1.2 A3 3 0 0 1 14 14 z' },
-    { id: 'activity', label: 'Activity', icon: 'M3 10 h3 l2 -5 l3 10 l2 -5 h4' },
-    { id: 'settings', label: 'Settings', icon: 'M10 7 a3 3 0 1 0 0 6 a3 3 0 1 0 0 -6 M10 2.5 v2 M10 15.5 v2 M2.5 10 h2 M15.5 10 h2 M4.6 4.6 l1.4 1.4 M14 14 l1.4 1.4 M15.4 4.6 L14 6 M6 14 l-1.4 1.4' },
-    { id: 'changelog', label: 'Changelog', icon: 'M5 3 h7 l3 3 v11 H5 z M12 3 v3 h3 M7.5 10 h5 M7.5 13 h5' }
+    { id: 'home', labelKey: 'nav.home', icon: 'M3 10.5 L10 4 L17 10.5 M5 9 V16 H8.5 V12 H11.5 V16 H15 V9' },
+    { id: 'devices', labelKey: 'nav.devices', icon: 'M3 6 h9 v7 H3 z M5 15.5 h5 M7.5 13 v2.5 M14 9 h3 v6.5 h-3 z' },
+    { id: 'cloud', labelKey: 'nav.cloud', icon: 'M6 14 a3.5 3.5 0 0 1 0 -7 a4.5 4.5 0 0 1 8.6 1.2 A3 3 0 0 1 14 14 z' },
+    { id: 'activity', labelKey: 'nav.activity', icon: 'M3 10 h3 l2 -5 l3 10 l2 -5 h4' },
+    { id: 'settings', labelKey: 'nav.settings', icon: 'M10 7 a3 3 0 1 0 0 6 a3 3 0 1 0 0 -6 M10 2.5 v2 M10 15.5 v2 M2.5 10 h2 M15.5 10 h2 M4.6 4.6 l1.4 1.4 M14 14 l1.4 1.4 M15.4 4.6 L14 6 M6 14 l-1.4 1.4' },
+    { id: 'changelog', labelKey: 'nav.changelog', icon: 'M5 3 h7 l3 3 v11 H5 z M12 3 v3 h3 M7.5 10 h5 M7.5 13 h5' }
   ];
 
   $: deviceName = $settings?.deviceName ?? '…';
@@ -32,7 +33,7 @@
     <div class="avatar">{initials(deviceName)}</div>
     <div class="who">
       <div class="name">{deviceName}</div>
-      <div class="sub">this device</div>
+      <div class="sub">{$t('sidebar.thisDevice')}</div>
     </div>
   </div>
 
@@ -42,7 +43,7 @@
         <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d={item.icon} />
         </svg>
-        <span>{item.label}</span>
+        <span>{$t(item.labelKey)}</span>
         {#if badgeFor(item.id)}
           <span class="nav-badge">{badgeFor(item.id)}</span>
         {/if}
@@ -51,11 +52,11 @@
   </nav>
 
   <div class="library-head">
-    <span>MY LIBRARY</span>
-    <button class="add" title="Track a game" on:click={() => navigate('home', { add: true })}>+</button>
+    <span>{$t('sidebar.library')}</span>
+    <button class="add" title={$t('sidebar.trackGame')} on:click={() => navigate('home', { add: true })}>+</button>
   </div>
 
-  <input class="filter" placeholder="Filter library" bind:value={filter} />
+  <input class="filter" placeholder={$t('sidebar.filterLibrary')} bind:value={filter} />
 
   <div class="library">
     {#each filteredGames as game (game.id)}
@@ -77,12 +78,12 @@
         </span>
         <span class="game-name">{game.name}</span>
         {#if $syncActivity[game.id]?.state === 'running'}
-          <span class="spin" title="Syncing"></span>
+          <span class="spin" title={$t('sidebar.syncing')}></span>
         {/if}
       </button>
     {:else}
       <div class="library-empty">
-        {$gameList.length === 0 ? 'No games tracked yet' : 'No matches'}
+        {$gameList.length === 0 ? $t('sidebar.noGames') : $t('sidebar.noMatches')}
       </div>
     {/each}
   </div>
@@ -90,7 +91,10 @@
   {#if activeSyncs > 0}
     <div class="sync-note">
       <span class="spin"></span>
-      {activeSyncs} sync{activeSyncs > 1 ? 's' : ''} in progress
+      {$t('sidebar.syncsInProgress', {
+        count: activeSyncs,
+        noun: $t(activeSyncs === 1 ? 'sidebar.syncSingular' : 'sidebar.syncPlural')
+      })}
     </div>
   {/if}
 </aside>

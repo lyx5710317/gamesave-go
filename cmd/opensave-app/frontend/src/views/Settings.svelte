@@ -4,6 +4,7 @@
   import { api, native } from '../lib/api.js';
   import qrcode from 'qrcode-generator';
   import { DISCORD_URL, DONATE_URL } from '../lib/links.js';
+  import { locale, t } from '../lib/i18n.js';
 
   // QR of the same URL, generated locally so paying from a phone (where
   // Apple/Google Pay is a single tap) needs no typing. Built once — the URL
@@ -79,7 +80,7 @@
       const updated = await api.post('/api/settings', draft);
       settings.set(updated);
       draft = structuredClone(updated);
-      toast('Settings saved', 'success');
+      toast($t('settings.saved'), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -177,17 +178,17 @@
 </script>
 
 <div class="head">
-  <h2 class="page-title">Settings</h2>
+  <h2 class="page-title">{$t('settings.title')}</h2>
 </div>
 
 {#if !draft}
-  <p class="quiet">Loading…</p>
+  <p class="quiet">{$t('settings.loading')}</p>
 {:else}
   <div class="pill-tabs" style="margin-bottom: 18px;">
-    <button class:active={tab === 'general'} on:click={() => (tab = 'general')}>General</button>
-    <button class:active={tab === 'sync'} on:click={() => (tab = 'sync')}>Sync</button>
-    <button class:active={tab === 'storage'} on:click={() => (tab = 'storage')}>Storage</button>
-    <button class:active={tab === 'advanced'} on:click={() => (tab = 'advanced')}>Advanced</button>
+    <button class:active={tab === 'general'} on:click={() => (tab = 'general')}>{$t('settings.tabs.general')}</button>
+    <button class:active={tab === 'sync'} on:click={() => (tab = 'sync')}>{$t('settings.tabs.sync')}</button>
+    <button class:active={tab === 'storage'} on:click={() => (tab = 'storage')}>{$t('settings.tabs.storage')}</button>
+    <button class:active={tab === 'advanced'} on:click={() => (tab = 'advanced')}>{$t('settings.tabs.advanced')}</button>
     <button class="support-tab" class:active={tab === 'support'} on:click={() => (tab = 'support')}>💜 Support</button>
     <!-- Not a tab: it leaves the app. Shaped like its neighbour so the pair
          reads as one group, marked with ↗ so nobody expects a panel. -->
@@ -204,6 +205,18 @@
 
   {#if tab === 'general'}
     <div class="card">
+      <h3 class="section-title">🌐 {$t('settings.language.section')}</h3>
+      <div class="field" style="margin-bottom: 0;">
+        <label for="s-language">{$t('settings.language.label')}</label>
+        <select id="s-language" bind:value={$locale}>
+          <option value="en">{$t('settings.language.en')}</option>
+          <option value="zh-CN">{$t('settings.language.zhCN')}</option>
+        </select>
+        <span class="hint">{$t('settings.language.hint')}</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 14px;">
       <h3 class="section-title">🖥️ Device identity</h3>
       <div class="field">
         <label for="s-name">Device name — how other devices see you</label>
@@ -556,7 +569,7 @@
 
   {#if tab !== 'support'}
     <div class="save-bar">
-      <button class="btn primary" disabled={busy} on:click={save}>Save changes</button>
+      <button class="btn primary" disabled={busy} on:click={save}>{$t('settings.saveChanges')}</button>
     </div>
   {/if}
 {/if}

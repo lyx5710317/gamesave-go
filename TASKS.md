@@ -17,14 +17,14 @@
 
 ## Phase 1 — i18n
 
-- [ ] Add a lightweight Svelte store-based i18n layer.
-- [ ] Add English and Simplified Chinese catalogs.
-- [ ] Reserve stable locale identifiers for Traditional Chinese and Japanese.
-- [ ] Translate the requested first slice of App, Sidebar, and Settings.
-- [ ] Add Settings → General language selection with immediate switching.
-- [ ] Persist language per device in `localStorage` without a database migration.
-- [ ] Add tests for resolution, fallback, interpolation, switching, persistence, and invalid stored values.
-- [ ] Pass frontend tests and production frontend build.
+- [x] Add a lightweight Svelte store-based i18n layer.
+- [x] Add English and Simplified Chinese catalogs.
+- [x] Reserve stable locale identifiers for Traditional Chinese and Japanese.
+- [x] Translate the requested first slice of App, Sidebar, and Settings.
+- [x] Add Settings → General language selection with immediate switching.
+- [x] Persist language per device in `localStorage` without a database migration.
+- [x] Add tests for resolution, fallback, interpolation, switching, persistence, and invalid stored values.
+- [x] Pass frontend tests and production frontend build.
 
 ## Phase 2 — Windows-first UI
 
