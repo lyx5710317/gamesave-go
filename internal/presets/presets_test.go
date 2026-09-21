@@ -193,6 +193,10 @@ func TestResolveNames_UsesResolverAndCachesResult(t *testing.T) {
 	sc := &Scanner{
 		CacheFile:          cacheFile,
 		SteamUserdataPaths: []string{userdata},
+		// An explicit empty list prevents the Windows registry from adding the
+		// real machine's Steam libraries to this otherwise isolated test.
+		SteamRoots: []string{},
+		GOOS:       "windows",
 		ResolveAppName: func(appID string) string {
 			calls++
 			if appID == "99999999" {

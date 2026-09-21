@@ -116,9 +116,18 @@ func freePort(t *testing.T) int {
 // USERPROFILE on Windows and HOME elsewhere; both are set so the same harness
 // works on either.
 func (c *cli) env() []string {
+	localAppData := filepath.Join(c.home, "AppData", "Local")
+	appData := filepath.Join(c.home, "AppData", "Roaming")
 	return append(os.Environ(),
 		"USERPROFILE="+c.home,
 		"HOME="+c.home,
+		// Windows path portability prefers these roots over USERPROFILE. If
+		// they still point at the real account, a backup exported by one test
+		// install resolves back into that install instead of the fresh one.
+		"LOCALAPPDATA="+localAppData,
+		"APPDATA="+appData,
+		"PUBLIC="+filepath.Join(c.home, "Public"),
+		"PROGRAMDATA="+filepath.Join(c.home, "ProgramData"),
 		// Styling is suppressed when stdout is not a terminal, but be explicit:
 		// escape codes in the captured output would break every assertion.
 		"NO_COLOR=1",
