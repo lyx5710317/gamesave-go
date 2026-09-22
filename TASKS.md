@@ -47,7 +47,7 @@
 - [x] Specify versioned `vault.json`, VaultId, DeviceId registration, and upgrade behavior.
 - [x] Map snapshot ancestry and device attribution onto existing data before proposing migrations.
 - [x] Require a successful safety snapshot before restore or incoming replacement.
-- [ ] Design first-join scanning and conflict behavior with no silent overwrite.
+- [x] Design and implement provider-independent first-join scanning and conflict previews with no silent overwrite. See `internal/vaultmeta` and `docs/VAULT_IDENTITY_V2.md`.
 
 ## Phase 4 — Baidu Netdisk
 

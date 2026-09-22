@@ -70,7 +70,7 @@ The provider's GameSave Go application directory contains one metadata file:
       "deviceId": "7e2ae42d-4672-4e48-b840-21f72afbe3dc",
       "nodeId": "node_7e2ae42d46724e48b84021f72afbe3dc",
       "name": "Gaming PC",
-      "identityPublicKey": "base64-x25519-public-key",
+      "identityPublicKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
       "registeredAt": "2026-09-22T10:00:00Z",
       "revokedAt": null
     }
@@ -121,6 +121,36 @@ Partial creation is detected by missing or invalid metadata, a missing wrapped
 key for every active device, or a revision mismatch. Cleanup must be explicit;
 the client does not overwrite an ambiguous remote directory in place.
 
+## First-join preview contract
+
+The provider-independent implementation lives in `internal/vaultmeta`. It
+validates `vault.json`, scans the current tracked save folders and named save
+locations, carries measured untracked discoveries into a local-only preview,
+and compares that preview with a remote library summary. It has no provider
+client and exposes no apply/write operation.
+
+The comparison produces only these relationships:
+
+| Relationship | Proof |
+| --- | --- |
+| `identical` | The canonical content hashes match. |
+| `local-only` / `remote-only` | The GameId exists on only one side. |
+| `local-ahead` | The remote head is explicitly present in the local immutable ancestry list. |
+| `remote-ahead` | The local head is explicitly present in the remote immutable ancestry list. |
+| `conflict` | Content differs and neither direction has provable ancestry. |
+
+`latestAt` is display metadata only. It is never read by the relationship
+algorithm. Existing SQLite snapshot order is likewise reported only as a
+latest snapshot hint; because legacy rows have no parent links, the scanner
+does not invent a head or ancestry from their timestamps.
+
+An unreadable tracked primary or named save location makes the scan fail
+closed. An unmeasured discovered candidate remains visible as unknown and
+marks the preview incomplete; unknown never means empty. Different local and
+remote VaultIds stop at a vault conflict before any per-game action is
+proposed. Every create, publish, or join plan requires a separate confirmation,
+and each `conflict` row additionally requires an explicit per-game resolution.
+
 ## Snapshot ancestry and attribution mapping
 
 The current snapshot engine remains authoritative. Existing data maps as
@@ -167,6 +197,7 @@ replacement, extra-location P2P replacement, and keep-remote conflict paths.
 - No SQLite schema migration is introduced by this design slice.
 - No provider API, OAuth flow, wrapped-key upload, or cloud snapshot index is
   implemented here.
-- The first-join scan/summary and explicit confirmation UI remain the next
-  Phase 3 implementation slice.
+- The first-join scan/summary and confirmation contract are implemented. The
+  screen that presents and applies the preview remains Phase 5 work and must
+  preserve this explicit-confirmation boundary.
 - Vault discovery never authorizes an automatic restore or upload.
