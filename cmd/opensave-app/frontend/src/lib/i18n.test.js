@@ -5,6 +5,7 @@ import {
   STORAGE_KEY,
   createLocaleStore,
   locale,
+  messages,
   resolveLocale,
   t,
   translate
@@ -27,8 +28,12 @@ function currentValue(store) {
 
 describe('translations', () => {
   it('provides English and Simplified Chinese strings', () => {
-    expect(translate('en', 'nav.home')).toBe('Home');
-    expect(translate('zh-CN', 'nav.home')).toBe('主页');
+    expect(translate('en', 'nav.games')).toBe('Games');
+    expect(translate('zh-CN', 'nav.games')).toBe('游戏');
+  });
+
+  it('keeps both shipped catalogs on the same set of keys', () => {
+    expect(Object.keys(messages['zh-CN']).sort()).toEqual(Object.keys(messages.en).sort());
   });
 
   it('falls back to English before returning the key', () => {

@@ -4,6 +4,9 @@
   import ReleaseNotes from '../components/ReleaseNotes.svelte';
   import DiscordBanner from '../components/DiscordBanner.svelte';
 
+  export let params = {};
+  $: params;
+
   let releases = [];
   let current = '';
   let loading = true;

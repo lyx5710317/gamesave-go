@@ -1,6 +1,9 @@
 <script>
   import { logEntries } from '../lib/stores.js';
 
+  export let params = {};
+  $: params;
+
   const colors = { info: 'var(--text-dim)', warn: 'var(--warn)', error: 'var(--danger)', success: 'var(--success)' };
   const fmtTime = (t) => new Date(t).toLocaleTimeString();
 

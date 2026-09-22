@@ -1,24 +1,16 @@
 <script>
   import { view, navigate, settings, gameList, conflictCount, pairingRequests, syncActivity } from '../lib/stores.js';
   import { t } from '../lib/i18n.js';
+  import { PRIMARY_NAV, primaryNavIsActive } from '../lib/navigation.js';
 
   let filter = '';
-
-  const nav = [
-    { id: 'home', labelKey: 'nav.home', icon: 'M3 10.5 L10 4 L17 10.5 M5 9 V16 H8.5 V12 H11.5 V16 H15 V9' },
-    { id: 'devices', labelKey: 'nav.devices', icon: 'M3 6 h9 v7 H3 z M5 15.5 h5 M7.5 13 v2.5 M14 9 h3 v6.5 h-3 z' },
-    { id: 'cloud', labelKey: 'nav.cloud', icon: 'M6 14 a3.5 3.5 0 0 1 0 -7 a4.5 4.5 0 0 1 8.6 1.2 A3 3 0 0 1 14 14 z' },
-    { id: 'activity', labelKey: 'nav.activity', icon: 'M3 10 h3 l2 -5 l3 10 l2 -5 h4' },
-    { id: 'settings', labelKey: 'nav.settings', icon: 'M10 7 a3 3 0 1 0 0 6 a3 3 0 1 0 0 -6 M10 2.5 v2 M10 15.5 v2 M2.5 10 h2 M15.5 10 h2 M4.6 4.6 l1.4 1.4 M14 14 l1.4 1.4 M15.4 4.6 L14 6 M6 14 l-1.4 1.4' },
-    { id: 'changelog', labelKey: 'nav.changelog', icon: 'M5 3 h7 l3 3 v11 H5 z M12 3 v3 h3 M7.5 10 h5 M7.5 13 h5' }
-  ];
 
   $: deviceName = $settings?.deviceName ?? '…';
   $: filteredGames = $gameList.filter((g) => g.name.toLowerCase().includes(filter.toLowerCase()));
   $: activeSyncs = Object.values($syncActivity).filter((s) => s.state === 'running').length;
 
   function badgeFor(id) {
-    if (id === 'devices' && $pairingRequests.length > 0) return $pairingRequests.length;
+    if (id === 'settings' && $pairingRequests.length > 0) return $pairingRequests.length;
     if (id === 'home' && $conflictCount > 0) return $conflictCount;
     return 0;
   }
@@ -38,8 +30,8 @@
   </div>
 
   <nav>
-    {#each nav as item}
-      <button class:active={$view.name === item.id} on:click={() => navigate(item.id)}>
+    {#each PRIMARY_NAV as item}
+      <button class:active={primaryNavIsActive($view.name, item.id)} on:click={() => navigate(item.id)}>
         <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d={item.icon} />
         </svg>

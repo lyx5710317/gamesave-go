@@ -1,10 +1,13 @@
 <script>
   import { onMount } from 'svelte';
-  import { settings, toast, askConfirm, gameList } from '../lib/stores.js';
+  import { settings, toast, askConfirm, gameList, navigate, pairingRequests } from '../lib/stores.js';
   import { api, native } from '../lib/api.js';
   import qrcode from 'qrcode-generator';
   import { DISCORD_URL, DONATE_URL } from '../lib/links.js';
   import { locale, t } from '../lib/i18n.js';
+
+  export let params = {};
+  $: params;
 
   // QR of the same URL, generated locally so paying from a phone (where
   // Apple/Google Pay is a single tap) needs no typing. Built once — the URL
@@ -489,6 +492,36 @@
     </div>
   {:else if tab === 'advanced'}
     <div class="card">
+      <h3 class="section-title">🧰 {$t('settings.advanced.section')}</h3>
+      <p class="hint advanced-intro">{$t('settings.advanced.intro')}</p>
+      <div class="advanced-links">
+        <button class="advanced-link" on:click={() => navigate('devices')}>
+          <span class="advanced-icon" aria-hidden="true">🖥️</span>
+          <span class="advanced-copy">
+            <strong>{$t('settings.advanced.deviceSync')}</strong>
+            <small>{$t('settings.advanced.deviceSyncHint')}</small>
+          </span>
+          <span class="advanced-actions">
+            {#if $pairingRequests.length > 0}
+              <span class="advanced-badge">
+                {$t('settings.advanced.pendingPairings', { count: $pairingRequests.length })}
+              </span>
+            {/if}
+            <span class="advanced-open">{$t('settings.advanced.open')} →</span>
+          </span>
+        </button>
+        <button class="advanced-link" on:click={() => navigate('changelog')}>
+          <span class="advanced-icon" aria-hidden="true">📄</span>
+          <span class="advanced-copy">
+            <strong>{$t('settings.advanced.changelog')}</strong>
+            <small>{$t('settings.advanced.changelogHint')}</small>
+          </span>
+          <span class="advanced-open">{$t('settings.advanced.open')} →</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 14px;">
       <h3 class="section-title">⚙️ Network</h3>
       <div class="field" style="margin-bottom: 0;">
         <label for="s-port">Daemon port</label>
@@ -830,5 +863,76 @@
     display: flex;
     justify-content: flex-end;
     margin-top: 16px;
+  }
+  .advanced-intro {
+    margin: -2px 0 14px;
+  }
+  .advanced-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .advanced-link {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+  }
+  .advanced-link:hover,
+  .advanced-link:focus-visible {
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
+  }
+  .advanced-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .advanced-icon {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--accent-soft);
+  }
+  .advanced-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .advanced-copy strong {
+    font-size: 0.9rem;
+  }
+  .advanced-copy small {
+    color: var(--text-faint);
+    line-height: 1.4;
+  }
+  .advanced-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(251, 191, 36, 0.13);
+    color: var(--warn);
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .advanced-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .advanced-open {
+    color: var(--accent);
+    font-size: 0.78rem;
+    white-space: nowrap;
   }
 </style>

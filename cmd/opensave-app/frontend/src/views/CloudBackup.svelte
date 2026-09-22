@@ -4,6 +4,12 @@
   import { backdropClose } from '../lib/backdrop.js';
   import { onMount, onDestroy } from 'svelte';
 
+  // All routed views share the same component contract. This page currently
+  // needs no route parameters, but accepting them keeps dynamic navigation
+  // warning-free and leaves room for future deep links.
+  export let params = {};
+  $: params;
+
   let config = null;
   let busy = false;
   let authCode = '';

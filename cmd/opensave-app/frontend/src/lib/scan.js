@@ -86,29 +86,54 @@ export function fmtBytes(n) {
   return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
 }
 
+const translated = (translate, key, params, fallback) =>
+  typeof translate === 'function' ? translate(key, params) : fallback;
+
 /**
  * Rough age. Rough on purpose: the question it answers is "is this folder
  * still in use", and a date is something you have to do arithmetic on.
  */
-export function fmtAge(unix, now = Date.now()) {
-  if (!unix) return 'never';
+export function fmtAge(unix, now = Date.now(), translate = null) {
+  if (!unix) return translated(translate, 'home.scan.age.never', {}, 'never');
   const secs = now / 1000 - unix;
-  if (secs < 60) return 'just now';
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  if (secs < 86400 * 365) return `${Math.floor(secs / 86400)}d ago`;
+  if (secs < 60) return translated(translate, 'home.scan.age.justNow', {}, 'just now');
+  if (secs < 3600) {
+    const count = Math.floor(secs / 60);
+    return translated(translate, 'home.scan.age.minutes', { count }, `${count}m ago`);
+  }
+  if (secs < 86400) {
+    const count = Math.floor(secs / 3600);
+    return translated(translate, 'home.scan.age.hours', { count }, `${count}h ago`);
+  }
+  if (secs < 86400 * 365) {
+    const count = Math.floor(secs / 86400);
+    return translated(translate, 'home.scan.age.days', { count }, `${count}d ago`);
+  }
   const years = secs / 86400 / 365;
-  return years < 2 ? 'over a year ago' : `${Math.round(years)} years ago`;
+  if (years < 2) return translated(translate, 'home.scan.age.overYear', {}, 'over a year ago');
+  const count = Math.round(years);
+  return translated(translate, 'home.scan.age.years', { count }, `${count} years ago`);
 }
 
 /** What a scan tile says about its folder. */
-export function contentsLabel(r, now = Date.now()) {
-  if (!r.measured) return 'size unknown';
-  if (r.fileCount === 0) return 'empty — nothing saved here yet';
+export function contentsLabel(r, now = Date.now(), translate = null) {
+  if (!r.measured) return translated(translate, 'home.scan.contents.unknown', {}, 'size unknown');
+  if (r.fileCount === 0) {
+    return translated(translate, 'home.scan.contents.empty', {}, 'empty — nothing saved here yet');
+  }
   // The "+" belongs on the number, not after the noun: counting stopped at a
   // cap, so it is a floor, not "files and a bit".
-  const files = `${r.fileCount}${r.truncated ? '+' : ''} file${r.fileCount === 1 ? '' : 's'}`;
-  return `${files} · ${fmtBytes(r.totalBytes)} · ${fmtAge(r.latestMtime, now)}`;
+  const plus = r.truncated ? '+' : '';
+  const fileKey = r.fileCount === 1 ? 'home.scan.contents.file' : 'home.scan.contents.files';
+  const files = translated(
+    translate,
+    fileKey,
+    { count: r.fileCount, plus },
+    `${r.fileCount}${plus} file${r.fileCount === 1 ? '' : 's'}`
+  );
+  const size = fmtBytes(r.totalBytes);
+  const age = fmtAge(r.latestMtime, now, translate);
+  return translated(translate, 'home.scan.contents.details', { files, size, age }, `${files} · ${size} · ${age}`);
 }
 
 /**

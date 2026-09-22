@@ -2,6 +2,7 @@
   import { gameList, peers, navigate, toast, syncActivity, askConfirm, settings } from '../lib/stores.js';
   import { api, native, coverURL, gameCover } from '../lib/api.js';
   import { backdropClose } from '../lib/backdrop.js';
+  import { t } from '../lib/i18n.js';
   // The scan screen's decisions live in a plain module so they can be tested
   // without opening the app — see scan.test.js, where each case is a mistake
   // that actually reached a build.
@@ -25,7 +26,7 @@
   let adding = false;
 
   async function pickFolder() {
-    const dir = await native.selectDirectory('Select the save folder to track');
+    const dir = await native.selectDirectory($t('home.folderPicker'));
     if (dir) newPath = dir;
   }
 
@@ -38,8 +39,8 @@
   async function excludeResult(item) {
     if (excluding) return;
     const ok = await askConfirm(
-      `Stop offering "${item.name}" in future scans? Nothing on disk is touched — this only tells the scanner to skip ${item.savePath}. You can undo it under Settings → Excluded folders.`,
-      { title: 'Exclude from scans?', confirmText: 'Exclude' }
+      $t('home.exclude.message', { name: item.name, path: item.savePath }),
+      { title: $t('home.exclude.title'), confirmText: $t('home.exclude.confirm') }
     );
     if (!ok) return;
     excluding = item.id;
@@ -60,7 +61,7 @@
       scanResults = (scanResults ?? []).filter((r) => r.id !== item.id);
       selected.delete(item.id);
       selected = selected;
-      toast(`"${item.name}" won't be offered again`, 'success');
+      toast($t('home.exclude.success', { name: item.name }), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -73,7 +74,7 @@
     adding = true;
     try {
       const game = await api.post('/api/games', { name: newName, savePath: newPath });
-      toast(`Now tracking "${newName}"`, 'success');
+      toast($t('home.toast.nowTracking', { name: newName }), 'success');
       newName = '';
       newPath = '';
       showAdd = false;
@@ -256,11 +257,11 @@
       const { failed } = await trackAsOneGame(primary, extras);
       consumeRows(new Set(group.suggested.map((m) => m.id)));
       if (failed.length > 0) {
-        toast(`Tracking "${primary.name}" — ${failed.length} folder(s) could not be added: ${failed[0]}`, 'error');
+        toast($t('home.toast.trackPartial', { name: primary.name, count: failed.length, error: failed[0] }), 'error');
       } else if (extras.length > 0) {
-        toast(`Now tracking "${primary.name}" across ${extras.length + 1} folders`, 'success');
+        toast($t('home.toast.trackAcross', { name: primary.name, count: extras.length + 1 }), 'success');
       } else {
-        toast(`Now tracking "${primary.name}"`, 'success');
+        toast($t('home.toast.nowTracking', { name: primary.name }), 'success');
       }
     } catch (e) {
       toast(e.message, 'error');
@@ -291,8 +292,8 @@
 
     consumeRows(new Set(items.map((i) => i.id)));
     clearSelection();
-    const extra = locations > 0 ? ` with ${locations} extra location${locations === 1 ? '' : 's'}` : '';
-    toast(`Tracked ${games} game${games === 1 ? '' : 's'}${extra}`, problems.length > 0 ? 'error' : 'success');
+    const summaryKey = locations > 0 ? 'home.toast.trackedSummaryWithLocations' : 'home.toast.trackedSummary';
+    toast($t(summaryKey, { games, locations }), problems.length > 0 ? 'error' : 'success');
     if (problems.length > 0) toast(problems[0], 'error');
     if (filteredResults.length === 0) closeScan();
   }
@@ -312,8 +313,11 @@
       const { failed } = await trackAsOneGame(primary, extras);
       consumeRows(new Set(items.map((i) => i.id)));
       clearSelection();
-      if (failed.length > 0) toast(`Tracked "${primary.name}", but ${failed.length} folder(s) failed: ${failed[0]}`, 'error');
-      else toast(`Tracking "${primary.name}" across ${items.length} folders`, 'success');
+      if (failed.length > 0) {
+        toast($t('home.toast.mergedPartial', { name: primary.name, count: failed.length, error: failed[0] }), 'error');
+      } else {
+        toast($t('home.toast.trackAcross', { name: primary.name, count: items.length }), 'success');
+      }
       if (filteredResults.length === 0) closeScan();
     } catch (e) {
       toast(e.message, 'error');
@@ -324,7 +328,7 @@
     for (const g of $gameList) {
       api.post(`/api/games/${g.id}/sync`).catch(() => {});
     }
-    toast('Sync triggered for all games');
+    toast($t('home.toast.syncAll'));
   }
 
   // ── Library multi-select ─────────────────────────────────────────
@@ -362,13 +366,13 @@
     const n = libSelectedCount;
     if (n === 0) return;
     const ok = await askConfirm(
-      `Untrack ${n} selected game${n === 1 ? '' : 's'}? They'll be removed from your library. Your save snapshots on disk are kept — nothing is deleted.`,
-      { title: 'Untrack selected?', confirmText: `Untrack ${n}`, danger: true }
+      $t('home.untrack.message', { count: n }),
+      { title: $t('home.untrack.title'), confirmText: $t('home.untrack.confirm', { count: n }), danger: true }
     );
     if (!ok) return;
     try {
       const res = await api.post('/api/games/untrack-bulk', { ids: [...libSelected] });
-      toast(`Untracked ${res.untracked} game${res.untracked === 1 ? '' : 's'} — snapshots kept`, 'success');
+      toast($t('home.untrack.success', { count: res.untracked }), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -378,43 +382,47 @@
   }
 
   $: onlinePeers = Object.values($peers).filter((p) => p.status === 'online');
-  const typeLabels = { emulator: 'Emulator', repack: 'Repack', game: 'Game' };
+  $: typeLabels = {
+    emulator: $t('home.types.emulator'),
+    repack: $t('home.types.repack'),
+    game: $t('home.types.game')
+  };
   const typeIcon = (t) => (t === 'emulator' ? '🕹️' : t === 'repack' ? '📦' : '🎮');
 </script>
 
 <svelte:window on:keydown={onKeydown} />
 
 <div class="head">
-  <h2 class="page-title">Home</h2>
+  <h2 class="page-title">{$t('home.title')}</h2>
   <div class="head-actions">
     <button class="btn" on:click={scan} disabled={scanning}>
-      {scanning ? 'Scanning…' : '🔍 Auto-scan'}
+      {scanning ? $t('home.scanning') : `🔍 ${$t('home.autoScan')}`}
     </button>
-    <button class="btn" on:click={syncAll} disabled={$gameList.length === 0}>⟳ Sync all</button>
-    <button class="btn primary" on:click={() => (showAdd = !showAdd)}>+ Track folder</button>
+    <button class="btn" on:click={syncAll} disabled={$gameList.length === 0}>⟳ {$t('home.syncAll')}</button>
+    <button class="btn primary" on:click={() => (showAdd = !showAdd)}>+ {$t('home.trackFolder')}</button>
   </div>
 </div>
 
 {#if showAdd}
   <div class="card add-card">
-    <h3>Track a save folder</h3>
+    <h3>{$t('home.trackForm.title')}</h3>
     <div class="row">
       <div class="field grow">
-        <label for="g-name">Game name</label>
-        <input id="g-name" placeholder="e.g. Elden Ring" bind:value={newName} on:keydown={(e) => e.key === 'Enter' && addGame()} />
+        <label for="g-name">{$t('home.trackForm.gameName')}</label>
+        <input id="g-name" placeholder={$t('home.trackForm.gameNamePlaceholder')} bind:value={newName} on:keydown={(e) => e.key === 'Enter' && addGame()} />
       </div>
       <div class="field grow2">
-        <label for="g-path">Save folder or file</label>
+        <label for="g-path">{$t('home.trackForm.savePath')}</label>
         <div class="path-row">
           <input id="g-path" placeholder="C:\Users\you\AppData\…" bind:value={newPath} on:keydown={(e) => e.key === 'Enter' && addGame()} />
-          <button class="btn" on:click={pickFolder}>Browse</button>
+          <button class="btn" on:click={pickFolder}>{$t('home.trackForm.browse')}</button>
         </div>
       </div>
     </div>
     <div class="add-actions">
-      <button class="btn" on:click={() => (showAdd = false)}>Cancel</button>
+      <button class="btn" on:click={() => (showAdd = false)}>{$t('home.trackForm.cancel')}</button>
       <button class="btn primary" disabled={!newName || !newPath || adding} on:click={addGame}>
-        {adding ? 'Adding…' : 'Start tracking'}
+        {adding ? $t('home.trackForm.adding') : $t('home.trackForm.start')}
       </button>
     </div>
   </div>
@@ -425,34 +433,38 @@
     <div class="scan-modal">
       <div class="scan-modal-head">
         <div>
-          <h2>🔍 Auto-scan results</h2>
+          <h2>🔍 {$t('home.scan.title')}</h2>
           <p class="scan-modal-sub">
-            {#if scanning}Scanning your system…{:else}Found {scanCounts.all} save location{scanCounts.all === 1 ? '' : 's'} — {shownAvailable} available to track{#if emptyCount > 0 && !showEmpty}, {emptyCount} empty hidden{/if}{/if}
+            {#if scanning}
+              {$t('home.scan.scanningSystem')}
+            {:else}
+              {$t('home.scan.summary', { count: scanCounts.all, available: shownAvailable })}{#if emptyCount > 0 && !showEmpty}{$t('home.scan.hiddenEmpty', { count: emptyCount })}{/if}
+            {/if}
           </p>
         </div>
-        <button class="btn icon" on:click={closeScan} title="Close">✕</button>
+        <button class="btn icon" on:click={closeScan} title={$t('home.scan.close')}>✕</button>
       </div>
 
       {#if scanning}
-        <div class="scan-loading"><span class="cspin"></span> Scanning Steam, emulators, and configured folders…</div>
+        <div class="scan-loading"><span class="cspin"></span> {$t('home.scan.loading')}</div>
       {:else}
         <div class="scan-toolbar">
-          <input class="scan-search" placeholder="Filter by name or path…" bind:value={scanFilter} />
+          <input class="scan-search" placeholder={$t('home.scan.filter')} bind:value={scanFilter} />
           <div class="scan-type-tabs">
-            {#each [['all', 'All'], ['game', 'Games'], ['emulator', 'Emulators'], ['repack', 'Repacks']] as [id, label]}
+            {#each [['all', 'home.scan.tabs.all'], ['game', 'home.scan.tabs.games'], ['emulator', 'home.scan.tabs.emulators'], ['repack', 'home.scan.tabs.repacks']] as [id, labelKey]}
               <button class:active={scanType === id} on:click={() => (scanType = id)}>
-                {label} <span class="count">{scanCounts[id]}</span>
+                {$t(labelKey)} <span class="count">{scanCounts[id]}</span>
               </button>
             {/each}
           </div>
-          <label class="scan-show-tracked" title="Also show saves you already track">
+          <label class="scan-show-tracked" title={$t('home.scan.showTrackedTitle')}>
             <input type="checkbox" bind:checked={showTracked} />
-            Show tracked
+            {$t('home.scan.showTracked')}
           </label>
           {#if emptyCount > 0}
-            <label class="scan-show-tracked" title="Folders that exist but hold no files. Steam creates one for every game you own, whether or not saves go there.">
+            <label class="scan-show-tracked" title={$t('home.scan.showEmptyTitle')}>
               <input type="checkbox" bind:checked={showEmpty} />
-              Show {emptyCount} empty
+              {$t('home.scan.showEmpty', { count: emptyCount })}
             </label>
           {/if}
         </div>
@@ -463,7 +475,7 @@
               {@const item = group.primary}
               {#if i === availableGroups.length && trackedGroups.length > 0}
                 <div class="scan-divider">
-                  Already tracked ({trackedGroups.length})
+                  {$t('home.scan.alreadyTrackedGroup', { count: trackedGroups.length })}
                 </div>
               {/if}
               <div
@@ -497,33 +509,33 @@
                   <span class="cover-type">{typeLabels[item.type] ?? item.type}</span>
 
                   {#if isTracked(item)}
-                    <span class="cover-tracked">✓ Tracked</span>
+                    <span class="cover-tracked">✓ {$t('home.scan.tracked')}</span>
                   {:else}
                     <div class="cover-hover">
                       <button class="btn small primary" on:click|stopPropagation={() => trackGroup(group)}>
-                        {group.suggested.length > 1 ? `Track all ${group.suggested.length}` : 'Track'}
+                        {group.suggested.length > 1 ? $t('home.scan.trackAll', { count: group.suggested.length }) : $t('home.scan.track')}
                       </button>
                       <button
                         class="btn small"
                         disabled={excluding === item.id}
-                        title="Stop offering this location in future scans"
+                        title={$t('home.scan.excludeTitle')}
                         on:click|stopPropagation={() => excludeResult(item)}
                       >
-                        {excluding === item.id ? 'Excluding…' : 'Exclude'}
+                        {excluding === item.id ? $t('home.scan.excluding') : $t('home.scan.exclude')}
                       </button>
                     </div>
                   {/if}
                 </div>
                 <div class="cover-name" title={item.name}>{item.name}</div>
-                <div class="cover-meta" title={item.savePath}>{contentsLabel(item)}</div>
+                <div class="cover-meta" title={item.savePath}>{contentsLabel(item, Date.now(), $t)}</div>
                 {#if group.extras.length > 0}
                   <button
                     class="cover-folders"
                     class:open={expandedGroup === group.id}
                     on:click|stopPropagation={() => (expandedGroup = expandedGroup === group.id ? null : group.id)}
                   >
-                    {expandedGroup === group.id ? '▾' : '▸'} found in {group.members.length} folders
-                    {#if group.suggested.length > 1}<span class="cover-folders-hint">· {group.suggested.length} are one save</span>{/if}
+                    {expandedGroup === group.id ? '▾' : '▸'} {$t('home.scan.foundFolders', { count: group.members.length })}
+                    {#if group.suggested.length > 1}<span class="cover-folders-hint">· {$t('home.scan.oneSave', { count: group.suggested.length })}</span>{/if}
                   </button>
                 {/if}
               </div>
@@ -531,8 +543,7 @@
               {#if expandedGroup === group.id}
                 <div class="group-detail">
                   <div class="group-detail-head">
-                    <strong>{item.name}</strong> was found in {group.members.length} places.
-                    Tick the folders that belong to this save — they are tracked as one game.
+                    <strong>{item.name}</strong> {$t('home.scan.groupDetail', { count: group.members.length })}
                   </div>
                   {#each group.members as m (m.id)}
                     <label class="group-row" class:covered={m.role === 'inside'}>
@@ -545,12 +556,12 @@
                       <span class="group-row-main">
                         <span class="group-row-path">{m.savePath}</span>
                         <span class="group-row-meta">
-                          {contentsLabel(m)}
-                          {#if m.role === 'primary'}<span class="tag tag-primary">the save folder</span>
-                          {:else if m.role === 'location'}<span class="tag tag-loc">part of the same save</span>
-                          {:else if m.role === 'inside'}<span class="tag">already inside the folder above</span>
-                          {:else if m.role === 'alternative'}<span class="tag tag-alt">another copy — probably an old install</span>{/if}
-                          {#if isTracked(m)}<span class="tag tag-primary">already tracked</span>{/if}
+                          {contentsLabel(m, Date.now(), $t)}
+                          {#if m.role === 'primary'}<span class="tag tag-primary">{$t('home.scan.roles.saveFolder')}</span>
+                          {:else if m.role === 'location'}<span class="tag tag-loc">{$t('home.scan.roles.sameSave')}</span>
+                          {:else if m.role === 'inside'}<span class="tag">{$t('home.scan.roles.inside')}</span>
+                          {:else if m.role === 'alternative'}<span class="tag tag-alt">{$t('home.scan.roles.alternative')}</span>{/if}
+                          {#if isTracked(m)}<span class="tag tag-primary">{$t('home.scan.roles.alreadyTracked')}</span>{/if}
                         </span>
                       </span>
                     </label>
@@ -559,7 +570,7 @@
               {/if}
             {:else}
               <div class="scan-empty">
-                {scanCounts.all === 0 ? 'Nothing detected. You can still track any folder manually.' : 'No matches for this filter.'}
+                {scanCounts.all === 0 ? $t('home.scan.nothingDetected') : $t('home.scan.noMatches')}
               </div>
             {/each}
           </div>
@@ -567,9 +578,9 @@
 
         <div class="scan-modal-foot">
           <div class="scan-select-actions">
-            <button class="btn small" on:click={selectAllVisible} disabled={availableGroups.length === 0}>Select all ({availableGroups.length})</button>
+            <button class="btn small" on:click={selectAllVisible} disabled={availableGroups.length === 0}>{$t('home.scan.selectAll', { count: availableGroups.length })}</button>
             {#if selectedCount > 0}
-              <button class="btn small" on:click={clearSelection}>Clear</button>
+              <button class="btn small" on:click={clearSelection}>{$t('home.scan.clear')}</button>
             {/if}
           </div>
           <!-- Both tracking actions sit together on the right: they are the
@@ -579,14 +590,14 @@
             {#if selectedCount > 1}
               <button
                 class="btn primary"
-                title="Track everything ticked as a single game, whatever it was grouped under. For a split save the scan did not spot."
+                title={$t('home.scan.mergeTitle')}
                 on:click={mergeSelectedIntoOneGame}
               >
-                Track as one game
+                {$t('home.scan.merge')}
               </button>
             {/if}
             <button class="btn primary" disabled={selectedCount === 0} on:click={trackSelected}>
-              Track selected ({selectedCount})
+              {$t('home.scan.trackSelected', { count: selectedCount })}
             </button>
           </div>
         </div>
@@ -598,47 +609,47 @@
 <div class="stats">
   <div class="card stat">
     <div class="stat-num">{$gameList.length}</div>
-    <div class="stat-label">games tracked</div>
+    <div class="stat-label">{$t('home.stats.games')}</div>
   </div>
   <div class="card stat">
     <div class="stat-num">{onlinePeers.length}</div>
-    <div class="stat-label">peers online</div>
+    <div class="stat-label">{$t('home.stats.peers')}</div>
   </div>
   <div class="card stat">
     <div class="stat-num">{Object.values($syncActivity).filter((s) => s.state === 'running').length}</div>
-    <div class="stat-label">active syncs</div>
+    <div class="stat-label">{$t('home.stats.syncs')}</div>
   </div>
 </div>
 
 {#if $gameList.length === 0}
   <div class="welcome">
     <div class="welcome-icon">🎮</div>
-    <h3>Welcome to OpenSave</h3>
-    <p>Keep your game saves in sync across every device — no accounts, no cloud lock-in. Start by finding your saves:</p>
+    <h3>{$t('home.welcome.title')}</h3>
+    <p>{$t('home.welcome.body')}</p>
     <div class="welcome-actions">
       <button class="btn primary" on:click={scan} disabled={scanning}>
-        {scanning ? 'Scanning…' : '🔍 Auto-scan for saves'}
+        {scanning ? $t('home.scanning') : `🔍 ${$t('home.welcome.scan')}`}
       </button>
-      <button class="btn" on:click={() => (showAdd = true)}>+ Track a folder manually</button>
+      <button class="btn" on:click={() => (showAdd = true)}>+ {$t('home.welcome.manual')}</button>
     </div>
-    <p class="welcome-hint">Then open <strong>Devices</strong> to pair another PC or Steam Deck, or <strong>Cloud Backup</strong> to mirror snapshots online.</p>
+    <p class="welcome-hint">{$t('home.welcome.hint')}</p>
   </div>
 {:else}
   <div class="section-row">
-    <h3 class="section">Library</h3>
+    <h3 class="section">{$t('home.library.title')}</h3>
     {#if selectMode}
       <div class="select-bar">
-        <span class="select-count">{libSelectedCount} selected</span>
+        <span class="select-count">{$t('home.library.selected', { count: libSelectedCount })}</span>
         <button class="btn small" on:click={toggleSelectAll}>
-          {allSelected ? 'Unselect all' : `Select all (${$gameList.length})`}
+          {allSelected ? $t('home.library.unselectAll') : $t('home.library.selectAll', { count: $gameList.length })}
         </button>
         <button class="btn small danger" disabled={libSelectedCount === 0} on:click={untrackSelectedGames}>
-          Untrack selected
+          {$t('home.library.untrackSelected')}
         </button>
-        <button class="btn small" on:click={toggleSelectMode}>Cancel</button>
+        <button class="btn small" on:click={toggleSelectMode}>{$t('home.trackForm.cancel')}</button>
       </div>
     {:else}
-      <button class="btn small" on:click={toggleSelectMode}>☑ Select</button>
+      <button class="btn small" on:click={toggleSelectMode}>☑ {$t('home.library.select')}</button>
     {/if}
   </div>
   <div class="grid">
@@ -667,12 +678,12 @@
         <div class="gc-body">
           <div class="gc-name">{game.name}</div>
           <div class="gc-meta">
-            branch <strong>{game.activeBranch}</strong>
-            · {Object.values(game.branches ?? {}).reduce((n, b) => n + (b.snapshots?.length ?? 0), 0)} snapshots
+            {$t('home.card.branch')} <strong>{game.activeBranch}</strong>
+            · {$t('home.card.snapshots', { count: Object.values(game.branches ?? {}).reduce((n, b) => n + (b.snapshots?.length ?? 0), 0) })}
           </div>
           <div class="gc-path" title={game.savePath}>{game.savePath}</div>
           {#if $syncActivity[game.id]?.state === 'running'}
-            <div class="gc-sync">syncing… {$syncActivity[game.id].percentage ?? 0}%</div>
+            <div class="gc-sync">{$t('home.card.syncing', { percentage: $syncActivity[game.id].percentage ?? 0 })}</div>
           {/if}
         </div>
       </button>

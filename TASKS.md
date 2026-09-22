@@ -4,7 +4,7 @@
 
 - [x] Read the supplied V2.1 execution document in full.
 - [x] Import exact OpenSave upstream commit `1d7476db5270e06aca0dc5a4c7e5ff669e344bc3` and configure `upstream`.
-- [ ] Configure `origin` after the GameSave Cloud fork URL is supplied.
+- [x] Configure `origin` for the public `gamesave-go` fork while retaining `upstream`.
 - [x] Audit README, license, dependencies, repository structure, core packages, settings, cloud providers, and tests.
 - [x] Record the baseline versions, architecture, build commands, gaps, and risks.
 - [x] Run the unmodified frontend tests and production build.
@@ -28,10 +28,16 @@
 
 ## Phase 2 — Windows-first UI
 
-- [ ] Define the information architecture around Games, Cloud Backup, Activity, and Settings.
-- [ ] Move P2P/device-sync entry points to an advanced location without deleting them.
+- [x] Define the information architecture around Games, Cloud Backup, Activity, and Settings.
+- [x] Move P2P/device-sync entry points to an advanced location without deleting them.
 - [ ] Extend i18n page by page; do not mix this with a global internal-name migration.
+  - [x] Translate the Games page shell, empty state, library controls, and game-card status.
+  - [x] Translate the auto-scan dialog as one reviewed interaction.
+  - [ ] Translate Cloud Backup and Activity in separate slices.
 - [ ] Validate keyboard, scaling, tray, and Windows WebView behavior.
+  - [x] Verify keyboard focus/navigation and the current 960×600 minimum layout in the WebView preview.
+  - [x] Build and launch the Windows WebView2 desktop binary.
+  - [ ] Verify native tray minimize/restore behavior on the packaged app.
 
 ## Phase 3 — Vault + Device Identity
 
