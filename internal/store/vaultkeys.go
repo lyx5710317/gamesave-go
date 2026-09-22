@@ -1,14 +1,12 @@
 package store
 
 import (
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/opensave/opensave/internal/e2ee"
 )
 
@@ -235,13 +233,10 @@ func (s *Store) JoinVault(vaultID string, theirs *e2ee.Keyring) (*e2ee.Keyring, 
 	return mine, nil
 }
 
-// newVaultID mints an identifier for a vault. Random rather than derived from
-// the key: it is bound into every sealed payload as associated data, and a
-// value that changes when the key rotates would make old blobs unopenable.
+// newVaultID mints an RFC 4122 UUID v4 for a vault. Random rather than derived
+// from the key: it is bound into every sealed payload as associated data, and
+// a value that changes when the key rotates would make old blobs unopenable.
+// Existing 32-hex vault ids remain valid and are never rewritten.
 func newVaultID() (string, error) {
-	raw := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, raw); err != nil {
-		return "", fmt.Errorf("generate vault id: %w", err)
-	}
-	return hex.EncodeToString(raw), nil
+	return uuid.NewString(), nil
 }

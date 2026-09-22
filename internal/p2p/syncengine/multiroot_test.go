@@ -1,7 +1,10 @@
 package syncengine
 
 import (
+	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opensave/opensave/internal/delta"
@@ -124,5 +127,96 @@ func TestOnlyTheIntersectionIsSynced(t *testing.T) {
 	}
 	if names["screenshots"] {
 		t.Error("a location only this device has was synced against nothing")
+	}
+}
+
+func TestExtraLocationRefusesIncomingReplacementWithoutSafetySnapshot(t *testing.T) {
+	env := setupEngine(t)
+	configDir := t.TempDir()
+	if err := env.store.AddGameRoot("game1", "config", configDir); err != nil {
+		t.Fatal(err)
+	}
+	write(t, configDir, "settings.ini", "agreed settings")
+	write(t, env.remoteDir, "settings.ini", "agreed settings")
+
+	game, err := env.store.GetGame("game1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := delta.BuildManifest(env.remoteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr := sharedRoot{
+		root:   syncRoot{Name: "config", Path: configDir},
+		remote: remote,
+	}
+	if err := env.engine.syncOneRoot(context.Background(), "game1", game, env.peer, sr, ManifestResponse{ActiveBranch: "main"}); err != nil {
+		t.Fatalf("establish root agreement: %v", err)
+	}
+
+	write(t, env.remoteDir, "settings.ini", "peer's newer settings")
+	remote, err = delta.BuildManifest(env.remoteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr.remote = remote
+
+	settings, err := env.store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.BackupsDir = filepath.Join(configDir, "settings.ini", "not-a-directory")
+	if err := env.store.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	err = env.engine.syncOneRoot(context.Background(), "game1", game, env.peer, sr, ManifestResponse{ActiveBranch: "main"})
+	if err == nil || !strings.Contains(err.Error(), "could not be snapshotted first") {
+		t.Fatalf("extra location replacement should stop when its safety snapshot fails, got %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(configDir, "settings.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "agreed settings" {
+		t.Errorf("extra location was replaced without a safety snapshot: %q", got)
+	}
+}
+
+func TestExtraLocationKeepRemoteLeavesConflictPendingWhenSafetySnapshotFails(t *testing.T) {
+	env := setupEngine(t)
+	configDir := t.TempDir()
+	if err := env.store.AddGameRoot("game1", "config", configDir); err != nil {
+		t.Fatal(err)
+	}
+	write(t, configDir, "settings.ini", "local conflict side")
+	env.engine.rootConflicts[rootConflictKey("game1", "config")] = &RootConflict{
+		GameID: "game1",
+		Root:   "config",
+		Peer:   env.peer,
+	}
+
+	settings, err := env.store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.BackupsDir = filepath.Join(configDir, "settings.ini", "not-a-directory")
+	if err := env.store.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := env.engine.ResolveRootConflict(context.Background(), "game1", env.peer.ID, "config", "keep-remote"); err == nil {
+		t.Fatal("extra-location keep-remote continued without a safety snapshot")
+	}
+	got, err := os.ReadFile(filepath.Join(configDir, "settings.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "local conflict side" {
+		t.Errorf("extra-location conflict side changed without a safety snapshot: %q", got)
+	}
+	if len(env.engine.ActiveRootConflicts()) != 1 {
+		t.Error("the extra-location conflict was cleared even though keep-remote was refused")
 	}
 }

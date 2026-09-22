@@ -59,6 +59,8 @@ Joining a second device must first scan local saves, inspect the remote vault, s
 
 Audited upstream already has a node ID, per-device X25519 keys, and a local cryptographic vault/keyring migration. These are valuable primitives, but they are not automatically equivalent to the planned cloud `VaultId` metadata contract. Phase 3 must reconcile and reuse them before adding schema.
 
+The reviewed reconciliation, versioned `vault.json` contract, upgrade states, and snapshot-lineage mapping are recorded in [`docs/VAULT_IDENTITY_V2.md`](docs/VAULT_IDENTITY_V2.md). It deliberately introduces no schema migration; legacy ancestry and device attribution remain unknown rather than being inferred from timestamps.
+
 ## Snapshot, restore, and conflict rules
 
 OpenSave's snapshot model remains authoritative. The target logical history must be able to associate a snapshot with `snapshotId`, `gameId`, `deviceId`, `parentSnapshotId`, `createdAt`, and content hash, reusing equivalent existing fields where possible.

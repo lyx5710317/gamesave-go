@@ -43,10 +43,10 @@
 
 ## Phase 3 — Vault + Device Identity
 
-- [ ] Reconcile current NodeID, X25519 device identity, and local keyring/vault with the V2.1 cloud model.
-- [ ] Specify versioned `vault.json`, VaultId, DeviceId registration, and upgrade behavior.
-- [ ] Map snapshot ancestry and device attribution onto existing data before proposing migrations.
-- [ ] Require a successful safety snapshot before restore or incoming replacement.
+- [x] Reconcile current NodeID, X25519 device identity, and local keyring/vault with the V2.1 cloud model. See `docs/VAULT_IDENTITY_V2.md`.
+- [x] Specify versioned `vault.json`, VaultId, DeviceId registration, and upgrade behavior.
+- [x] Map snapshot ancestry and device attribution onto existing data before proposing migrations.
+- [x] Require a successful safety snapshot before restore or incoming replacement.
 - [ ] Design first-join scanning and conflict behavior with no silent overwrite.
 
 ## Phase 4 — Baidu Netdisk

@@ -14,10 +14,10 @@ import (
 )
 
 type testEnv struct {
-	mgr      *Manager
-	store    *store.Store
-	saveDir  string
-	backups  string
+	mgr     *Manager
+	store   *store.Store
+	saveDir string
+	backups string
 }
 
 func setup(t *testing.T) *testEnv {
@@ -126,6 +126,83 @@ func TestRestore_TakesSafetySnapshotFirst(t *testing.T) {
 	}
 	if !snaps[0].IsSystemAuto {
 		t.Error("newest snapshot should be the auto safety snapshot")
+	}
+}
+
+// A restore is destructive even when the target snapshot is healthy. If the
+// current state cannot be protected first, the restore must stop before it
+// clears or replaces a single file.
+func TestRestoreAbortsWhenSafetySnapshotFails(t *testing.T) {
+	env := setup(t)
+	writeSave(t, env.saveDir, "slot1.sav", "snapshot target")
+	target, err := env.mgr.Create("game1", "target", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSave(t, env.saveDir, "slot1.sav", "current irreplaceable progress")
+
+	settings, err := env.store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("block backups"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	settings.BackupsDir = blocker
+	if err := env.store.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.mgr.Restore("game1", target.ID); err == nil || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("restore should refuse to continue without a safety snapshot, got %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(env.saveDir, "slot1.sav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "current irreplaceable progress" {
+		t.Errorf("restore replaced the current save without a safety snapshot: %q", got)
+	}
+}
+
+// Restore clears every named save location, so an otherwise-empty primary
+// folder must not hide irreplaceable data in an extra config/mods location.
+func TestRestoreSafetyGateIncludesExtraLocations(t *testing.T) {
+	env := setup(t)
+	configDir := t.TempDir()
+	if err := env.store.AddGameRoot("game1", "config", configDir); err != nil {
+		t.Fatal(err)
+	}
+	writeSave(t, configDir, "settings.ini", "snapshot target")
+	target, err := env.mgr.Create("game1", "target", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSave(t, configDir, "settings.ini", "current local settings")
+
+	settings, err := env.store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("block backups"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	settings.BackupsDir = blocker
+	if err := env.store.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.mgr.Restore("game1", target.ID); err == nil {
+		t.Fatal("restore ignored content in the extra location when its safety snapshot failed")
+	}
+	got, err := os.ReadFile(filepath.Join(configDir, "settings.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "current local settings" {
+		t.Errorf("extra location was replaced without a safety snapshot: %q", got)
 	}
 }
 

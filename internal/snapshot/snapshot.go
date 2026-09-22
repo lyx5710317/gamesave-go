@@ -461,10 +461,10 @@ func (m *Manager) DeleteBranch(gameID, branch string) (removed int, freed int64)
 	return removed, freed
 }
 
-// Restore extracts the given snapshot over the game's save path, taking a
-// safety snapshot of the current state first (when there is anything to
-// save). The snapshot may live on any branch, matching the JS behavior of
-// searching all branches.
+// Restore extracts the given snapshot over the game's save paths. When any
+// current location has content, a verified safety snapshot is a hard gate:
+// if it cannot be created, no current file is replaced. The snapshot may live
+// on any branch, matching the JS behavior of searching all branches.
 func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	game, err := m.Store.GetGame(gameID)
 	if err != nil {
@@ -479,16 +479,27 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	// game is at its snapshot limit and this is the oldest snapshot — would
 	// delete this very snapshot's archive before we extract it. Restore from
 	// a temporary copy so the content survives that pruning.
+	hasContent, err := m.gameHasSaveContent(gameID, game.SavePath)
+	if err != nil {
+		return store.Snapshot{}, fmt.Errorf("inspect current save before restore: %w", err)
+	}
+
 	restoreZip := snap.ZipPath
-	if savePathHasContent(game.SavePath) {
-		if tmp, err := copyToTempZip(snap.ZipPath); err == nil {
-			restoreZip = tmp
-			defer os.Remove(tmp)
+	if hasContent {
+		// The safety snapshot can trigger retention pruning. Preserve the target
+		// before taking it, or restoring the oldest retained snapshot could
+		// delete the archive it is about to read.
+		tmp, err := copyToTempZip(snap.ZipPath)
+		if err != nil {
+			return store.Snapshot{}, fmt.Errorf("preserve target snapshot before restore: %w", err)
 		}
+		restoreZip = tmp
+		defer os.Remove(tmp)
+
 		safetyComment := fmt.Sprintf("Pre-rollback safety restore point (before restoring %s)", snapshotID)
 		if _, err := m.Create(gameID, safetyComment, true); err != nil {
-			// Non-fatal, same as JS: warn and continue the restore.
-			fmt.Fprintf(os.Stderr, "[snapshot] safety snapshot before restore failed: %v\n", err)
+			return store.Snapshot{}, fmt.Errorf(
+				"could not back up the current save before restoring, so nothing was changed: %w", err)
 		}
 	}
 
@@ -626,20 +637,9 @@ func (m *Manager) SwitchBranch(gameID, targetBranch string) error {
 	// disk, a locked file, a database error, and the save folder was emptied
 	// anyway with nothing to go back to. A switch that cannot be undone is not
 	// a switch worth making automatically.
-	hasContent := savePathHasContent(game.SavePath)
-	if !hasContent {
-		// A game whose main save is empty may still have a settings or mods
-		// folder full of work, and the switch below clears those too. Backing
-		// up only when the main folder has something in it would skip the
-		// backup in exactly the case where it is the only copy.
-		if paths, err := m.Store.GameRootPaths(gameID); err == nil {
-			for _, p := range paths {
-				if savePathHasContent(p) {
-					hasContent = true
-					break
-				}
-			}
-		}
+	hasContent, err := m.gameHasSaveContent(gameID, game.SavePath)
+	if err != nil {
+		return fmt.Errorf("inspect the current save before switching branches: %w", err)
 	}
 	if hasContent {
 		comment := fmt.Sprintf("Auto backup before switching to branch %q", targetBranch)
@@ -729,15 +729,53 @@ func ensureSavePathExists(savePath string) error {
 // savePathHasContent reports whether there is anything at the save path
 // worth safety-snapshotting: an existing file, or a non-empty directory.
 func savePathHasContent(savePath string) bool {
+	hasContent, _ := savePathContentStatus(savePath)
+	return hasContent
+}
+
+// savePathContentStatus is the error-reporting form used by destructive
+// operations. Treating an unreadable folder as empty would let a restore or
+// branch switch clear it without first protecting what is inside.
+func savePathContentStatus(savePath string) (bool, error) {
 	info, err := os.Stat(savePath)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
 	}
 	if !info.IsDir() {
-		return true
+		return true, nil
 	}
 	entries, err := os.ReadDir(savePath)
-	return err == nil && len(entries) > 0
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
+// gameHasSaveContent checks the primary save and every named location. A
+// restore clears all of them, so content in a config/mods location needs the
+// same safety snapshot even when the primary folder is empty.
+func (m *Manager) gameHasSaveContent(gameID, primaryPath string) (bool, error) {
+	hasContent, err := savePathContentStatus(primaryPath)
+	if err != nil || hasContent {
+		return hasContent, err
+	}
+	roots, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return false, err
+	}
+	for name, path := range roots {
+		hasContent, err := savePathContentStatus(path)
+		if err != nil {
+			return false, fmt.Errorf("inspect the %q save location: %w", name, err)
+		}
+		if hasContent {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // clearSavePath removes a single save file, or empties a save directory

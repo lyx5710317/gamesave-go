@@ -328,6 +328,44 @@ func TestSync_ConflictDetectedAndResolvedKeepRemote(t *testing.T) {
 	}
 }
 
+func TestConflictKeepRemoteAbortsWhenSafetySnapshotFails(t *testing.T) {
+	env := setupEngine(t)
+	write(t, env.localDir, "save.dat", "local irreplaceable version")
+	write(t, env.remoteDir, "save.dat", "remote version")
+	if err := env.store.SetSyncState("game1", env.peer.ID, []string{"save.dat"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.UpdatePeerLastSynced(env.peer.ID, "2026-01-01T00:00:00.000Z"); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := env.engine.SyncWithPeer(context.Background(), "game1", env.peer); err != nil || res.Status != "conflict" {
+		t.Fatalf("expected conflict, got %+v err=%v", res, err)
+	}
+
+	settings, err := env.store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.BackupsDir = filepath.Join(env.localDir, "save.dat", "not-a-directory")
+	if err := env.store.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.engine.ResolveConflict(context.Background(), "game1", env.peer.ID, "keep-remote"); err == nil {
+		t.Fatal("keep-remote overwrote the local conflict side without a safety snapshot")
+	}
+	got, err := os.ReadFile(filepath.Join(env.localDir, "save.dat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "local irreplaceable version" {
+		t.Errorf("local conflict side was replaced without a safety snapshot: %q", got)
+	}
+	if len(env.engine.ActiveConflicts()) != 1 {
+		t.Error("the conflict was cleared even though keep-remote was refused")
+	}
+}
+
 // TestConflict_CarriesComparisonData verifies the conflict captures per-side
 // stats and the differing file list, and that keep-remote snapshots the
 // local version first so the choice is undoable.
