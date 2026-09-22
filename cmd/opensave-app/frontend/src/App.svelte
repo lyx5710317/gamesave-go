@@ -3,6 +3,7 @@
   import { initApi, connectWS, native } from './lib/api.js';
   import { applyMessage, wsConnected, view, appUpdate, toast, showAbout } from './lib/stores.js';
   import { t } from './lib/i18n.js';
+  import { PRODUCT_NAME } from './lib/branding.js';
 
   import logoUrl from './assets/logo.png';
   import TitleBar from './components/TitleBar.svelte';
@@ -110,7 +111,7 @@
     <div class="update-banner installing">
       <span>
         {#if $appUpdate.state === 'downloading'}
-          ⬇️ Updating OpenSave — downloading {$appUpdate.percentage ?? 0}%…
+          ⬇️ Updating {PRODUCT_NAME} — downloading {$appUpdate.percentage ?? 0}%…
         {:else if $appUpdate.state === 'installing'}
           🔧 Installing update…
         {:else}
@@ -121,7 +122,7 @@
     </div>
   {:else if update}
     <div class="update-banner">
-      <span>🎉 OpenSave {update.latest} is available — you're on {update.current}.</span>
+      <span>🎉 {PRODUCT_NAME} {update.latest} is available — you're on {update.current}.</span>
       <div class="update-actions">
         {#if update.notes}
           <button class="dismiss" on:click={() => (showNotes = !showNotes)}>
@@ -145,7 +146,7 @@
     {/if}
   {:else if updatedTo}
     <div class="update-banner">
-      <span>🎉 OpenSave was updated to v{updatedTo}.</span>
+      <span>🎉 {PRODUCT_NAME} was updated to v{updatedTo}.</span>
       <div class="update-actions">
         <button class="link" on:click={openWhatsNew}>What's new</button>
         <button class="dismiss" on:click={() => (updatedTo = '')} aria-label="Dismiss">✕</button>
@@ -163,8 +164,8 @@
   <div class="body">
     {#if bootError}
       <div class="boot-error">
-        <img class="boot-logo" src={logoUrl} alt="OpenSave" />
-        <h2>{$t('app.failedToStart', { app: 'OpenSave' })}</h2>
+        <img class="boot-logo" src={logoUrl} alt={PRODUCT_NAME} />
+        <h2>{$t('app.failedToStart', { app: PRODUCT_NAME })}</h2>
         <p>{bootError}</p>
         <button class="btn primary" disabled={retrying} on:click={boot}>
           {retrying ? $t('app.retrying') : $t('app.retry')}
@@ -180,8 +181,8 @@
       </main>
     {:else}
       <div class="boot-loading">
-        <img class="boot-logo pulse" src={logoUrl} alt="OpenSave" />
-        <span>{$t('app.starting', { app: 'OpenSave' })}</span>
+        <img class="boot-logo pulse" src={logoUrl} alt={PRODUCT_NAME} />
+        <span>{$t('app.starting', { app: PRODUCT_NAME })}</span>
       </div>
     {/if}
   </div>

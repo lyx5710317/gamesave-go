@@ -34,10 +34,12 @@
   - [x] Translate the Games page shell, empty state, library controls, and game-card status.
   - [x] Translate the auto-scan dialog as one reviewed interaction.
   - [x] Translate Cloud Backup and Activity in separate slices.
-- [ ] Validate keyboard, scaling, tray, and Windows WebView behavior.
+- [x] Apply the GameSave Go user-facing brand and supplied icon while preserving compatibility identifiers.
+- [x] Point the in-app repository and release checks at the `gamesave-go` fork, with legacy update-asset fallback.
+- [x] Validate keyboard, scaling, tray, and Windows WebView behavior.
   - [x] Verify keyboard focus/navigation and the current 960×600 minimum layout in the WebView preview.
   - [x] Build and launch the Windows WebView2 desktop binary.
-  - [ ] Verify native tray minimize/restore behavior on the packaged app.
+  - [x] Verify native tray hide/restore behavior on the packaged app.
 
 ## Phase 3 — Vault + Device Identity
 

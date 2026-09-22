@@ -47,7 +47,7 @@ func runningInFlatpak() bool {
 	return err == nil
 }
 
-const flatpakUpdateMsg = "OpenSave is installed as a Flatpak, which updates through Flatpak itself — " +
+const flatpakUpdateMsg = productName + " is installed through the OpenSave-compatible Flatpak, which updates through Flatpak itself — " +
 	"run \"flatpak update\", or install the newer OpenSave.flatpak from the GitHub release page."
 
 // InstallUpdateFromPeer downloads the newer build a paired peer is running
@@ -68,7 +68,7 @@ func (a *App) InstallUpdateFromPeer(peerID string) string {
 		}
 		if !selfupdate.CanStageUpdate(exe) {
 			a.updateEvent("error", 0,
-				"OpenSave is installed in a protected folder (like Program Files), which peer updates can't replace. "+
+				productName+" is installed in a protected folder (like Program Files), which peer updates can't replace. "+
 					"Use the update banner to install from GitHub instead — that path runs the installer with the proper permissions.")
 			return
 		}
@@ -88,7 +88,7 @@ func (a *App) InstallUpdateFromPeer(peerID string) string {
 			a.updateEvent("error", 0, "download from peer failed: "+err.Error())
 			return
 		}
-		a.daemon.Log.Log("info", fmt.Sprintf("downloaded OpenSave %s (build %d) from peer; installing", build.AppVersion, build.BuildTimeMs))
+		a.daemon.Log.Log("info", fmt.Sprintf("downloaded %s %s (build %d) from peer; installing", productName, build.AppVersion, build.BuildTimeMs))
 		a.finishInstall(dest)
 	}()
 	return ""
@@ -184,7 +184,7 @@ func (a *App) installViaInstaller() {
 		return
 	}
 
-	tmp, err := os.CreateTemp("", "OpenSave.Setup-*.exe")
+	tmp, err := os.CreateTemp("", "GameSaveGo.Setup-*.exe")
 	if err != nil {
 		a.updateEvent("error", 0, err.Error())
 		return
@@ -227,7 +227,7 @@ func (a *App) installViaInstaller() {
 // fetchInstallerURL returns the download URL of the NSIS installer asset
 // on the latest GitHub release.
 func (a *App) fetchInstallerURL() (string, error) {
-	rel, err := selfupdate.LatestRelease(updateRepo, "OpenSave/"+AppVersion, a.wantsPreReleases())
+	rel, err := selfupdate.LatestRelease(updateRepo, "GameSaveGo/"+AppVersion, a.wantsPreReleases())
 	if err != nil {
 		return "", err
 	}

@@ -1,19 +1,19 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "OpenSave",
-  "outputfilename": "OpenSave",
+  "name": "GameSave Go",
+  "outputfilename": "GameSaveGo",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "OpenSave"
+    "name": "GameSave Go contributors"
   },
   "info": {
-    "companyName": "OpenSave",
-    "productName": "OpenSave",
+    "companyName": "GameSave Go",
+    "productName": "GameSave Go",
     "productVersion": "2.3.1",
-    "copyright": "Copyright © 2026 Siva Prakash & OpenSave contributors",
-    "comments": "Peer-to-peer game save sync"
+    "copyright": "Copyright © 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors",
+    "comments": "Local-first game save backup and sync"
   }
 }

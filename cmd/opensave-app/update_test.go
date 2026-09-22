@@ -35,18 +35,28 @@ func TestSelectUpdateAssetFor(t *testing.T) {
 	assets := []releaseAsset{
 		{Name: "OpenSave.Setup.exe", BrowserDownloadURL: "u/setup"},
 		{Name: "OpenSave.exe", BrowserDownloadURL: "u/portable"},
+		{Name: "GameSaveGo.exe", BrowserDownloadURL: "u/branded"},
 		{Name: "opensave-cli.exe", BrowserDownloadURL: "u/cli"},
 		{Name: "opensave-relay.exe", BrowserDownloadURL: "u/relay"},
 		{Name: "opensave-linux-amd64.tar.gz", BrowserDownloadURL: "u/linux"},
 	}
-	if got := selectUpdateAssetFor(assets, "windows"); got != "u/portable" {
-		t.Errorf("windows asset = %q, want u/portable", got)
+	if got := selectUpdateAssetFor(assets, "windows"); got != "u/branded" {
+		t.Errorf("windows asset = %q, want u/branded", got)
 	}
 	if got := selectUpdateAssetFor(assets, "linux"); got != "u/linux" {
 		t.Errorf("linux asset = %q, want u/linux", got)
 	}
 	if got := selectUpdateAssetFor(nil, "linux"); got != "" {
 		t.Errorf("no assets should yield empty, got %q", got)
+	}
+	if got := selectUpdateAssetFor([]releaseAsset{{Name: "OpenSave.exe", BrowserDownloadURL: "u/legacy"}}, "windows"); got != "u/legacy" {
+		t.Errorf("legacy Windows asset = %q, want u/legacy", got)
+	}
+}
+
+func TestUpdateRepositoryUsesGameSaveGoFork(t *testing.T) {
+	if updateRepo != "lyx5710317/gamesave-go" {
+		t.Fatalf("update repository = %q, want the GameSave Go fork", updateRepo)
 	}
 }
 

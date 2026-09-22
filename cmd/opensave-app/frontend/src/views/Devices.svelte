@@ -42,8 +42,8 @@
   // install it here — no manually copying the exe between machines.
   const updateFromPeer = async (peer) => {
     const ok = await askConfirm(
-      `${peer.name} is running a newer OpenSave build (${peer.appVersion}). Download it from ${peer.name} and update this device? OpenSave restarts itself when done.`,
-      { title: 'Update OpenSave?', confirmText: 'Update & restart' }
+      `${peer.name} is running a newer GameSave Go build (${peer.appVersion}). Download it from ${peer.name} and update this device? GameSave Go restarts itself when done.`,
+      { title: 'Update GameSave Go?', confirmText: 'Update & restart' }
     );
     if (!ok) return;
     const err = await native.installFromPeer(peer.id);
@@ -78,7 +78,7 @@
           <div class="peer-meta">
             {peer.address === 'relay' ? '🌐 internet relay' : `🖧 ${peer.address}:${peer.port}`}
             · last synced {fmtTime(peer.lastSynced)}
-            {#if peer.appVersion}· OpenSave {peer.appVersion}{/if}
+            {#if peer.appVersion}· GameSave Go {peer.appVersion}{/if}
           </div>
         </div>
         {#if peer.hasNewerBuild && peer.status === 'online'}
@@ -103,11 +103,11 @@
 
 {#if connectTab === 'lan'}
   <p class="quiet lan-intro">
-    Devices running OpenSave on the same Wi-Fi/Ethernet discover each other automatically. No setup needed.
+    Devices running GameSave Go on the same Wi-Fi/Ethernet discover each other automatically. No setup needed.
   </p>
   <h4 class="subsection">Found on your network</h4>
   {#if lanDiscovered.length === 0}
-    <p class="quiet">No unpaired devices found on the local network. Make sure OpenSave is running on the other device.</p>
+    <p class="quiet">No unpaired devices found on the local network. Make sure GameSave Go is running on the other device.</p>
   {:else}
     <div class="list">
       {#each lanDiscovered as d (d.id)}

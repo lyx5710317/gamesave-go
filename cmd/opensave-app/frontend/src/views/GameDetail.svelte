@@ -279,7 +279,7 @@
   async function removeLocation(name) {
     if (
       !(await askConfirm(
-        `Stop covering the “${name}” folder for ${game.name}? Its files are left exactly where they are — this only stops OpenSave syncing and snapshotting them.`,
+        `Stop covering the “${name}” folder for ${game.name}? Its files are left exactly where they are — this only stops GameSave Go syncing and snapshotting them.`,
         { title: 'Remove save location?', confirmText: 'Remove', danger: true }
       ))
     )
@@ -872,7 +872,7 @@
     <div class="card" style="margin-top: 16px;">
       <h3>Stop tracking</h3>
       <p class="danger-desc">
-        Removes "{game.name}" from OpenSave. Your save files and existing snapshot archives on disk are
+        Removes "{game.name}" from GameSave Go. Your save files and existing snapshot archives on disk are
         kept.
       </p>
       <button class="btn danger" disabled={busy} on:click={untrack}>Stop tracking this game</button>

@@ -42,14 +42,24 @@ Activity translates its page shell, empty state, severity labels, and time forma
 
 Device Sync covers the existing LAN pairing and internet-relay features. Changelog remains available for release details. These are normal buttons with keyboard focus treatment, not hidden links or new implementations.
 
+## Visible brand and application icon
+
+The packaged desktop product is shown as **GameSave Go** in the Wails window, custom title bar, status bar, About dialog, update messages, Windows tray title/menu, executable name, and Windows package configuration. The in-app GitHub link and release checker now point to `lyx5710317/gamesave-go`; Windows update selection prefers `GameSaveGo.exe` and retains `OpenSave.exe` as a one-way compatibility fallback across the rename.
+
+The supplied cloud-and-controller artwork is used for the 1024 px application image, the 256 px frontend image, and a Windows ICO containing 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px entries. The outside canvas is transparent while the supplied artwork itself is unchanged.
+
 ## Compatibility boundaries
 
-- Route IDs, daemon endpoints, storage, snapshot behavior, P2P protocol, cloud providers, and update protocol are unchanged.
+- Route IDs, daemon endpoints, storage, snapshot behavior, P2P protocol, cloud providers, and the update transport are unchanged.
 - Internal `OpenSave` and `.opensave` identifiers remain unchanged.
+- Existing cloud folder names, CLI names, environment variables, database/log paths, and Linux launcher integration remain compatible.
 - No SQLite migration is involved.
 - The layout uses wrapping grids and existing scalable CSS primitives; the minimum desktop window remains the current Wails setting until packaging work defines a supported range.
 
+## Native Windows validation
+
+The packaged `GameSaveGo.exe` was launched under WebView2 with the new title and icon. Pressing the close control made the window unavailable while the process continued running, which exercises the tray-ready hide path. Launching the executable again restored the same single-instance window rather than creating a duplicate. The restored window and About dialog showed the new icon, GameSave Go identity, current version metadata, and retained upstream attribution.
+
 ## Remaining Phase 2 work
 
-- Review visible GameSave Go branding separately from internal compatibility identifiers and update/release endpoints.
-- Complete native tray minimize/restore testing on the packaged app; keyboard focus, the 960×600 minimum layout, Windows binary launch, and warning-free WebView navigation have been smoke-tested.
+Phase 2 is complete. Packaging, signing, installer behavior, and clean-machine upgrade testing remain Phase 6 release work.

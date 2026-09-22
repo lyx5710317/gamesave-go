@@ -1,14 +1,16 @@
 <div align="center">
 
-<img src="cmd/opensave-app/build/appicon.png" alt="OpenSave" width="120" />
+<img src="cmd/opensave-app/build/appicon.png" alt="GameSave Go" width="120" />
 
-# OpenSave
+# GameSave Go
 
-### Steam Cloud for every game you own.
+### Local-first game save backup and sync.
 
-**OpenSave** syncs your game saves between devices, peer-to-peer — no Steam required, no accounts, no subscriptions. Point it at a folder, pair your devices, and your saves follow you everywhere.
+**GameSave Go** is a Windows-first, accountless game-save backup and synchronization app built on OpenSave. Point it at a folder, connect your own cloud storage or pair another device, and your saves follow you everywhere.
 
-[![Release](https://img.shields.io/github/v/release/Liquid-co/OpenSave?sort=semver)](https://github.com/Liquid-co/OpenSave/releases)
+> Compatibility note: user-facing desktop branding is GameSave Go. Internal `OpenSave`, `.opensave`, database, log, cloud-folder, CLI, and protocol identifiers remain unchanged so existing data and peers keep working.
+
+[![Development](https://img.shields.io/badge/status-development-8a63f4)](https://github.com/lyx5710317/gamesave-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/hvBv92DZvn)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)

@@ -195,13 +195,13 @@
     <button class="support-tab" class:active={tab === 'support'} on:click={() => (tab = 'support')}>💜 Support</button>
     <!-- Not a tab: it leaves the app. Shaped like its neighbour so the pair
          reads as one group, marked with ↗ so nobody expects a panel. -->
-    <button class="discord-tab" on:click={() => native.openExternal(DISCORD_URL)} title="Open the OpenSave Discord in your browser">
+    <button class="discord-tab" on:click={() => native.openExternal(DISCORD_URL)} title="Open the upstream OpenSave Discord in your browser">
       <span class="discord-glyph" aria-hidden="true">
         <svg viewBox="0 0 24 18" width="17" height="13" fill="currentColor">
           <path d="M20.32 1.53A19.8 19.8 0 0 0 15.43 0c-.21.38-.46.9-.63 1.31a18.3 18.3 0 0 0-5.6 0C9.03.9 8.77.38 8.56 0A19.74 19.74 0 0 0 3.67 1.53C.57 6.19-.27 10.73.15 15.21A19.9 19.9 0 0 0 6.18 18c.49-.66.92-1.37 1.29-2.11-.71-.27-1.39-.6-2.03-.98.17-.13.34-.26.5-.4a14.2 14.2 0 0 0 12.12 0c.16.14.33.27.5.4-.64.38-1.32.71-2.03.98.37.74.8 1.45 1.29 2.11a19.87 19.87 0 0 0 6.03-2.79c.5-5.19-.84-9.69-3.53-13.68ZM8.02 12.46c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Z" />
         </svg>
       </span>
-      Discord
+      Upstream Discord
       <span class="ext" aria-hidden="true">↗</span>
     </button>
   </div>
@@ -246,7 +246,7 @@
       <h3 class="section-title">🚀 Startup</h3>
       <label class="check">
         <input type="checkbox" bind:checked={draft.startOnBoot} />
-        Start OpenSave when the computer starts
+        Start GameSave Go when the computer starts
       </label>
       <p class="hint" style="margin-top: 6px;">
         Launches minimized to the system tray so syncing runs in the background.
@@ -552,7 +552,7 @@
       <div class="support-hero">
         <div class="support-badge">💜</div>
         <div class="support-hero-text">
-          <h3 class="support-title">Support OpenSave</h3>
+          <h3 class="support-title">Support the OpenSave upstream</h3>
           <p class="support-lede">
             Free and open source, and it stays that way — no accounts, no ads, no telemetry,
             and nothing locked behind a payment.
@@ -595,7 +595,7 @@
       </div>
 
       <p class="support-note">
-        Payment is handled entirely by Gumroad — OpenSave never sees your card details.
+        Payment is handled entirely by Gumroad — GameSave Go never sees your card details.
       </p>
     </div>
   {/if}
@@ -610,11 +610,6 @@
 <style>
   .head {
     margin-bottom: 18px;
-  }
-  .oauth-ids {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
   }
   .quiet {
     color: var(--text-faint);

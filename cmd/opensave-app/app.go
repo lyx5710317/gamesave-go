@@ -26,6 +26,11 @@ import (
 // drives the Windows executable/installer metadata) in sync with it.
 var AppVersion = version.Version
 
+// productName is the user-facing name of this fork. Compatibility-sensitive
+// identifiers (package paths, .opensave data, protocol names, and the
+// single-instance key) deliberately keep their existing OpenSave values.
+const productName = "GameSave Go"
+
 // App is the Wails-bound bridge between the webview frontend and the
 // embedded daemon. Methods on it are callable from JS.
 type App struct {
@@ -70,7 +75,7 @@ func (a *App) startup(ctx context.Context) {
 		a.updatedFrom = ""
 	}
 	if a.updatedFrom != "" {
-		d.Log.Log("success", "OpenSave updated: "+a.updatedFrom+" → "+AppVersion)
+		d.Log.Log("success", productName+" updated: "+a.updatedFrom+" → "+AppVersion)
 	}
 
 	settings, err := d.Store.GetSettings()
@@ -145,12 +150,12 @@ func (a *App) shutdown(ctx context.Context) {
 // AppInfo returns static app metadata for the About dialog / status bar.
 func (a *App) AppInfo() map[string]string {
 	return map[string]string{
-		"name":      "OpenSave",
+		"name":      productName,
 		"version":   AppVersion,
 		"buildTime": strconv.FormatInt(version.BuildTimeMs(), 10),
-		"tagline":   "Peer-to-peer game save sync",
+		"tagline":   "Local-first game save backup and sync",
 		"license":   "MIT",
-		"copyright": "© 2026 Siva Prakash & OpenSave contributors",
+		"copyright": "© 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors",
 		"tech":      "Go + Wails",
 	}
 }
@@ -232,7 +237,7 @@ func (a *App) SelectBackupFile(title string) string {
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: title,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "OpenSave backup (*.sscb)", Pattern: "*.sscb"},
+			{DisplayName: productName + " backup (*.sscb)", Pattern: "*.sscb"},
 			{DisplayName: "All files", Pattern: "*.*"},
 		},
 	})
@@ -248,7 +253,7 @@ func (a *App) SelectSaveFile(title, defaultName string) string {
 		Title:           title,
 		DefaultFilename: defaultName,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "OpenSave backup (*.sscb)", Pattern: "*.sscb"},
+			{DisplayName: productName + " backup (*.sscb)", Pattern: "*.sscb"},
 		},
 	})
 	if err != nil {

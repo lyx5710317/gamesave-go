@@ -180,7 +180,7 @@
       {#if $settings?.relayUrlLocked}
         <span class="hint">
           Set by the <code>OPENSAVE_RELAY_URL</code> environment variable, so it can't be changed
-          here. Change the variable and restart OpenSave, or unset it to go back to the saved
+          here. Change the variable and restart GameSave Go, or unset it to go back to the saved
           setting.
         </span>
       {:else}

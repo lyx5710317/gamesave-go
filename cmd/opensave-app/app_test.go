@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func TestAppInfoUsesVisibleForkBrandWithoutDroppingUpstreamCredit(t *testing.T) {
+	info := NewApp().AppInfo()
+	if got := info["name"]; got != "GameSave Go" {
+		t.Fatalf("app name = %q, want GameSave Go", got)
+	}
+	if got := info["copyright"]; !strings.Contains(got, "OpenSave contributors") {
+		t.Fatalf("copyright must retain upstream credit, got %q", got)
+	}
+}
+
 // TestRevealTargetDir covers what "Open folder" resolves to before anything
 // is launched: a directory reveals itself, a single-file save reveals its
 // parent, and unusable paths come back with a message the user can act on

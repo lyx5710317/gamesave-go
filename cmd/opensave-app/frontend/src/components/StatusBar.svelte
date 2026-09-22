@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { wsConnected, syncActivity, wanRoom, peers, showAbout } from '../lib/stores.js';
   import { native } from '../lib/api.js';
+  import { PRODUCT_NAME } from '../lib/branding.js';
   import AboutModal from './AboutModal.svelte';
 
   // Replaced by AppInfo() as soon as it answers; see FALLBACK_INFO.
@@ -37,7 +38,7 @@
       <span class="wan">relay: {$wanRoom.roomCode}</span>
     {/if}
     <span>{onlinePeers} peer{onlinePeers === 1 ? '' : 's'} online</span>
-    <button class="ver" on:click={() => showAbout.set(true)} title="About OpenSave">OpenSave v{version}</button>
+    <button class="ver" on:click={() => showAbout.set(true)} title={`About ${PRODUCT_NAME}`}>{PRODUCT_NAME} v{version}</button>
   </div>
 </footer>
 

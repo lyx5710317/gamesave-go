@@ -45,10 +45,10 @@ func trayIconBytes() []byte {
 func (a *App) startTray() {
 	go systray.Run(func() {
 		systray.SetIcon(trayIconBytes())
-		systray.SetTitle("OpenSave")
-		systray.SetTooltip("OpenSave — game save sync")
+		systray.SetTitle(productName)
+		systray.SetTooltip(productName + " — game save backup and sync")
 
-		openItem := systray.AddMenuItem("Open OpenSave", "Show the OpenSave window")
+		openItem := systray.AddMenuItem("Open "+productName, "Show the "+productName+" window")
 		syncItem := systray.AddMenuItem("Sync all games", "Sync every tracked game now")
 		systray.AddSeparator()
 		quitItem := systray.AddMenuItem("Quit", "Stop syncing and exit")

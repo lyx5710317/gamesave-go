@@ -153,7 +153,7 @@ export function applyMessage(msg) {
       const now = Date.now();
       if (now - (lastSyncErrorToast[data.gameId] ?? 0) > 60_000) {
         lastSyncErrorToast[data.gameId] = now;
-        toast(`Sync failed for “${gameName}”${reason ? ' — ' + reason : ''}. OpenSave will retry automatically.`, 'error');
+        toast(`Sync failed for “${gameName}”${reason ? ' — ' + reason : ''}. GameSave Go will retry automatically.`, 'error');
       }
       break;
     }

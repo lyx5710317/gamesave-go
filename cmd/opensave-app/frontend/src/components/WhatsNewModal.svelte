@@ -3,6 +3,7 @@
   import ReleaseNotes from './ReleaseNotes.svelte';
   import DiscordBanner from './DiscordBanner.svelte';
   import { navigate } from '../lib/stores.js';
+  import { PRODUCT_NAME } from '../lib/branding.js';
 
   export let releases = [];
   export let version = '';
@@ -22,12 +23,12 @@
 <svelte:window on:keydown={onKeydown} />
 
 <div class="backdrop" use:backdropClose={onClose} role="presentation">
-  <div class="modal" role="dialog" aria-modal="true" aria-label="What's new in OpenSave">
+  <div class="modal" role="dialog" aria-modal="true" aria-label={`What's new in ${PRODUCT_NAME}`}>
     <button class="x" on:click={onClose} title="Close" aria-label="Close">✕</button>
 
     <div class="hero">
       <div class="badge">Updated</div>
-      <h2>OpenSave {version}</h2>
+      <h2>{PRODUCT_NAME} {version}</h2>
       {#if from}<p class="from">You were on {from}</p>{/if}
     </div>
 

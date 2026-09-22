@@ -22,7 +22,7 @@ func (a *App) wantsPreReleases() bool {
 
 // updateRepo is the GitHub "owner/repo" whose releases are checked for a
 // newer version. Change this one line if the project moves.
-const updateRepo = "Liquid-co/OpenSave"
+const updateRepo = "lyx5710317/gamesave-go"
 
 // CheckForUpdate best-effort asks GitHub for the latest published release
 // and reports whether it is newer than the running build. Any failure
@@ -31,7 +31,7 @@ const updateRepo = "Liquid-co/OpenSave"
 func (a *App) CheckForUpdate() map[string]any {
 	none := map[string]any{"available": false, "current": AppVersion}
 
-	rel, err := selfupdate.LatestRelease(updateRepo, "OpenSave/"+AppVersion, a.wantsPreReleases())
+	rel, err := selfupdate.LatestRelease(updateRepo, "GameSaveGo/"+AppVersion, a.wantsPreReleases())
 	if err != nil || rel.TagName == "" {
 		return none
 	}
@@ -77,21 +77,30 @@ func (a *App) CheckForUpdate() map[string]any {
 type releaseAsset = selfupdate.Asset
 
 // selectUpdateAsset picks the OS-appropriate one-click update asset:
-// OpenSave.exe on Windows, the linux tarball on Linux. Returns "" when no
-// matching asset exists (the UI then opens the release page instead).
+// GameSaveGo.exe (or the legacy OpenSave.exe) on Windows, and the existing
+// Linux tarball on Linux. Returns "" when no matching asset exists (the UI
+// then opens the release page instead).
 func selectUpdateAsset(assets []releaseAsset) string {
 	return selectUpdateAssetFor(assets, runtime.GOOS)
 }
 
 func selectUpdateAssetFor(assets []releaseAsset, goos string) string {
+	if goos == "windows" {
+		// Prefer the fork's branded portable binary. The legacy name stays as
+		// a fallback so users can cross the rename boundary without reinstalling.
+		for _, wanted := range []string{"gamesavego.exe", "opensave.exe"} {
+			for _, a := range assets {
+				if strings.EqualFold(a.Name, wanted) {
+					return a.BrowserDownloadURL
+				}
+			}
+		}
+		return ""
+	}
+
 	for _, a := range assets {
 		name := strings.ToLower(a.Name)
 		switch goos {
-		case "windows":
-			// Portable app binary only — not the installer/cli/relay.
-			if name == "opensave.exe" {
-				return a.BrowserDownloadURL
-			}
 		case "linux":
 			if strings.HasPrefix(name, "opensave-linux") &&
 				(strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".tgz")) {

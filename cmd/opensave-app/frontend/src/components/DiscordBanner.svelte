@@ -16,7 +16,7 @@
     </svg>
   </span>
   <span class="text">
-    <span class="title">The OpenSave Discord is open</span>
+    <span class="title">The upstream OpenSave Discord is open</span>
     <span class="sub">Get help, report a bug, or see what's coming before it ships.</span>
   </span>
   <span class="cta">Join <span class="arrow" aria-hidden="true">→</span></span>

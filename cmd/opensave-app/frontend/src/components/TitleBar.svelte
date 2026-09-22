@@ -1,12 +1,13 @@
 <script>
   import { native } from '../lib/api.js';
+  import { PRODUCT_NAME } from '../lib/branding.js';
   import logoUrl from '../assets/logo.png';
 </script>
 
 <div class="titlebar" role="banner" style="--wails-draggable: drag" on:dblclick={() => native.toggleMaximise()}>
   <div class="brand">
     <img class="logo" src={logoUrl} alt="" draggable="false" />
-    <span class="title">OpenSave</span>
+    <span class="title">{PRODUCT_NAME}</span>
   </div>
   <div class="controls" style="--wails-draggable: no-drag">
     <button on:click={() => native.minimise()} title="Minimise" aria-label="Minimise">
