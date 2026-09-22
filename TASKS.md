@@ -30,10 +30,10 @@
 
 - [x] Define the information architecture around Games, Cloud Backup, Activity, and Settings.
 - [x] Move P2P/device-sync entry points to an advanced location without deleting them.
-- [ ] Extend i18n page by page; do not mix this with a global internal-name migration.
+- [x] Extend i18n page by page; do not mix this with a global internal-name migration.
   - [x] Translate the Games page shell, empty state, library controls, and game-card status.
   - [x] Translate the auto-scan dialog as one reviewed interaction.
-  - [ ] Translate Cloud Backup and Activity in separate slices.
+  - [x] Translate Cloud Backup and Activity in separate slices.
 - [ ] Validate keyboard, scaling, tray, and Windows WebView behavior.
   - [x] Verify keyboard focus/navigation and the current 960×600 minimum layout in the WebView preview.
   - [x] Build and launch the Windows WebView2 desktop binary.

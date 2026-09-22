@@ -1,11 +1,18 @@
 <script>
   import { logEntries } from '../lib/stores.js';
+  import { locale, t } from '../lib/i18n.js';
 
   export let params = {};
   $: params;
 
   const colors = { info: 'var(--text-dim)', warn: 'var(--warn)', error: 'var(--danger)', success: 'var(--success)' };
-  const fmtTime = (t) => new Date(t).toLocaleTimeString();
+  const levelKeys = {
+    info: 'activity.levels.info',
+    warn: 'activity.levels.warn',
+    error: 'activity.levels.error',
+    success: 'activity.levels.success'
+  };
+  const fmtTime = (timestamp, language) => new Date(timestamp).toLocaleTimeString(language);
 
   // Stick to the bottom as new entries arrive. Implemented as an action
   // (node is a local, uninstrumented reference): assigning scrollTop on a
@@ -19,17 +26,19 @@
 </script>
 
 <div class="head">
-  <h2 class="page-title">Activity</h2>
+  <h2 class="page-title">{$t('activity.title')}</h2>
 </div>
 
 <div class="card log" use:autoscroll={$logEntries.length}>
   {#if $logEntries.length === 0}
-    <div class="empty"><h3>Nothing yet</h3><p>Sync events, snapshots, and warnings show up here.</p></div>
+    <div class="empty"><h3>{$t('activity.empty.title')}</h3><p>{$t('activity.empty.body')}</p></div>
   {:else}
     {#each $logEntries as entry}
       <div class="line">
-        <span class="time">{fmtTime(entry.timestamp)}</span>
-        <span class="level" style="color: {colors[entry.level] ?? 'var(--text-dim)'}">{entry.level}</span>
+        <span class="time">{fmtTime(entry.timestamp, $locale)}</span>
+        <span class="level" style="color: {colors[entry.level] ?? 'var(--text-dim)'}">
+          {levelKeys[entry.level] ? $t(levelKeys[entry.level]) : entry.level}
+        </span>
         <span class="msg">{entry.message}</span>
       </div>
     {/each}

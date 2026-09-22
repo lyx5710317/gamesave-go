@@ -3,6 +3,7 @@
   import { api, native } from '../lib/api.js';
   import { backdropClose } from '../lib/backdrop.js';
   import { onMount, onDestroy } from 'svelte';
+  import { t } from '../lib/i18n.js';
 
   // All routed views share the same component contract. This page currently
   // needs no route parameters, but accepting them keeps dynamic navigation
@@ -25,10 +26,10 @@
     authInProgress = false;
     showManualCode = false;
     if (ev.success) {
-      toast(`Connected as ${ev.userEmail}`, 'success');
+      toast($t('cloud.toast.connectedAs', { email: ev.userEmail }), 'success');
       load();
     } else {
-      toast(ev.error ?? 'Sign-in failed', 'error');
+      toast(ev.error ?? $t('cloud.toast.signInFailed'), 'error');
     }
   });
   onDestroy(unsubAuth);
@@ -49,12 +50,12 @@
   onDestroy(unsubUpload);
 
   const providers = [
-    { id: 'google_drive', label: 'Google Drive', oauth: true, img: 'cloud/googledrive.png' },
-    { id: 'onedrive', label: 'OneDrive', oauth: true, img: 'cloud/onedrive.png' },
-    { id: 'dropbox', label: 'Dropbox', oauth: true, img: 'cloud/dropbox.png' },
-    { id: 'local', label: 'Local Folder', oauth: false, icon: 'folder' },
-    { id: 'webdav', label: 'WebDAV Server', oauth: false, icon: 'cloud' },
-    { id: 'webhook', label: 'HTTP Webhook', oauth: false, icon: 'webhook' }
+    { id: 'google_drive', labelKey: 'cloud.providers.googleDrive', oauth: true, img: 'cloud/googledrive.png' },
+    { id: 'onedrive', labelKey: 'cloud.providers.oneDrive', oauth: true, img: 'cloud/onedrive.png' },
+    { id: 'dropbox', labelKey: 'cloud.providers.dropbox', oauth: true, img: 'cloud/dropbox.png' },
+    { id: 'local', labelKey: 'cloud.providers.local', oauth: false, icon: 'folder' },
+    { id: 'webdav', labelKey: 'cloud.providers.webdav', oauth: false, icon: 'cloud' },
+    { id: 'webhook', labelKey: 'cloud.providers.webhook', oauth: false, icon: 'webhook' }
   ];
 
   const iconPaths = {
@@ -79,11 +80,11 @@
     if (!cfg) return '';
     if (id === connected) {
       const email = cfg.tokens?.userEmail;
-      return isEmail(email) ? email : 'Connected';
+      return isEmail(email) ? email : $t('cloud.status.connected');
     }
-    if (['google_drive', 'onedrive', 'dropbox'].includes(id)) return 'Click to sign in';
-    if (id === cfg.provider && cfg.url) return 'Configured';
-    return 'Not configured';
+    if (['google_drive', 'onedrive', 'dropbox'].includes(id)) return $t('cloud.status.clickToSignIn');
+    if (id === cfg.provider && cfg.url) return $t('cloud.status.configured');
+    return $t('cloud.status.notConfigured');
   }
 
   onMount(load);
@@ -110,7 +111,7 @@
     busy = true;
     try {
       settings.set(await api.post('/api/settings', { cloudSync: config }));
-      toast('Cloud settings saved', 'success');
+      toast($t('cloud.toast.settingsSaved'), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -163,9 +164,9 @@
       }));
       if (changed && wasConnected) {
         await api.post('/api/auth/disconnect');
-        toast('Saved. Sign in again — the old connection belonged to the previous app.', 'success');
+        toast($t('cloud.toast.ownAppChanged'), 'success');
       } else {
-        toast(ownAppID.trim() ? 'Saved. Sign in to use your own app.' : 'Cleared — the built-in app will be used.', 'success');
+        toast($t(ownAppID.trim() ? 'cloud.toast.ownAppSaved' : 'cloud.toast.builtInRestored'), 'success');
       }
       // Reload for the fresh tokens/ids, then put the card back. load() takes
       // the provider from the server, which is whatever was last saved with
@@ -190,9 +191,9 @@
       authAuto = !!res.autoCallback;
       showManualCode = !authAuto;
       if (authAuto) {
-        toast('Finish signing in — OpenSave connects automatically.');
+        toast($t('cloud.toast.finishAuto'));
       } else {
-        toast('Sign in using the browser window, then paste the code from the redirect URL here.');
+        toast($t('cloud.toast.finishManual'));
       }
     } catch (e) {
       toast(e.message, 'error');
@@ -211,7 +212,7 @@
     busy = true;
     try {
       const res = await api.post('/api/auth/callback', { code: authCode.trim() });
-      toast(`Connected as ${res.userEmail}`, 'success');
+      toast($t('cloud.toast.connectedAs', { email: res.userEmail }), 'success');
       authInProgress = false;
       showManualCode = false;
       authCode = '';
@@ -227,7 +228,7 @@
     busy = true;
     try {
       await api.post('/api/auth/disconnect');
-      toast('Disconnected');
+      toast($t('cloud.toast.disconnected'));
       await load();
     } catch (e) {
       toast(e.message, 'error');
@@ -237,7 +238,7 @@
   }
 
   async function pickLocalFolder() {
-    const dir = await native.selectDirectory('Select backup destination folder');
+    const dir = await native.selectDirectory($t('cloud.folderPicker'));
     if (dir) config.url = dir;
   }
 
@@ -302,8 +303,8 @@
   const deleteCloud = async (g, f) => {
     if (
       !(await askConfirm(
-        `Delete ${f.snapshotId} of "${g.gameName}" from the cloud? Snapshots stored on your devices are not affected.`,
-        { title: 'Delete cloud snapshot?', confirmText: 'Delete', danger: true }
+        $t('cloud.delete.message', { snapshot: f.snapshotId, game: g.gameName }),
+        { title: $t('cloud.delete.title'), confirmText: $t('cloud.delete.confirm'), danger: true }
       ))
     )
       return;
@@ -314,7 +315,7 @@
       g.count = g.snapshots.length;
       g.totalSize = g.snapshots.reduce((n, x) => n + x.sizeBytes, 0);
       cloudGames = cloudGames.filter((x) => x.count > 0);
-      toast('Deleted from cloud', 'success');
+      toast($t('cloud.delete.success'), 'success');
     } catch (e) {
       handleCloudError(e);
     } finally {
@@ -328,11 +329,11 @@
   );
 
   const restoreCloud = async (gameId, file) => {
-    if (!(await askConfirm(`Restore ${file.snapshotId} from the cloud over your current save?`, { title: 'Restore from cloud?', confirmText: 'Restore' }))) return;
+    if (!(await askConfirm($t('cloud.restore.message', { snapshot: file.snapshotId }), { title: $t('cloud.restore.title'), confirmText: $t('cloud.restore.confirm') }))) return;
     busy = true;
     try {
       await api.post(`/api/cloud/restore/${gameId}`, { fileName: file.name });
-      toast('Restored from cloud', 'success');
+      toast($t('cloud.restore.success'), 'success');
     } catch (e) {
       handleCloudError(e);
     } finally {
@@ -346,8 +347,8 @@
       const res = await api.post(`/api/cloud/sync-local/${gameId}`);
       toast(
         res.uploaded === 0 && res.skipped > 0
-          ? `Everything already in the cloud (${res.skipped} skipped)`
-          : `Uploaded ${res.uploaded}, skipped ${res.skipped}`,
+          ? $t('cloud.upload.alreadyCurrent', { skipped: res.skipped })
+          : $t('cloud.upload.summary', { uploaded: res.uploaded, skipped: res.skipped }),
         'success'
       );
       await browseCloud(); // detailTile re-derives from the fresh listing
@@ -417,7 +418,7 @@
   const runExport = async () => {
     const chosen = (exportItems ?? []).filter((it) => exportSel[it.id]);
     if (!chosen.length) return;
-    const target = await native.selectSaveFile('Export selected saves', 'opensave-saves.sscb');
+    const target = await native.selectSaveFile($t('cloud.export.pickerTitle'), 'opensave-saves.sscb');
     if (!target) return;
     exporting = true;
     try {
@@ -427,7 +428,7 @@
       });
       const skipped = res.skipped?.length ?? 0;
       toast(
-        `Exported ${res.exported} save${res.exported === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped — see Activity` : ''}`,
+        $t(skipped ? 'cloud.export.successSkipped' : 'cloud.export.success', { exported: res.exported, skipped }),
         skipped ? 'info' : 'success'
       );
       exportOpen = false;
@@ -447,7 +448,7 @@
   let importing = false;
 
   const pickImportFile = async () => {
-    const src = await native.selectBackupFile('Select an .sscb backup to import');
+    const src = await native.selectBackupFile($t('cloud.import.pickerTitle'));
     if (!src) return;
     importSrc = src;
     importMode = 'snapshots';
@@ -466,13 +467,13 @@
     try {
       const res = await api.post('/api/backup/restore', { sourcePath: importSrc, mode: importMode });
       if (res.legacy) {
-        toast(`Imported ${res.imported} snapshot(s), skipped ${res.skipped}`, 'success');
+        toast($t('cloud.import.legacyResult', { imported: res.imported, skipped: res.skipped }), 'success');
       } else {
         const bits = [];
-        if (res.restored) bits.push(`${res.restored} restored`);
-        if (res.snapshots) bits.push(`${res.snapshots} added to snapshots`);
-        if (res.skipped) bits.push(`${res.skipped} skipped`);
-        toast(`Import finished: ${bits.join(', ') || 'nothing imported'} — details in Activity`, res.skipped ? 'info' : 'success');
+        if (res.restored) bits.push($t('cloud.import.restored', { count: res.restored }));
+        if (res.snapshots) bits.push($t('cloud.import.snapshotsAdded', { count: res.snapshots }));
+        if (res.skipped) bits.push($t('cloud.import.skipped', { count: res.skipped }));
+        toast($t('cloud.import.finished', { result: bits.join($t('cloud.import.separator')) || $t('cloud.import.nothing') }), res.skipped ? 'info' : 'success');
       }
       importOpen = false;
     } catch (e) {
@@ -487,14 +488,14 @@
 </script>
 
 <div class="head">
-  <h2 class="page-title">Cloud Backup</h2>
+  <h2 class="page-title">{$t('cloud.title')}</h2>
 </div>
 
 {#if !config}
-  <p class="quiet">Loading…</p>
+  <p class="quiet">{$t('cloud.loading')}</p>
 {:else}
   <div class="card">
-    <div class="provider-label" style="margin-top: 0;">Select cloud storage provider</div>
+    <div class="provider-label" style="margin-top: 0;">{$t('cloud.selectProvider')}</div>
     <div class="provider-grid">
       {#each providers as p}
         <button
@@ -503,16 +504,16 @@
           on:click={() => { config.provider = p.id; cloudGames = null; detailId = null; }}
         >
           {#if p.id === connectedProvider}
-            <span class="prov-check" title="Connected">✓</span>
+            <span class="prov-check" title={$t('cloud.status.connected')}>✓</span>
           {/if}
           <div class="provider-icon">
             {#if p.img}
-              <img src={p.img} alt={p.label} />
+              <img src={p.img} alt={$t(p.labelKey)} />
             {:else}
               <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d={iconPaths[p.icon]} /></svg>
             {/if}
           </div>
-          <div class="provider-name">{p.label}</div>
+          <div class="provider-name">{$t(p.labelKey)}</div>
           <div class="provider-status" class:is-connected={p.id === connectedProvider}>
             {providerStatus(p.id, connectedProvider, config)}
           </div>
@@ -522,34 +523,34 @@
 
     {#if config.provider === 'local'}
       <div class="field">
-        <label for="cb-folder">Destination folder (e.g. a NAS mount)</label>
+        <label for="cb-folder">{$t('cloud.fields.destination')}</label>
         <div class="path-row">
           <input id="cb-folder" bind:value={config.url} placeholder="D:\Backups\OpenSave" />
-          <button class="btn" on:click={pickLocalFolder}>Browse</button>
+          <button class="btn" on:click={pickLocalFolder}>{$t('cloud.fields.browse')}</button>
         </div>
       </div>
     {:else if config.provider === 'webdav'}
       <div class="field">
-        <label for="cb-url">WebDAV URL</label>
+        <label for="cb-url">{$t('cloud.fields.webdavUrl')}</label>
         <input id="cb-url" bind:value={config.url} placeholder="https://nas.local/dav/opensave/" />
       </div>
       <div class="two">
         <div class="field">
-          <label for="cb-user">Username</label>
+          <label for="cb-user">{$t('cloud.fields.username')}</label>
           <input id="cb-user" bind:value={config.username} />
         </div>
         <div class="field">
-          <label for="cb-pass">Password</label>
+          <label for="cb-pass">{$t('cloud.fields.password')}</label>
           <input id="cb-pass" type="password" bind:value={config.password} />
         </div>
       </div>
     {:else if config.provider === 'webhook'}
       <div class="field">
-        <label for="cb-hook">Webhook URL (receives multipart POST)</label>
+        <label for="cb-hook">{$t('cloud.fields.webhookUrl')}</label>
         <input id="cb-hook" bind:value={config.url} />
       </div>
       <div class="field">
-        <label for="cb-headers">Custom headers (JSON)</label>
+        <label for="cb-headers">{$t('cloud.fields.headers')}</label>
         <input id="cb-headers" bind:value={config.headers} placeholder={'{"Authorization": "Bearer …"}'} />
       </div>
     {:else}
@@ -564,56 +565,54 @@
             {/if}
           </div>
           <div class="acct-info">
-            <div class="acct-title">Connected to {currentProvider?.label}</div>
+            <div class="acct-title">{$t('cloud.oauth.connectedTo', { provider: $t(currentProvider?.labelKey ?? '') })}</div>
             <div class="acct-sub">
               <span class="acct-dot"></span>
               {isEmail(config.tokens.userEmail)
                 ? config.tokens.userEmail
-                : 'Signed in — new snapshots upload automatically'}
+                : $t('cloud.oauth.signedInUploads')}
             </div>
           </div>
-          <button class="btn small danger" disabled={busy} on:click={disconnect}>Disconnect</button>
+          <button class="btn small danger" disabled={busy} on:click={disconnect}>{$t('cloud.oauth.disconnect')}</button>
         </div>
       {:else}
         {#if connectedProvider}
           <p class="quiet" style="margin-bottom: 10px;">
-            You're currently connected to {providers.find((x) => x.id === connectedProvider)?.label} — signing in
-            here will replace that connection.
+            {$t('cloud.oauth.replacing', { provider: $t(providers.find((x) => x.id === connectedProvider)?.labelKey ?? '') })}
           </p>
         {/if}
         {#if !authInProgress}
           <button class="btn primary" disabled={busy} on:click={startAuth}>
-            Sign in with {currentProvider?.label}
+            {$t('cloud.oauth.signInWith', { provider: $t(currentProvider?.labelKey ?? '') })}
           </button>
           {#if config.provider === 'google_drive'}
             <p class="quiet" style="margin-top: 10px;">
-              ⚠️ On Google's consent screen, <strong>tick the checkbox</strong> allowing OpenSave to access
-              its own Drive files — without it, uploads fail with "insufficient permissions".
+              ⚠️ {$t('cloud.oauth.googleConsentBefore')} <strong>{$t('cloud.oauth.googleConsentAction')}</strong>
+              {$t('cloud.oauth.googleConsentAfter')}
             </p>
           {/if}
         {:else}
           <div class="auth-waiting">
             <span class="cspin"></span>
             <div class="auth-waiting-text">
-              <strong>Waiting for you to finish signing in…</strong>
-              <span class="quiet">Approve access in your browser — OpenSave connects by itself.</span>
+              <strong>{$t('cloud.auth.waiting')}</strong>
+              <span class="quiet">{$t('cloud.auth.approve')}</span>
             </div>
-            <button class="btn small" on:click={cancelAuth}>Cancel</button>
+            <button class="btn small" on:click={cancelAuth}>{$t('cloud.common.cancel')}</button>
           </div>
           {#if !showManualCode && authAuto}
             <button class="linkish" on:click={() => (showManualCode = true)}>
-              Having trouble? Paste the code manually
+              {$t('cloud.auth.trouble')}
             </button>
           {/if}
           {#if showManualCode}
             <div class="auth-code">
               <p class="quiet">
-                After approving access, the browser lands on a localhost page. Copy the <code>code</code> value
-                from its address bar and paste it here:
+                {$t('cloud.auth.manualBefore')} <code>code</code> {$t('cloud.auth.manualAfter')}
               </p>
               <div class="path-row">
                 <input placeholder="4/0AY0e-g7…" bind:value={authCode} />
-                <button class="btn primary" disabled={!authCode || busy} on:click={finishAuth}>Connect</button>
+                <button class="btn primary" disabled={!authCode || busy} on:click={finishAuth}>{$t('cloud.auth.connect')}</button>
               </div>
             </div>
           {/if}
@@ -625,15 +624,13 @@
       <div class="own-app">
         {#if providerNeedsOwnApp(config.provider) && !ownAppID}
           <p class="quiet own-app-required">
-            <strong>OneDrive needs your own app registration.</strong> Microsoft doesn't allow a
-            shared one, so OpenSave can't ship credentials for it. Create a free app in the
-            <button class="linkish" on:click={() => native.openExternal('https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade')}>Azure portal</button>
-            with redirect URI <code>http://localhost/callback</code>, then paste its Application
-            (client) ID below.
+            <strong>{$t('cloud.ownApp.oneDriveTitle')}</strong> {$t('cloud.ownApp.oneDriveBefore')}
+            <button class="linkish" on:click={() => native.openExternal('https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade')}>{$t('cloud.ownApp.azurePortal')}</button>
+            {$t('cloud.ownApp.oneDriveAfter')} <code>http://localhost/callback</code>{$t('cloud.ownApp.oneDriveEnd')}
           </p>
         {:else}
           <button class="linkish" on:click={() => (showOwnApp = !showOwnApp)}>
-            {showOwnApp ? '▾' : '▸'} Use your own OAuth app{ownAppID ? ' (in use)' : ''}
+            {showOwnApp ? '▾' : '▸'} {$t('cloud.ownApp.toggle')}{ownAppID ? $t('cloud.ownApp.inUse') : ''}
           </button>
         {/if}
 
@@ -641,49 +638,46 @@
           <div class="own-app-body">
             {#if config.provider === 'google_drive'}
               <p class="quiet">
-                OpenSave's built-in Google credentials are a shared app still in testing, so Drive
-                can ask you to sign in again every week. Your own Client ID stops that. Create one
-                in the
-                <button class="linkish" on:click={() => native.openExternal('https://console.cloud.google.com/apis/credentials')}>Google Cloud console</button>
-                as an OAuth client with redirect URI <code>http://localhost/callback</code>.
+                {$t('cloud.ownApp.googleBefore')}
+                <button class="linkish" on:click={() => native.openExternal('https://console.cloud.google.com/apis/credentials')}>{$t('cloud.ownApp.googleConsole')}</button>
+                {$t('cloud.ownApp.googleAfter')} <code>http://localhost/callback</code>{$t('cloud.ownApp.redirectEnd')}
               </p>
             {:else if config.provider === 'dropbox'}
               <p class="quiet">
-                Only needed if you'd rather use your own Dropbox app than the built-in one.
+                {$t('cloud.ownApp.dropboxHint')}
               </p>
             {/if}
             <div class="field">
-              <label for="cb-clientid">Client ID</label>
+              <label for="cb-clientid">{$t('cloud.ownApp.clientId')}</label>
               <input
                 id="cb-clientid"
                 bind:value={ownAppID}
                 spellcheck="false"
                 placeholder={config.provider === 'google_drive'
                   ? '…apps.googleusercontent.com'
-                  : 'Application (client) ID'}
+                  : $t('cloud.ownApp.clientIdPlaceholder')}
               />
             </div>
             <div class="field">
-              <label for="cb-clientsecret">Client secret <span class="quiet">— leave empty unless your app requires one</span></label>
+              <label for="cb-clientsecret">{$t('cloud.ownApp.clientSecret')} <span class="quiet">— {$t('cloud.ownApp.secretHint')}</span></label>
               <input id="cb-clientsecret" type="password" bind:value={ownAppSecret} spellcheck="false" />
             </div>
             <div class="path-row">
-              <button class="btn primary" disabled={busy} on:click={saveOwnApp}>Save credentials</button>
+              <button class="btn primary" disabled={busy} on:click={saveOwnApp}>{$t('cloud.ownApp.saveCredentials')}</button>
               {#if ownAppID}
                 <button
                   class="btn small"
                   disabled={busy}
-                  title="Go back to OpenSave's built-in credentials"
+                  title={$t('cloud.ownApp.builtInTitle')}
                   on:click={() => { ownAppID = ''; ownAppSecret = ''; saveOwnApp(); }}
                 >
-                  Use the built-in app
+                  {$t('cloud.ownApp.builtInApp')}
                 </button>
               {/if}
             </div>
             {#if connectedProvider === config.provider}
               <p class="quiet">
-                You're signed in already — changing this disconnects you, because the existing
-                sign-in belongs to the old app.
+                {$t('cloud.ownApp.alreadySignedIn')}
               </p>
             {/if}
           </div>
@@ -693,35 +687,34 @@
 
     <div class="actions">
       <span class="quiet" style="margin-right: auto;">
-        Automatic mirroring and the Drive folder ID live in <strong>Settings → Sync</strong>.
+        {$t('cloud.automaticHint', { path: $t('cloud.automaticHintPath') })}
       </span>
-      <button class="btn primary" disabled={busy} on:click={save}>Save settings</button>
+      <button class="btn primary" disabled={busy} on:click={save}>{$t('cloud.saveSettings')}</button>
     </div>
   </div>
 
-  <h3 class="section">Cloud snapshots</h3>
+  <h3 class="section">{$t('cloud.snapshots.section')}</h3>
   <div class="card export-row">
     <div>
-      <h3>Browse your cloud library</h3>
+      <h3>{$t('cloud.snapshots.browseTitle')}</h3>
       <p class="quiet">
-        Every game with snapshots in the cloud, as cover-art tiles — upload, restore, or delete per game.
+        {$t('cloud.snapshots.browseHint')}
       </p>
     </div>
-    <button class="btn primary" on:click={openCloudBrowser}>☁️ Browse cloud</button>
+    <button class="btn primary" on:click={openCloudBrowser}>☁️ {$t('cloud.snapshots.browse')}</button>
   </div>
 
-  <h3 class="section">Backup file (.sscb)</h3>
+  <h3 class="section">{$t('cloud.backupFile.section')}</h3>
   <div class="card export-row">
     <div>
-      <h3>Export / import saves</h3>
+      <h3>{$t('cloud.backupFile.title')}</h3>
       <p class="quiet">
-        Pick any saves on this machine — tracked or just detected — and export them with their
-        locations into one file. Import adds them to snapshots, or fully restores them onto disk.
+        {$t('cloud.backupFile.hint')}
       </p>
     </div>
     <div class="export-actions">
-      <button class="btn" disabled={busy} on:click={pickImportFile}>Import .sscb</button>
-      <button class="btn primary" disabled={busy} on:click={openExportPicker}>Export saves…</button>
+      <button class="btn" disabled={busy} on:click={pickImportFile}>{$t('cloud.backupFile.import')}</button>
+      <button class="btn primary" disabled={busy} on:click={openExportPicker}>{$t('cloud.backupFile.export')}</button>
     </div>
   </div>
 {/if}
@@ -736,35 +729,34 @@
     <div class="cloud-modal">
       <div class="cloud-modal-head">
         <div>
-          <h2>📦 Export saves</h2>
+          <h2>📦 {$t('cloud.export.title')}</h2>
           <p class="cloud-modal-sub">
             {#if !exportItems}
-              Looking for saves on this machine…
+              {$t('cloud.export.looking')}
             {:else}
-              {exportCount} of {exportItems.length} selected — each game's current save is exported
-              along with where it belongs
+              {$t('cloud.export.summary', { selected: exportCount, total: exportItems.length })}
             {/if}
           </p>
         </div>
         <div class="cloud-head-actions">
-          <button class="btn icon" on:click={() => (exportOpen = false)} title="Close">✕</button>
+          <button class="btn icon" on:click={() => (exportOpen = false)} title={$t('cloud.common.close')}>✕</button>
         </div>
       </div>
 
       {#if !exportItems}
-        <div class="cloud-loading"><span class="cspin"></span> Listing tracked games and scanning for saves…</div>
+        <div class="cloud-loading"><span class="cspin"></span> {$t('cloud.export.loading')}</div>
       {:else}
         <div class="export-toolbar">
           <button class="btn small" on:click={() => exportSetAll(!allSelected)}>
-            {allSelected ? 'Unselect all' : 'Select all'}
+            {allSelected ? $t('cloud.export.unselectAll') : $t('cloud.export.selectAll')}
           </button>
-          <button class="btn small" on:click={() => { exportSetAll(false); exportSetAll(true, true); }}>Tracked only</button>
+          <button class="btn small" on:click={() => { exportSetAll(false); exportSetAll(true, true); }}>{$t('cloud.export.trackedOnly')}</button>
         </div>
         <div class="cloud-modal-list">
           {#if exportItems.length === 0}
             <div class="cloud-empty">
               <div class="cloud-empty-icon">📦</div>
-              <p>No saves found to export.</p>
+              <p>{$t('cloud.export.empty')}</p>
             </div>
           {:else}
             <div class="export-grid">
@@ -794,7 +786,7 @@
                     {#if exportSel[it.id]}
                       <div class="cover-check">✓</div>
                     {/if}
-                    <span class="cover-type">{it.tracked ? 'Tracked' : 'Detected'}</span>
+                    <span class="cover-type">{it.tracked ? $t('cloud.export.tracked') : $t('cloud.export.detected')}</span>
                   </div>
                   <div class="cover-name" title={it.name}>{it.name}</div>
                 </div>
@@ -806,7 +798,7 @@
           <div class="upload-progress">
             <div class="upload-progress-text">
               <span class="cspin"></span>
-              Exporting {Math.min(backupProg.done + 1, backupProg.total)} of {backupProg.total}
+              {$t('cloud.export.progress', { current: Math.min(backupProg.done + 1, backupProg.total), total: backupProg.total })}
               {#if backupProg.current}&nbsp;— <code>{backupProg.current}</code>{/if}
             </div>
             <div class="upload-bar">
@@ -815,11 +807,11 @@
           </div>
         {/if}
         <div class="cloud-modal-foot">
-          <span class="quiet">Detected saves export fine without being tracked.</span>
+          <span class="quiet">{$t('cloud.export.untrackedHint')}</span>
           <div class="export-foot-actions">
-            <button class="btn" on:click={() => (exportOpen = false)}>Cancel</button>
+            <button class="btn" on:click={() => (exportOpen = false)}>{$t('cloud.common.cancel')}</button>
             <button class="btn primary" disabled={exporting || exportCount === 0} on:click={runExport}>
-              {exporting ? 'Exporting…' : `Export ${exportCount} save${exportCount === 1 ? '' : 's'}`}
+              {exporting ? $t('cloud.export.exporting') : $t('cloud.export.exportCount', { count: exportCount })}
             </button>
           </div>
         </div>
@@ -838,11 +830,11 @@
     <div class="cloud-modal import-modal">
       <div class="cloud-modal-head">
         <div>
-          <h2>📥 Import backup</h2>
+          <h2>📥 {$t('cloud.import.title')}</h2>
           <p class="cloud-modal-sub"><code>{importSrc}</code></p>
         </div>
         <div class="cloud-head-actions">
-          <button class="btn icon" disabled={importing} on:click={() => (importOpen = false)} title="Close">✕</button>
+          <button class="btn icon" disabled={importing} on:click={() => (importOpen = false)} title={$t('cloud.common.close')}>✕</button>
         </div>
       </div>
 
@@ -850,23 +842,18 @@
         <label class="mode-option" class:selected={importMode === 'snapshots'}>
           <input type="radio" bind:group={importMode} value="snapshots" />
           <div>
-            <div class="mode-title">Add to snapshots <span class="badge online">recommended</span></div>
+            <div class="mode-title">{$t('cloud.import.addToSnapshots')} <span class="badge online">{$t('cloud.import.recommended')}</span></div>
             <p class="quiet">
-              Each save in the file is added to its game's snapshot history. Nothing on disk
-              changes — restore individual games whenever you choose. Games not tracked on this
-              machine are reported in Activity and skipped.
+              {$t('cloud.import.snapshotsHint')}
             </p>
           </div>
         </label>
         <label class="mode-option danger-option" class:selected={importMode === 'overwrite'}>
           <input type="radio" bind:group={importMode} value="overwrite" />
           <div>
-            <div class="mode-title">Overwrite current saves</div>
+            <div class="mode-title">{$t('cloud.import.overwrite')}</div>
             <p class="quiet">
-              Every save in the file is written to its location on this machine — tracked games to
-              their tracked folder, others to the path recorded in the backup. A safety copy of
-              whatever is there now is taken first. Check Activity afterwards for exactly what was
-              restored where.
+              {$t('cloud.import.overwriteHint')}
             </p>
           </div>
         </label>
@@ -876,7 +863,7 @@
         <div class="upload-progress">
           <div class="upload-progress-text">
             <span class="cspin"></span>
-            Importing {Math.min(backupProg.done + 1, backupProg.total)} of {backupProg.total}
+            {$t('cloud.import.progress', { current: Math.min(backupProg.done + 1, backupProg.total), total: backupProg.total })}
             {#if backupProg.current}&nbsp;— <code>{backupProg.current}</code>{/if}
           </div>
           <div class="upload-bar">
@@ -885,15 +872,15 @@
         </div>
       {/if}
       <div class="cloud-modal-foot">
-        <span class="quiet">Nothing is ever overwritten without a safety copy.</span>
+        <span class="quiet">{$t('cloud.import.safetyHint')}</span>
         <div class="export-foot-actions">
-          <button class="btn" disabled={importing} on:click={() => (importOpen = false)}>Cancel</button>
+          <button class="btn" disabled={importing} on:click={() => (importOpen = false)}>{$t('cloud.common.cancel')}</button>
           <button
             class="btn {importMode === 'overwrite' ? 'danger' : 'primary'}"
             disabled={importing}
             on:click={runImport}
           >
-            {importing ? 'Importing…' : importMode === 'overwrite' ? 'Overwrite saves' : 'Add to snapshots'}
+            {importing ? $t('cloud.import.importing') : importMode === 'overwrite' ? $t('cloud.import.overwriteAction') : $t('cloud.import.addToSnapshots')}
           </button>
         </div>
       </div>
@@ -911,45 +898,44 @@
     <div class="cloud-modal">
       <div class="cloud-modal-head">
         <div>
-          <h2>☁️ Cloud snapshots</h2>
+          <h2>☁️ {$t('cloud.browser.title')}</h2>
           <p class="cloud-modal-sub">
             {#if browsing}
-              Reading cloud storage…
+              {$t('cloud.browser.reading')}
             {:else if cloudGames}
-              {cloudGames.length} game{cloudGames.length === 1 ? '' : 's'} · {cloudTotals.snaps}
-              snapshot{cloudTotals.snaps === 1 ? '' : 's'} · {fmtSize(cloudTotals.size)} in the cloud
+              {$t('cloud.browser.summary', { games: cloudGames.length, snapshots: cloudTotals.snaps, size: fmtSize(cloudTotals.size) })}
             {:else}
-              Could not read cloud storage
+              {$t('cloud.browser.readFailed')}
             {/if}
           </p>
         </div>
         <div class="cloud-head-actions">
           <button class="btn small" disabled={browsing} on:click={browseCloud}>
-            {browsing ? 'Loading…' : 'Refresh'}
+            {browsing ? $t('cloud.loading') : $t('cloud.browser.refresh')}
           </button>
-          <button class="btn icon" on:click={closeCloudBrowser} title="Close">✕</button>
+          <button class="btn icon" on:click={closeCloudBrowser} title={$t('cloud.common.close')}>✕</button>
         </div>
       </div>
 
       {#if browsing && !cloudGames}
-        <div class="cloud-loading"><span class="cspin"></span> Listing snapshots from your provider…</div>
+        <div class="cloud-loading"><span class="cspin"></span> {$t('cloud.browser.listing')}</div>
       {:else if cloudGames && detailTile}
         <!-- drill-in: one game's cloud snapshots -->
         <div class="detail-head">
-          <button class="btn small" on:click={() => (detailId = null)}>← Back</button>
+          <button class="btn small" on:click={() => (detailId = null)}>← {$t('cloud.browser.back')}</button>
           <div class="detail-title">
             <strong>{detailTile.name}</strong>
             <span class="quiet">
               {#if detailTile.cloud}
-                {detailTile.cloud.count} snapshot{detailTile.cloud.count === 1 ? '' : 's'} · {fmtSize(detailTile.cloud.totalSize)} in the cloud
+                {$t('cloud.browser.gameSummary', { snapshots: detailTile.cloud.count, size: fmtSize(detailTile.cloud.totalSize) })}
               {:else}
-                nothing in the cloud yet
+                {$t('cloud.browser.nothingYet')}
               {/if}
             </span>
           </div>
           {#if detailTile.tracked}
             <button class="btn small" disabled={uploading} on:click={() => uploadLocal(detailTile.id)}>
-              {uploading ? 'Uploading…' : '⬆ Upload local snapshots'}
+              {uploading ? $t('cloud.browser.uploading') : `⬆ ${$t('cloud.browser.uploadLocal')}`}
             </button>
           {/if}
         </div>
@@ -958,10 +944,10 @@
             <div class="upload-progress-text">
               <span class="cspin"></span>
               {#if uploadProg && uploadProg.total > 0}
-                Uploading {Math.min(uploadProg.done + 1, uploadProg.total)} of {uploadProg.total}
+                {$t('cloud.browser.uploadProgress', { current: Math.min(uploadProg.done + 1, uploadProg.total), total: uploadProg.total })}
                 {#if uploadProg.current}&nbsp;— <code>{uploadProg.current}</code>{/if}
               {:else}
-                Checking what needs uploading…
+                {$t('cloud.browser.checkingUpload')}
               {/if}
             </div>
             <div class="upload-bar">
@@ -983,41 +969,41 @@
                 <button
                   class="btn small primary"
                   disabled={busy || !detailTile.tracked}
-                  title={detailTile.tracked ? 'Download and restore this snapshot' : 'Track this game first to restore'}
+                  title={detailTile.tracked ? $t('cloud.browser.restoreTitle') : $t('cloud.browser.trackFirst')}
                   on:click={() => restoreCloud(detailTile.id, f)}
                 >
-                  Restore
+                  {$t('cloud.restore.confirm')}
                 </button>
                 <button
                   class="btn small danger"
                   disabled={busy}
-                  title="Delete from the cloud (local snapshots are kept)"
+                  title={$t('cloud.browser.deleteTitle')}
                   on:click={() => deleteCloud(detailTile.cloud, f)}
                 >
-                  Delete
+                  {$t('cloud.delete.confirm')}
                 </button>
               </div>
             {/each}
           {:else}
             <div class="cloud-empty">
               <div class="cloud-empty-icon">☁️</div>
-              <p>No cloud snapshots for this game yet.</p>
-              <p class="quiet">Use <strong>Upload local snapshots</strong> above to push them up.</p>
+              <p>{$t('cloud.browser.noGameSnapshots')}</p>
+              <p class="quiet">{$t('cloud.browser.useUploadBefore')} <strong>{$t('cloud.browser.uploadLocal')}</strong> {$t('cloud.browser.useUploadAfter')}</p>
             </div>
           {/if}
         </div>
         <div class="cloud-modal-foot">
-          <span class="quiet">Deleting only removes the cloud copy — snapshots on your devices stay.</span>
-          <button class="btn" on:click={closeCloudBrowser}>Close</button>
+          <span class="quiet">{$t('cloud.browser.deleteHint')}</span>
+          <button class="btn" on:click={closeCloudBrowser}>{$t('cloud.common.close')}</button>
         </div>
       {:else if cloudGames}
         <!-- tile grid -->
         <div class="cloud-toolbar">
-          <input class="cloud-search" placeholder="Filter by name…" bind:value={cloudFilter} />
+          <input class="cloud-search" placeholder={$t('cloud.browser.filter')} bind:value={cloudFilter} />
           <div class="cloud-tabs">
-            {#each [['all', 'All'], ['cloud', 'In cloud'], ['local', 'Not uploaded']] as [id, label]}
+            {#each [['all', 'cloud.browser.tabs.all'], ['cloud', 'cloud.browser.tabs.inCloud'], ['local', 'cloud.browser.tabs.notUploaded']] as [id, labelKey]}
               <button class:active={cloudTab === id} on:click={() => (cloudTab = id)}>
-                {label} <span class="count">{tabCounts[id]}</span>
+                {$t(labelKey)} <span class="count">{tabCounts[id]}</span>
               </button>
             {/each}
           </div>
@@ -1025,49 +1011,49 @@
 
         <div class="cloud-modal-list">
           <div class="cloud-grid">
-            {#each filteredTiles as t (t.id)}
+            {#each filteredTiles as tile (tile.id)}
               <div
                 class="cover-tile"
-                on:click={() => (detailId = t.id)}
-                on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), (detailId = t.id))}
+                on:click={() => (detailId = tile.id)}
+                on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), (detailId = tile.id))}
                 role="button"
                 tabindex="0"
-                title={t.name}
+                title={tile.name}
               >
                 <div class="cover-art">
-                  {#if t.coverUrl}
-                    <img src={t.coverUrl} alt={t.name} loading="lazy" on:error={(e) => (e.currentTarget.style.display = 'none')} />
+                  {#if tile.coverUrl}
+                    <img src={tile.coverUrl} alt={tile.name} loading="lazy" on:error={(e) => (e.currentTarget.style.display = 'none')} />
                   {/if}
                   <div class="cover-fallback">
-                    <span class="cover-emoji">{t.cloud ? '☁️' : '💾'}</span>
-                    <span class="cover-fallback-name">{t.name}</span>
+                    <span class="cover-emoji">{tile.cloud ? '☁️' : '💾'}</span>
+                    <span class="cover-fallback-name">{tile.name}</span>
                   </div>
-                  {#if t.cloud}
-                    <span class="cover-type in-cloud">☁ {t.cloud.count}</span>
+                  {#if tile.cloud}
+                    <span class="cover-type in-cloud">☁ {tile.cloud.count}</span>
                   {:else}
-                    <span class="cover-type">local only</span>
+                    <span class="cover-type">{$t('cloud.browser.localOnly')}</span>
                   {/if}
                   <div class="cover-hover">
-                    <button class="btn small primary" on:click|stopPropagation={() => (detailId = t.id)}>
-                      {t.cloud ? 'Browse' : 'Upload'}
+                    <button class="btn small primary" on:click|stopPropagation={() => (detailId = tile.id)}>
+                      {tile.cloud ? $t('cloud.browser.browse') : $t('cloud.browser.upload')}
                     </button>
                   </div>
                 </div>
-                <div class="cover-name">{t.name}</div>
+                <div class="cover-name">{tile.name}</div>
               </div>
             {:else}
               <div class="cloud-grid-empty">
                 {tiles.length === 0
-                  ? 'No tracked games and nothing in the cloud yet.'
-                  : 'No matches for this filter.'}
+                  ? $t('cloud.browser.empty')
+                  : $t('cloud.browser.noMatches')}
               </div>
             {/each}
           </div>
         </div>
 
         <div class="cloud-modal-foot">
-          <span class="quiet">Click a game to browse, restore, delete, or upload its snapshots.</span>
-          <button class="btn" on:click={closeCloudBrowser}>Close</button>
+          <span class="quiet">{$t('cloud.browser.help')}</span>
+          <button class="btn" on:click={closeCloudBrowser}>{$t('cloud.common.close')}</button>
         </div>
       {/if}
     </div>
@@ -1336,15 +1322,6 @@
   }
   .section {
     margin: 22px 0 10px;
-  }
-  .section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 22px 0 10px;
-  }
-  .section-head .section {
-    margin: 0;
   }
   /* Cloud snapshot browser overlay (same pattern as the auto-scan modal) */
   .cloud-overlay {

@@ -32,6 +32,12 @@ Pending pairing requests continue to surface as a badge on Settings. This preven
 
 The page is named Games in the primary experience. The translated surface includes page actions, the manual-folder form, protection statistics, empty-state guidance, library controls, game-card status, and the complete auto-scan interaction. Scan filters, grouping explanations, file metadata, exclusion confirmations, and tracking results switch language together.
 
+## Cloud Backup and Activity
+
+Cloud Backup now switches its complete interaction as one language surface: provider setup, OAuth guidance, custom-app credentials, cloud browsing, upload/restore/delete controls, `.sscb` import/export, progress, safety explanations, confirmations, and results. Provider names remain their official product names where appropriate. No provider behavior or credential storage changed.
+
+Activity translates its page shell, empty state, severity labels, and time formatting. Log message bodies remain the daemon's original diagnostic text so troubleshooting details are not rewritten or obscured.
+
 ## Advanced tools
 
 Device Sync covers the existing LAN pairing and internet-relay features. Changelog remains available for release details. These are normal buttons with keyboard focus treatment, not hidden links or new implementations.
@@ -45,6 +51,5 @@ Device Sync covers the existing LAN pairing and internet-relay features. Changel
 
 ## Remaining Phase 2 work
 
-- Translate the Cloud Backup and Activity pages in coherent page-sized slices.
 - Review visible GameSave Go branding separately from internal compatibility identifiers and update/release endpoints.
 - Complete native tray minimize/restore testing on the packaged app; keyboard focus, the 960×600 minimum layout, Windows binary launch, and warning-free WebView navigation have been smoke-tested.

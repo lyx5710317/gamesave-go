@@ -30,6 +30,10 @@ describe('translations', () => {
   it('provides English and Simplified Chinese strings', () => {
     expect(translate('en', 'nav.games')).toBe('Games');
     expect(translate('zh-CN', 'nav.games')).toBe('游戏');
+    expect(translate('en', 'cloud.title')).toBe('Cloud Backup');
+    expect(translate('zh-CN', 'cloud.title')).toBe('云备份');
+    expect(translate('en', 'activity.empty.title')).toBe('Nothing yet');
+    expect(translate('zh-CN', 'activity.empty.title')).toBe('暂无活动');
   });
 
   it('keeps both shipped catalogs on the same set of keys', () => {
