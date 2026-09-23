@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/opensave/opensave/internal/cloud"
+	"github.com/opensave/opensave/internal/store"
 )
 
 type failingCloudUpload struct{}
@@ -80,5 +81,53 @@ func TestAutomaticCloudUploadFailureIsVisibleWithoutLoggingSecrets(t *testing.T)
 		if strings.Contains(entry.Message, "secret-value") {
 			t.Fatalf("provider error leaked to activity log: %q", entry.Message)
 		}
+	}
+}
+
+type remoteHistoryProvider struct {
+	uploads int
+	deletes int
+}
+
+func (p *remoteHistoryProvider) Upload(_, _ string) error { p.uploads++; return nil }
+func (p *remoteHistoryProvider) List() ([]cloud.CloudFile, error) {
+	return []cloud.CloudFile{
+		{Name: "game__main__remote-old.zip", CreatedTime: "2020-01-01T00:00:00Z"},
+		{Name: "game__main__remote-new.zip", CreatedTime: "2021-01-01T00:00:00Z"},
+	}, nil
+}
+func (p *remoteHistoryProvider) Download(_, _ string) error { return nil }
+func (p *remoteHistoryProvider) Delete(cloud.CloudFile) error {
+	p.deletes++
+	return nil
+}
+
+func TestAutomaticCloudUploadPreservesUnverifiedRemoteHistory(t *testing.T) {
+	d, err := New(Options{HomeOverride: t.TempDir(), DisableDiscovery: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Stop)
+	if err := d.Store.CreateGame(store.Game{
+		ID: "game", Name: "Game", SavePath: t.TempDir(), MaxSnapshots: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &remoteHistoryProvider{}
+	if err := d.Cloud.RegisterProvider("history_test", provider); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := d.Store.GetCloudConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled, cfg.Provider = true, "history_test"
+	if err := d.Store.UpdateCloudConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	d.uploads.Add(1)
+	d.runCloudUpload("not-read-by-provider", "game__main__new.zip", d.Log)
+	if provider.uploads != 1 || provider.deletes != 0 {
+		t.Fatalf("uploads=%d deletes=%d; unverified remote history must be preserved", provider.uploads, provider.deletes)
 	}
 }

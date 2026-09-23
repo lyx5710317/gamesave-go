@@ -295,9 +295,9 @@ func SteamCoverURL(appID string) string {
 	return "https://cdn.cloudflare.steamstatic.com/steam/apps/" + appID + "/header.jpg"
 }
 
-// runCloudUpload mirrors one snapshot to the configured cloud provider and
-// then trims that game's remote copies. Always started with d.uploads already
-// incremented by the caller, and it owns releasing that count.
+// runCloudUpload mirrors one snapshot to the configured cloud provider.
+// Always started with d.uploads already incremented by the caller, and it
+// owns releasing that count.
 func (d *Daemon) runCloudUpload(zipPath, remoteFileName string, log *logging.Logger) {
 	defer d.uploads.Done()
 
@@ -307,39 +307,9 @@ func (d *Daemon) runCloudUpload(zipPath, remoteFileName string, log *logging.Log
 		}
 		return
 	}
-	// Cloud-side retention mirrors the game's local snapshot limit: keep the
-	// newest maxSnapshots per branch, delete the rest.
-	gameID, branch, _, ok := snapshot.ParseExportEntryName(remoteFileName)
-	if !ok {
-		return
-	}
-	game, err := d.Store.GetGame(gameID)
-	if err != nil || game.MaxSnapshots <= 0 {
-		return
-	}
-	// Only automatic snapshots are candidates. Mirroring the local limit over
-	// every file would delete the user's deliberate snapshots from the cloud
-	// even though local retention now keeps them — leaving the backup thinner
-	// than the machine it is backing up.
-	//
-	// A remote file whose snapshot row is gone locally cannot be classified,
-	// so it stays a candidate: that is the pre-existing behaviour, and
-	// treating unknowns as protected would make cloud storage grow without
-	// bound.
-	prefix := fmt.Sprintf("%s__%s__", gameID, branch)
-	_, _ = d.Cloud.PruneGameBranch(func(name string) bool {
-		if !strings.HasPrefix(name, prefix) {
-			return false
-		}
-		_, _, snapID, parsed := snapshot.ParseExportEntryName(name)
-		if !parsed {
-			return false
-		}
-		if snap, sErr := d.Store.GetSnapshot(snapID); sErr == nil && !snap.IsSystemAuto {
-			return false // a manual snapshot: not the automatic budget's to spend
-		}
-		return true
-	}, game.MaxSnapshots)
+	// Do not prune remote history automatically until the vault/index can prove
+	// device ownership and snapshot ancestry. Filename and creation time do
+	// not identify whose backup this is; unknown remote rows must be preserved.
 }
 
 // ResyncWatchers reconciles the live watch set with what the database says,
