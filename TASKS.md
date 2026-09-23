@@ -66,6 +66,7 @@
 ## Phase 5 — Cloud UX / Conflict / Restore
 
 - [ ] Implement the vault discovery and explicit second-device join flow.
+  - [x] Expose a read-only local save scan in Cloud Backup, using the existing first-join scanner; remote comparison and confirmation remain pending.
 - [ ] Add remote-state summaries, upload queue visibility, and actionable errors.
 - [ ] Implement ancestry-aware conflicts and explicit user resolution.
 - [ ] Test interrupted upload/download, retry, rollback, restore, and concurrent-device scenarios.

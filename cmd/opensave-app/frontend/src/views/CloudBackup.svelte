@@ -4,6 +4,7 @@
   import { backdropClose } from '../lib/backdrop.js';
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
+  import { summarizeLocalPreview } from '../lib/localPreview.js';
 
   // All routed views share the same component contract. This page currently
   // needs no route parameters, but accepting them keeps dynamic navigation
@@ -12,6 +13,10 @@
   $: params;
 
   let config = null;
+  let localPreview = null;
+  let localPreviewBusy = false;
+  let localPreviewError = '';
+  $: localPreviewSummary = localPreview ? summarizeLocalPreview(localPreview) : null;
   let busy = false;
   let authCode = '';
   let authInProgress = false;
@@ -88,6 +93,19 @@
   }
 
   onMount(load);
+
+  async function inspectLocalSaves() {
+    localPreviewBusy = true;
+    localPreview = null;
+    localPreviewError = '';
+    try {
+      localPreview = await api.get('/api/cloud/join/local-preview');
+    } catch (e) {
+      localPreviewError = e.message;
+    } finally {
+      localPreviewBusy = false;
+    }
+  }
 
   async function load() {
     try {
@@ -693,6 +711,52 @@
     </div>
   </div>
 
+  <h3 class="section">{$t('cloud.joinPreview.section')}</h3>
+  <div class="card preview-card">
+    <div class="export-row">
+      <div>
+        <h3>{$t('cloud.joinPreview.title')}</h3>
+        <p class="quiet">{$t('cloud.joinPreview.hint')}</p>
+      </div>
+      <button class="btn" disabled={localPreviewBusy} on:click={inspectLocalSaves}>
+        {localPreviewBusy ? $t('cloud.joinPreview.scanning') : $t('cloud.joinPreview.scan')}
+      </button>
+    </div>
+    {#if localPreviewError}
+      <p class="preview-warning" role="alert">{$t('cloud.joinPreview.failed')}: {localPreviewError}</p>
+    {:else if localPreview && localPreviewSummary}
+      <p class="preview-summary">
+        {$t('cloud.joinPreview.summary', { tracked: localPreviewSummary.trackedCount, detected: localPreviewSummary.detectedCount })}
+      </p>
+      {#if !localPreviewSummary.complete}
+        <p class="preview-warning" role="status">
+          {$t('cloud.joinPreview.incomplete', { count: localPreviewSummary.unknownCount })}
+        </p>
+      {/if}
+      {#if localPreview.library?.games?.length}
+        <h4>{$t('cloud.joinPreview.tracked')}</h4>
+        <ul class="preview-list">
+          {#each localPreview.library.games as game (game.gameId)}
+            <li><span>{game.name}</span><span class="quiet">{$t('cloud.joinPreview.files', { count: game.fileCount })}</span></li>
+          {/each}
+        </ul>
+      {/if}
+      {#if localPreview.candidates?.length}
+        <h4>{$t('cloud.joinPreview.detected')}</h4>
+        <p class="quiet">{$t('cloud.joinPreview.detectedHint')}</p>
+        <ul class="preview-list">
+          {#each localPreview.candidates as candidate (candidate.id)}
+            <li>
+              <span>{candidate.name}</span>
+              <span class="quiet">{candidate.measured ? $t('cloud.joinPreview.files', { count: candidate.fileCount }) : $t('cloud.joinPreview.unknown')}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <p class="quiet">{$t('cloud.joinPreview.remotePending')}</p>
+    {/if}
+  </div>
+
   <h3 class="section">{$t('cloud.snapshots.section')}</h3>
   <div class="card export-row">
     <div>
@@ -1061,6 +1125,13 @@
 {/if}
 
 <style>
+  .preview-card { padding: 18px 20px; }
+  .preview-card .export-row { padding: 0; }
+  .preview-card h4 { margin: 16px 0 6px; }
+  .preview-summary { margin: 14px 0 0; }
+  .preview-warning { color: var(--danger, #e5484d); margin: 12px 0; }
+  .preview-list { list-style: none; padding: 0; margin: 0 0 12px; max-height: 240px; overflow: auto; }
+  .preview-list li { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--border); }
   .head {
     margin-bottom: 20px;
   }

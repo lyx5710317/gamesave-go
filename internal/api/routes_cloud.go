@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/opensave/opensave/internal/cloud"
 	"github.com/opensave/opensave/internal/snapshot"
+	"github.com/opensave/opensave/internal/vaultmeta"
 )
 
 // pendingPKCE holds verifier state between /api/auth/start and
@@ -28,11 +29,28 @@ func (s *Server) cloudRoutes(r chi.Router) {
 	r.Post("/api/auth/disconnect", s.handleAuthDisconnect)
 
 	r.Get("/api/cloud/browse", s.handleCloudBrowse)
+	r.Get("/api/cloud/join/local-preview", s.handleCloudJoinLocalPreview)
 	r.Get("/api/cloud/snapshots/{gameId}", s.handleCloudSnapshots)
 	r.Post("/api/cloud/restore/{gameId}", s.handleCloudRestore)
 	r.Post("/api/cloud/delete/{gameId}", s.handleCloudDelete)
 	r.Post("/api/cloud/delete-game/{gameId}", s.handleCloudDeleteGame)
 	r.Post("/api/cloud/sync-local/{gameId}", s.handleCloudSyncLocal)
+}
+
+// handleCloudJoinLocalPreview only reads current local saves. It does not
+// infer that a remote vault is absent, authorize a join, or perform uploads.
+func (s *Server) handleCloudJoinLocalPreview(w http.ResponseWriter, r *http.Request) {
+	discovered, err := s.scanMeasuredSaves()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	scan, err := vaultmeta.ScanLocal(s.Daemon.Store, discovered)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, scan)
 }
 
 // handleCloudBrowse lists every cloud snapshot the provider holds, grouped

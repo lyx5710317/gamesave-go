@@ -631,10 +631,20 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePresetScan(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.Daemon.Store.GetSettings()
+	found, err := s.scanMeasuredSaves()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, found)
+}
+
+// scanMeasuredSaves is shared by the existing discovery UI and the read-only
+// cloud join preview, so both report the same measured candidate locations.
+func (s *Server) scanMeasuredSaves() ([]presets.DiscoveredSave, error) {
+	settings, err := s.Daemon.Store.GetSettings()
+	if err != nil {
+		return nil, err
 	}
 	found := s.Daemon.Scanner.Scan(settings.CustomScanPaths)
 	found = presets.FilterExcluded(found, settings.ExcludePaths)
@@ -649,5 +659,5 @@ func (s *Server) handlePresetScan(w http.ResponseWriter, r *http.Request) {
 	if found == nil {
 		found = []presets.DiscoveredSave{} // never null on the wire
 	}
-	writeJSON(w, http.StatusOK, found)
+	return found, nil
 }

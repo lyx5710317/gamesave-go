@@ -137,9 +137,16 @@ the client does not overwrite an ambiguous remote directory in place.
 
 The provider-independent implementation lives in `internal/vaultmeta`. It
 validates `vault.json`, scans the current tracked save folders and named save
-locations, carries measured untracked discoveries into a local-only preview,
+locations, carries measured discoveries into a local-only preview (which can
+still include tracked locations and must be reviewed),
 and compares that preview with a remote library summary. It has no provider
 client and exposes no apply/write operation.
+
+The Cloud Backup screen now offers an on-demand, read-only local scan through
+`GET /api/cloud/join/local-preview`. It reuses the existing measured discovery
+pipeline and shows tracked games, detected locations, and incomplete-scan
+warnings. It does not fetch a remote vault, compare libraries, register a
+device, or enable joining; those remain separate Phase 5 work.
 
 The comparison produces only these relationships:
 
