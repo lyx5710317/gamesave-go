@@ -76,6 +76,7 @@
   - [x] Enumerate Dropbox and OneDrive snapshot-list pages before upload decisions; reject missing/repeated Dropbox cursors, unexpected Dropbox listing conflicts, unsafe/repeated OneDrive next-page URLs, and page failures. Provider-atomic create-only writes and verified remote identity remain pending.
   - [x] Use provider-enforced create-only uploads for Dropbox (strict add, no autorename) and OneDrive (fail-on-conflict for simple and session uploads), including late-conflict tests. Google Drive name uniqueness and verified remote identity remain unresolved; webhook destinations cannot provide a general create-only guarantee.
   - [x] Suspend automatic remote retention pruning until the cloud vault can verify ownership and ancestry; local retention and explicit cloud delete remain available. Unknown remote history is preserved even when the local automatic-snapshot limit is low.
+  - [x] Cover simultaneous Dropbox and OneDrive uploads after both clients observe an empty remote list; provider-enforced conflict leaves exactly one remote writer. This does not establish Google Drive atomicity or ancestry-aware resolution.
   - [ ] Add a durable, resumable queue with verified remote state, retry and recovery after the provider contract is approved.
 - [ ] Implement ancestry-aware conflicts and explicit user resolution.
 - [ ] Test interrupted upload/download, retry, rollback, restore, and concurrent-device scenarios.

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -579,6 +580,66 @@ func TestDropboxUploadRaceDoesNotOverwrite(t *testing.T) {
 	}
 }
 
+func TestDropboxConcurrentUploadIfAbsentKeepsFirstWriter(t *testing.T) {
+	var mu sync.Mutex
+	lists, writes := 0, 0
+	var saved string
+	listed := make(chan struct{})
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		lists++
+		if lists == 2 {
+			close(listed)
+		}
+		mu.Unlock()
+		select {
+		case <-listed:
+		case <-time.After(5 * time.Second):
+			t.Error("second Dropbox listing never arrived")
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		fmt.Fprint(w, `{"entries":[],"has_more":false}`)
+	}))
+	defer api.Close()
+	content := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		if writes > 0 {
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"error_summary":"path/conflict/file/"}`)
+			return
+		}
+		writes++
+		saved = string(body)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer content.Close()
+	results := make(chan error, 2)
+	for _, payload := range []string{"device-a", "device-b"} {
+		svc, db := newTestService(t)
+		setCloudConfig(t, db, func(c *store.CloudConfig) {
+			c.Enabled, c.Provider = true, "dropbox"
+			c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+		})
+		svc.Endpoints.DropboxAPI, svc.Endpoints.DropboxContent = api.URL, content.URL
+		path := writeTempZip(t, payload)
+		go func() { results <- svc.UploadIfAbsent(path, "game__main__same.zip") }()
+	}
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) ||
+		(first != nil && !errors.Is(first, ErrRemoteSnapshotConflict)) ||
+		(second != nil && !errors.Is(second, ErrRemoteSnapshotConflict)) {
+		t.Fatalf("concurrent upload results = %v, %v", first, second)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lists != 2 || writes != 1 || (saved != "device-a" && saved != "device-b") {
+		t.Fatalf("lists=%d writes=%d saved=%q", lists, writes, saved)
+	}
+}
+
 func TestDropboxListingFindsCollisionOnLaterPage(t *testing.T) {
 	requests, uploads := 0, 0
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -787,6 +848,67 @@ func TestOneDriveUploadRaceDoesNotOverwrite(t *testing.T) {
 				t.Fatalf("OneDrive upload race = %v", err)
 			}
 		})
+	}
+}
+
+func TestOneDriveConcurrentUploadIfAbsentKeepsFirstWriter(t *testing.T) {
+	var mu sync.Mutex
+	lists, writes := 0, 0
+	var saved string
+	listed := make(chan struct{})
+	graph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/children") {
+			mu.Lock()
+			lists++
+			if lists == 2 {
+				close(listed)
+			}
+			mu.Unlock()
+			select {
+			case <-listed:
+			case <-time.After(5 * time.Second):
+				t.Error("second OneDrive listing never arrived")
+				w.WriteHeader(http.StatusGatewayTimeout)
+				return
+			}
+			fmt.Fprint(w, `{"value":[]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		if writes > 0 {
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"error":{"code":"nameAlreadyExists"}}`)
+			return
+		}
+		writes++
+		saved = string(body)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer graph.Close()
+	results := make(chan error, 2)
+	for _, payload := range []string{"device-a", "device-b"} {
+		svc, db := newTestService(t)
+		setCloudConfig(t, db, func(c *store.CloudConfig) {
+			c.Enabled, c.Provider = true, "onedrive"
+			c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+		})
+		svc.Endpoints.Graph = graph.URL
+		path := writeTempZip(t, payload)
+		go func() { results <- svc.UploadIfAbsent(path, "game__main__same.zip") }()
+	}
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) ||
+		(first != nil && !errors.Is(first, ErrRemoteSnapshotConflict)) ||
+		(second != nil && !errors.Is(second, ErrRemoteSnapshotConflict)) {
+		t.Fatalf("concurrent upload results = %v, %v", first, second)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lists != 2 || writes != 1 || (saved != "device-a" && saved != "device-b") {
+		t.Fatalf("lists=%d writes=%d saved=%q", lists, writes, saved)
 	}
 }
 
