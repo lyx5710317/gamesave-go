@@ -69,18 +69,28 @@ type Service struct {
 	Endpoints Endpoints
 	HTTP      *http.Client
 
+	providersMu   sync.RWMutex
+	providers     map[string]Provider
 	driveFolderMu sync.Mutex
 	driveFolderID string // cached id of the auto-managed "OpenSave" Drive folder
 }
 
 // New creates a production Service.
 func New(s *store.Store, logf func(level, msg string)) *Service {
-	return &Service{
+	svc := &Service{
 		Store:     s,
 		Log:       logf,
 		Endpoints: DefaultEndpoints(),
 		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}
+	// Existing providers retain their implementation while new adapters can
+	// be registered behind the same call boundary.
+	legacy := legacyProvider{service: svc}
+	svc.providers = map[string]Provider{
+		"local": legacy, "webdav": legacy, "webhook": legacy,
+		"google_drive": legacy, "dropbox": legacy, "onedrive": legacy,
+	}
+	return svc
 }
 
 // IsNotConfigured reports whether err just means cloud backup isn't set up
@@ -169,7 +179,7 @@ var (
 	driveChunkSize          int64 = 16 << 20  // resumable upload chunk (multiple of 256 KiB)
 	dropboxSessionThreshold int64 = 128 << 20 // singles are allowed to 150 MB; stay under
 	dropboxChunkSize        int64 = 48 << 20
-	onedriveSimpleLimit     int64 = 4 << 20 // Graph recommends sessions above 4 MB
+	onedriveSimpleLimit     int64 = 4 << 20  // Graph recommends sessions above 4 MB
 	onedriveChunkSize       int64 = 10 << 20 // multiple of 320 KiB
 )
 
@@ -241,9 +251,9 @@ func (s *Service) fetchToFile(req *http.Request, localPath string) error {
 	return out.Close()
 }
 
-// Upload sends a snapshot zip to the configured provider. Errors are
-// returned (the snapshot hook logs them without failing the snapshot).
-func (s *Service) Upload(filePath, fileName string) error {
+// uploadLegacy contains the existing provider implementations until they are
+// migrated into independent adapters.
+func (s *Service) uploadLegacy(filePath, fileName string) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err
@@ -633,7 +643,7 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 }
 
 // List returns the provider's snapshot zips.
-func (s *Service) List() ([]CloudFile, error) {
+func (s *Service) listLegacy() ([]CloudFile, error) {
 	cfg, err := s.config()
 	if err != nil {
 		return nil, err
@@ -772,7 +782,7 @@ func (s *Service) List() ([]CloudFile, error) {
 }
 
 // Download fetches a remote snapshot to localPath.
-func (s *Service) Download(fileName, localPath string) error {
+func (s *Service) downloadLegacy(fileName, localPath string) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err
@@ -945,7 +955,7 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 
 // Delete removes one remote snapshot. Webhook destinations are fire-and-
 // forget and don't support deletion.
-func (s *Service) Delete(f CloudFile) error {
+func (s *Service) deleteLegacy(f CloudFile) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err

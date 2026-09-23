@@ -51,12 +51,12 @@
 
 ## Phase 4 — Baidu Netdisk
 
-- [ ] Verify official third-party native-app eligibility, scopes, redirects, quotas, and current API terms.
-- [ ] Decide public-client OAuth versus the minimal broker.
-- [ ] Introduce an isolated provider boundary without deleting existing providers.
+- [ ] Verify official third-party native-app eligibility, scopes, redirects, quotas, and current API terms. Documentation findings are recorded in `docs/BAIDU_PROVIDER.md`; actual public-app approval, granted APIs, and approved redirect remain open.
+- [x] Decide public-client OAuth versus the minimal broker. Documented code/device flows require `SecretKey`, so use a minimal OAuth broker, pending security review and provider approval.
+- [x] Introduce an isolated provider boundary without deleting existing providers. Snapshot operations now route through `internal/cloud.Provider`; existing providers remain behind a compatibility adapter.
 - [ ] Implement protected token storage, refresh, retries, rate limits, upload, download, and resume.
 - [ ] Add provider contract, failure, and recovery tests.
-- [ ] Keep Quark at candidate status until its official access path is confirmed.
+- [x] Keep Quark at candidate status until its official access path is confirmed. No Quark API implementation or undocumented path has been added.
 
 ## Phase 5 — Cloud UX / Conflict / Restore
 
