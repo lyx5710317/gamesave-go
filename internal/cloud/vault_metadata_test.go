@@ -139,6 +139,44 @@ func TestVaultMetadataConcurrentWritersMustReread(t *testing.T) {
 	}
 }
 
+func TestVaultMetadataRejectsSwappedVersionToken(t *testing.T) {
+	metadata := testVaultMetadata(t)
+	raw, err := vaultmeta.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &memoryVaultProvider{data: raw, version: 1}
+	svc := testVaultService(t, provider)
+	stale, err := svc.ReadVaultMetadata(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := stale.Metadata
+	updated.Revision++
+	updated.UpdatedAt = "2026-09-22T10:01:00Z"
+	updated.Devices = append(append([]vaultmeta.Device(nil), updated.Devices...), testVaultDevice(t, "Laptop"))
+	if _, err := svc.ReplaceVaultMetadata(context.Background(), stale, updated); err != nil {
+		t.Fatal(err)
+	}
+	current, err := svc.ReadVaultMetadata(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A stale caller must not combine its old metadata with a newly observed
+	// token: that would authorize replacing the new device without merging it.
+	stale.VersionToken = current.VersionToken
+	unsafe := stale.Metadata
+	unsafe.Revision++
+	unsafe.UpdatedAt = "2026-09-22T10:02:00Z"
+	unsafe.Devices = append(append([]vaultmeta.Device(nil), unsafe.Devices...), testVaultDevice(t, "Steam Deck"))
+	if _, err := svc.ReplaceVaultMetadata(context.Background(), stale, unsafe); !errors.Is(err, ErrVaultInvalidTransition) {
+		t.Fatalf("swapped version token = %v, want invalid transition", err)
+	}
+	if provider.writes != 1 {
+		t.Fatalf("swapped token caused remote write: %d", provider.writes)
+	}
+}
+
 func TestVaultMetadataRejectsUnsafeTransitionsBeforeProviderWrite(t *testing.T) {
 	metadata := testVaultMetadata(t)
 	raw, err := vaultmeta.Marshal(metadata)

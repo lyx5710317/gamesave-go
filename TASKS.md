@@ -59,7 +59,7 @@
   - [ ] Integrate the protected backend with approved Baidu OAuth and implement refresh, retries, rate limits, and transfers after app approval and security review.
 - [ ] Add provider contract, failure, and recovery tests.
   - [x] Stage and verify cloud-restored ZIPs before publication, reject local/remote same-name conflicts, and test interrupted/corrupt/path-unsafe downloads without touching live saves or existing local backups.
-  - [x] Define an optional `vault.json` conditional-write contract and test stale concurrent writes, provider switches, invalid revisions, device identity changes, and revocation rollback; no existing provider is changed.
+  - [x] Define an optional `vault.json` conditional-write contract and test stale concurrent writes, provider switches, swapped version tokens, invalid revisions, device identity changes, and revocation rollback; no existing provider is changed.
   - [ ] Add Baidu adapter contract tests for OAuth, multipart resume, rate limits, quota, and recovery once approved API behavior is confirmed.
 - [x] Keep Quark at candidate status until its official access path is confirmed. No Quark API implementation or undocumented path has been added.
 

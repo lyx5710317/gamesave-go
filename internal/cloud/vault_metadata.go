@@ -40,6 +40,7 @@ type VaultState struct {
 	Metadata     vaultmeta.Metadata
 	VersionToken string
 	readDigest   [sha256.Size]byte
+	tokenDigest  [sha256.Size]byte
 	providerName string
 }
 
@@ -72,7 +73,11 @@ func (s *Service) ReadVaultMetadata(ctx context.Context) (VaultState, error) {
 	if err != nil {
 		return VaultState{}, err
 	}
-	return VaultState{Metadata: metadata, VersionToken: version, readDigest: sha256.Sum256(canonical), providerName: providerName}, nil
+	return VaultState{
+		Metadata: metadata, VersionToken: version,
+		readDigest: sha256.Sum256(canonical), tokenDigest: sha256.Sum256([]byte(version)),
+		providerName: providerName,
+	}, nil
 }
 
 // ReplaceVaultMetadata checks the immutable vault identity, monotonic
@@ -92,6 +97,9 @@ func (s *Service) ReplaceVaultMetadata(ctx context.Context, observed VaultState,
 	}
 	if observed.VersionToken == "" || strings.TrimSpace(observed.VersionToken) != observed.VersionToken {
 		return VaultState{}, fmt.Errorf("%w: missing provider precondition", ErrVaultInvalidTransition)
+	}
+	if observed.tokenDigest != sha256.Sum256([]byte(observed.VersionToken)) {
+		return VaultState{}, fmt.Errorf("%w: provider precondition changed after read", ErrVaultInvalidTransition)
 	}
 	if err := observed.Metadata.Validate(); err != nil {
 		return VaultState{}, fmt.Errorf("%w: old metadata: %v", ErrVaultInvalidTransition, err)
@@ -120,7 +128,11 @@ func (s *Service) ReplaceVaultMetadata(ctx context.Context, observed VaultState,
 	if newVersion == "" || strings.TrimSpace(newVersion) != newVersion {
 		return VaultState{}, errors.New("provider wrote vault metadata but returned no version token; reread before continuing")
 	}
-	return VaultState{Metadata: next, VersionToken: newVersion, readDigest: sha256.Sum256(data), providerName: providerName}, nil
+	return VaultState{
+		Metadata: next, VersionToken: newVersion,
+		readDigest: sha256.Sum256(data), tokenDigest: sha256.Sum256([]byte(newVersion)),
+		providerName: providerName,
+	}, nil
 }
 
 func (s *Service) vaultMetadataProvider() (VaultMetadataProvider, string, error) {

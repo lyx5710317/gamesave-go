@@ -109,10 +109,12 @@ merge; it never falls back to last-writer-wins by timestamp.
 and-swap capability for the exact provider account and `vault.json` object.
 The cloud service validates the remote document and an opaque provider version
 token, enforces one-step revision changes, immutable vault identity, retained
-device registrations, and monotonic revocation. Stale writes return a conflict
-without an automatic retry. Existing providers do not implement this optional
-capability, and no production provider metadata write is enabled yet. A Baidu
-adapter must prove strong conditional-write semantics before implementing it;
+device registrations, and monotonic revocation. A caller also cannot pair old
+metadata with a newer provider version token to bypass the required reread and
+merge. Stale writes return a conflict without an automatic retry. Existing
+providers do not implement this optional capability, and no production provider
+metadata write is enabled yet. A Baidu adapter must prove strong conditional-
+write semantics before implementing it;
 the wrapped-key prerequisite for registering a device remains separate.
 
 ## Discovery, creation, and upgrade behavior
