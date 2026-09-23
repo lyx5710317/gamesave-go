@@ -1,6 +1,6 @@
 # Baidu Netdisk Provider Design (Not Implemented)
 
-Status (2026-09-23): official API documentation reviewed; no Baidu adapter, credential, OAuth broker, or production account is included. Public app approval and the security review remain launch gates.
+Status (2026-09-23): official API documentation reviewed; no Baidu adapter, credential, OAuth broker, or production account is included. The project owner supplied a screenshot showing the application as "已上线，仅限个人场景使用" (online, personal-use only) and confirmed that public distribution is the intended release model. This records the owner's application status, not public-distribution approval or a verified grant of particular APIs. Public app approval and the security review remain launch gates.
 
 ## Goal and boundary
 
@@ -14,13 +14,13 @@ The following is documentation evidence, not a grant of production API access:
 
 | Topic | Verified documentation | Remaining gate |
 | --- | --- | --- |
-| Application eligibility | [Create application](https://pan.baidu.com/union/doc/使用入门/创建应用.md) includes an OS software application type. Unreviewed personal/test apps have a 10-user limit. Public distribution requires online review. | Register the project application and obtain public-release approval under the actual distribution model. |
+| Application eligibility | [Create application](https://pan.baidu.com/union/doc/使用入门/创建应用.md) includes an OS software application type. The owner's screenshot shows this application is online for personal use only. That status does not establish approval for other users to install this open-source client. | Confirm the permitted personal test scope; obtain public-release approval before distributing a Baidu-enabled build to others. |
 | Scope and OAuth | [Authorization-code mode](https://pan.baidu.com/union/doc/使用入门/接入授权/授权码模式.md) documents `basic,netdisk` scope and requires `SecretKey` for code exchange and refresh. Code lifetime is 10 minutes; access tokens are documented as valid for 30 days; refresh tokens rotate on use. | Confirm the exact approved redirect and broker integration for this application. Do not ship `SecretKey` in the client. |
 | Device code | [Device-code mode](https://pan.baidu.com/union/doc/使用入门/接入授权/设备码模式授权.md) also requires `SecretKey` for token exchange and refresh, and polling no more often than every 5 seconds. | Device-code mode does not remove the confidential-client requirement. |
 | Redirect | [Callback address](https://pan.baidu.com/union/doc/使用入门/接入授权/授权回调地址.md) allows configured callbacks and documents `oob`. | Obtain explicit confirmation for the chosen redirect; loopback/custom-scheme support has not been established. |
 | Quota and directory | [Permissions and quotas](https://pan.baidu.com/union/doc/使用入门/权限与配额.md) describes 10 calls/hour and 10 users before review, then approved API/frequency permissions. Default file access is under `/apps/{appname}`. Applications created after 2026-06-03 have additional application-directory restrictions in the [create application](https://pan.baidu.com/union/doc/使用入门/创建应用.md) document. | Confirm granted APIs, rate limits, application directory name, and any partner-specific conditions after review. |
 | Upload | [Upload capability](https://pan.baidu.com/union/doc/基础网盘服务/上传/能力说明.md) and [part upload](https://pan.baidu.com/union/doc/基础网盘服务/上传/分片上传.md) document pre-create, part upload, commit, and provider-specific size/part limits. Ordinary accounts are documented with a 4 GB file limit and up to 1024 parts. | Confirm the upload-host discovery and checksum semantics for the granted APIs before coding retries/resume. |
-| Review | [Application online review](https://pan.baidu.com/union/doc/使用入门/应用上线审核/应用上线审核试运行.md) describes public-release review materials and demonstration requirements. | Complete review; do not distribute a test-only integration as production. |
+| Review | [Application online review](https://pan.baidu.com/union/doc/使用入门/应用上线审核/应用上线审核试运行.md) describes public-release review materials and demonstration requirements. | Personal-use "online" status is not public-release approval; do not distribute a test-only integration as production. |
 
 Decision: **minimal OAuth broker**, subject to application approval and a separate security review. The published authorization-code and device-code flows require a confidential `SecretKey` for exchange and refresh; no approved public-client/PKCE route was found in the reviewed documentation. This is a decision from the documented flows, not a claim that Baidu forbids every possible public-client arrangement. The broker is limited to OAuth code exchange and refresh; save bytes must travel directly between the client and Baidu.
 
