@@ -121,7 +121,10 @@ func TestWebDAVConditionalUploadRejectsExistingSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 	svc, db := newTestService(t)
-	setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider, c.URL = true, "webdav", server.URL+"/dav" })
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.URL = true, "webdav", server.URL+"/dav"
+		c.HeadersJSON = `{"If-None-Match":"unsafe-override"}`
+	})
 	if err := svc.Upload(writeTempZip(t, "new"), "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
 		t.Fatalf("WebDAV collision = %v", err)
 	}

@@ -310,10 +310,11 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 		}
 		req.ContentLength = size
 		req.Header.Set("Content-Type", "application/zip")
+		applyCustomHeaders(req, cfg.HeadersJSON)
 		// A compliant WebDAV origin rejects an existing object with 412.
+		// Set this after user headers so a custom header cannot disable it.
 		// Keep the listing guard too; some servers do not honor conditions.
 		req.Header.Set("If-None-Match", "*")
-		applyCustomHeaders(req, cfg.HeadersJSON)
 		applyBasicAuth(req, cfg.Username, cfg.Password)
 		resp, err := s.doTransfer(req)
 		if err != nil {
