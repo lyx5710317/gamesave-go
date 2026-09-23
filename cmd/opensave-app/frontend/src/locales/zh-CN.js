@@ -257,6 +257,7 @@ export default {
   'cloud.upload.alreadyCurrent': '所有内容都已在云端（跳过 {skipped} 项）',
   'cloud.upload.summary': '已上传 {uploaded} 项，跳过 {skipped} 项',
   'cloud.upload.failed': '已上传 {uploaded} 项；{failed} 项失败；{skipped} 项已是最新。请查看传输记录。',
+  'cloud.upload.conflict': '已上传 {uploaded} 项；{conflicts} 个云端同名备份需要核对；{failed} 项失败。同名项未上传。',
   'cloud.activity.section': '传输记录',
   'cloud.activity.title': '本次运行的云端上传',
   'cloud.activity.hint': '显示实时状态和最近结果；这还不是可恢复的重试队列。',

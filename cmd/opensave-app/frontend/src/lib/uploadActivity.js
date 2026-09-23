@@ -10,6 +10,7 @@ export function summarizeUploadActivity(records) {
 }
 
 export function manualUploadOutcome(result) {
+  if ((result?.conflicts ?? 0) > 0) return 'conflict';
   if ((result?.failed ?? 0) > 0) return 'failed';
   if (result?.uploaded === 0 && (result?.skipped ?? 0) > 0) return 'already-current';
   return 'uploaded';

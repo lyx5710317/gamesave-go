@@ -3,6 +3,7 @@
   import { api, native, coverURL, gameCover } from '../lib/api.js';
   import { addExclusion, addNegation, removeDirectExclusion } from '../lib/ignorerules.js';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
+  import { t } from '../lib/i18n.js';
 
   export let params = {};
 
@@ -431,7 +432,9 @@
   const uploadToCloud = () =>
     run(null, async () => {
       const res = await api.post(`/api/cloud/sync-local/${game.id}`);
-      if (manualUploadOutcome(res) === 'failed') {
+      if (manualUploadOutcome(res) === 'conflict') {
+        toast($t('cloud.upload.conflict', { uploaded: res.uploaded, conflicts: res.conflicts, failed: res.failed }), 'error');
+      } else if (manualUploadOutcome(res) === 'failed') {
         toast(`Uploaded ${res.uploaded}; ${res.failed} failed; ${res.skipped} already current. Check Cloud Backup transfer activity.`, 'error');
       } else {
         toast(`Uploaded ${res.uploaded}, skipped ${res.skipped}`, 'success');

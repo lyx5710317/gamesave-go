@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,19 @@ func (failingUploadProvider) Upload(_, _ string) error         { return errors.N
 func (failingUploadProvider) List() ([]cloud.CloudFile, error) { return []cloud.CloudFile{}, nil }
 func (failingUploadProvider) Download(_, _ string) error       { return nil }
 func (failingUploadProvider) Delete(cloud.CloudFile) error     { return nil }
+
+type existingUploadProvider struct {
+	files   []cloud.CloudFile
+	uploads int
+}
+
+func (p *existingUploadProvider) Upload(_, _ string) error {
+	p.uploads++
+	return nil
+}
+func (p *existingUploadProvider) List() ([]cloud.CloudFile, error) { return p.files, nil }
+func (p *existingUploadProvider) Download(_, _ string) error       { return nil }
+func (p *existingUploadProvider) Delete(cloud.CloudFile) error     { return nil }
 
 func TestCloudUploadsEndpointShowsSanitizedCurrentRunActivity(t *testing.T) {
 	ts := startTestServer(t)
@@ -64,7 +78,7 @@ func TestCloudUploadsEndpointShowsSanitizedCurrentRunActivity(t *testing.T) {
 	}
 }
 
-func TestCloudSyncLocalReportsFailuresSeparatelyFromSkipped(t *testing.T) {
+func TestCloudSyncLocalReportsTransferFailures(t *testing.T) {
 	ts := startTestServer(t)
 	if err := ts.daemon.Cloud.RegisterProvider("failing_test", failingUploadProvider{}); err != nil {
 		t.Fatal(err)
@@ -99,5 +113,44 @@ func TestCloudSyncLocalReportsFailuresSeparatelyFromSkipped(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body["uploads"]), `"failure":"transfer"`) ||
 		strings.Contains(string(body["uploads"]), "do-not-show") {
 		t.Fatalf("failure activity leaked secret or lost state: %d, %v", resp.StatusCode, body)
+	}
+}
+
+func TestCloudSyncLocalBlocksListedRemoteName(t *testing.T) {
+	for _, size := range []int64{7, 3, 0} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			ts := startTestServer(t)
+			provider := &existingUploadProvider{files: []cloud.CloudFile{{Name: "game__main__snap.zip", SizeBytes: size}}}
+			if err := ts.daemon.Cloud.RegisterProvider("existing_test", provider); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := ts.daemon.Store.GetCloudConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Enabled, cfg.Provider = true, "existing_test"
+			if err := ts.daemon.Store.UpdateCloudConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := ts.daemon.Store.CreateGame(store.Game{ID: "game", Name: "Game", SavePath: ts.saveDir}); err != nil {
+				t.Fatal(err)
+			}
+			zipPath := filepath.Join(t.TempDir(), "save.zip")
+			if err := os.WriteFile(zipPath, []byte("archive"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := ts.daemon.Store.CreateSnapshot(store.Snapshot{
+				ID: "snap", GameID: "game", BranchName: "main", Timestamp: "2026-09-23T00:00:00Z",
+				ZipPath: zipPath, SizeBytes: 7,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			resp, body := ts.do(t, http.MethodPost, "/api/cloud/sync-local/game", nil)
+			if resp.StatusCode != http.StatusOK || string(body["uploaded"]) != "0" ||
+				string(body["skipped"]) != "0" || string(body["conflicts"]) != "1" ||
+				provider.uploads != 0 {
+				t.Fatalf("unverified remote was overwritten or marked current: %d, %v, uploads=%d", resp.StatusCode, body, provider.uploads)
+			}
+		})
 	}
 }

@@ -355,8 +355,9 @@ func (s *Server) handleCloudDeleteGame(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted, "failed": failed})
 }
 
-// handleCloudSyncLocal uploads every local snapshot of a game that the
-// provider doesn't have yet.
+// handleCloudSyncLocal uploads local snapshots only when the provider's
+// listing contains no object with the same name. Size alone cannot prove
+// identity, and an existing object must never be silently overwritten.
 func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 	if _, err := s.Daemon.Store.GetGame(gameID); err != nil {
@@ -369,14 +370,9 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	// Sizes, not just names. Skipping on the name alone means an archive that
-	// arrived truncated stays truncated forever: it is present, so every later
-	// push passes over it. Uploads interrupted partway do happen — a snapshot
-	// taken by a short-lived CLI process used to die mid-copy — and the file
-	// left behind looks like a backup while containing nothing.
-	remoteSizes := map[string]int64{}
+	remoteNames := map[string]struct{}{}
 	for _, f := range remote {
-		remoteSizes[f.Name] = f.SizeBytes
+		remoteNames[f.Name] = struct{}{}
 	}
 
 	branches, err := s.Daemon.Store.ListBranches(gameID)
@@ -393,7 +389,7 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		snapID     string
 	}
 	var pending []pendingUpload
-	skipped := 0
+	conflicts := 0
 	for _, branch := range branches {
 		snaps, err := s.Daemon.Store.ListSnapshots(gameID, branch)
 		if err != nil {
@@ -401,17 +397,12 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, snap := range snaps {
 			remoteName := fmt.Sprintf("%s__%s__%s.zip", gameID, branch, snap.ID)
-			if size, present := remoteSizes[remoteName]; present && size == snap.SizeBytes {
-				skipped++
+			if _, present := remoteNames[remoteName]; present {
+				// Even an equal size cannot establish equal content. Until the
+				// provider supports an account-bound, conditional object write
+				// and trusted content verification, require explicit resolution.
+				conflicts++
 				continue
-			} else if present {
-				// Present but the wrong size: re-upload over it. A provider
-				// that does not report sizes returns 0, which reads as a
-				// mismatch and costs one redundant upload — the safe way to
-				// be wrong about this.
-				s.Daemon.Log.Log("warn", fmt.Sprintf(
-					"cloud copy of %s is %d bytes, local is %d — re-uploading",
-					remoteName, size, snap.SizeBytes))
 			}
 			pending = append(pending, pendingUpload{zipPath: snap.ZipPath, remoteName: remoteName, snapID: snap.ID})
 		}
@@ -441,5 +432,5 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		uploaded++
 	}
 	progress(uploaded, "", true)
-	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": skipped, "failed": failed})
+	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": 0, "conflicts": conflicts, "failed": failed})
 }

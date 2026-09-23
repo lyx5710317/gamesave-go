@@ -366,12 +366,14 @@
     try {
       const res = await api.post(`/api/cloud/sync-local/${gameId}`);
       const outcome = manualUploadOutcome(res);
-      toast(outcome === 'failed'
+      toast(outcome === 'conflict'
+        ? $t('cloud.upload.conflict', { uploaded: res.uploaded, conflicts: res.conflicts, failed: res.failed })
+        : outcome === 'failed'
         ? $t('cloud.upload.failed', { uploaded: res.uploaded, failed: res.failed, skipped: res.skipped })
         : outcome === 'already-current'
           ? $t('cloud.upload.alreadyCurrent', { skipped: res.skipped })
           : $t('cloud.upload.summary', { uploaded: res.uploaded, skipped: res.skipped }),
-        outcome === 'failed' ? 'error' : 'success'
+        outcome === 'failed' || outcome === 'conflict' ? 'error' : 'success'
       );
       await browseCloud(); // detailTile re-derives from the fresh listing
     } catch (e) {

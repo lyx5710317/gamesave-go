@@ -244,10 +244,10 @@ func TestCloud_DeleteRemovesTheRemoteCopy(t *testing.T) {
 	}
 }
 
-// sync-local is the "make the cloud match what I have" repair path, and it is
-// where a truncated remote copy is supposed to be re-uploaded rather than
-// skipped. Deliberately corrupt the remote copy and check it gets repaired.
-func TestCloud_SyncLocalRepairsATruncatedRemoteCopy(t *testing.T) {
+// A truncated remote copy is not proof that the local archive should replace
+// it: the name may collide with another writer's data. Manual sync must
+// report it for review without silently overwriting or marking it current.
+func TestCloud_SyncLocalFlagsATruncatedRemoteCopy(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "CloudRepair")
 	cloudDir := useLocalCloud(t, a)
 
@@ -257,30 +257,27 @@ func TestCloud_SyncLocalRepairsATruncatedRemoteCopy(t *testing.T) {
 
 	name := waitForUpload(t, cloudDir)[0]
 	full := filepath.Join(cloudDir, name)
-	before, err := os.Stat(full)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Truncate it the way an interrupted upload would have left it.
 	if err := os.WriteFile(full, []byte("half a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	a.API(http.MethodPost, "/api/cloud/sync-local/"+gameID, map[string]any{}, nil)
-
-	if !testutil.WaitFor(30*time.Second, func() bool {
-		info, err := os.Stat(full)
-		return err == nil && info.Size() == before.Size()
-	}) {
-		after, _ := os.Stat(full)
-		size := int64(-1)
-		if after != nil {
-			size = after.Size()
-		}
-		t.Errorf("a truncated cloud backup was not repaired: %d bytes, want %d — "+
-			"a same-name check would skip it and leave the user with a broken backup",
-			size, before.Size())
+	var result struct {
+		Uploaded  int `json:"uploaded"`
+		Skipped   int `json:"skipped"`
+		Conflicts int `json:"conflicts"`
+		Failed    int `json:"failed"`
+	}
+	a.API(http.MethodPost, "/api/cloud/sync-local/"+gameID, map[string]any{}, &result)
+	if result.Uploaded != 0 || result.Skipped != 0 || result.Conflicts < 1 || result.Failed != 0 {
+		t.Fatalf("truncated remote must require review: %+v", result)
+	}
+	after, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != "half a" {
+		t.Fatalf("manual sync changed the existing remote copy: %q", after)
 	}
 }
 

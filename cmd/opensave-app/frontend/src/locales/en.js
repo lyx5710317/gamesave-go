@@ -257,6 +257,7 @@ export default {
   'cloud.upload.alreadyCurrent': 'Everything is already in the cloud ({skipped} skipped)',
   'cloud.upload.summary': 'Uploaded {uploaded}, skipped {skipped}',
   'cloud.upload.failed': 'Uploaded {uploaded}; {failed} failed; {skipped} already current. Check transfer activity.',
+  'cloud.upload.conflict': 'Uploaded {uploaded}; {conflicts} existing cloud snapshots need review; {failed} failed. Matching names were not uploaded.',
   'cloud.activity.section': 'Transfer activity',
   'cloud.activity.title': 'Cloud uploads this run',
   'cloud.activity.hint': 'Live status and recent results. This is not a persistent retry queue.',
