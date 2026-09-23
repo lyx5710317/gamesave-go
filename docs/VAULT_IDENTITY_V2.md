@@ -105,6 +105,16 @@ official equivalent): read, validate, merge by DeviceId, increment `revision`,
 then conditionally replace. A concurrent-write failure causes a reread and
 merge; it never falls back to last-writer-wins by timestamp.
 
+`internal/cloud.VaultMetadataProvider` now defines the optional read/compare-
+and-swap capability for the exact provider account and `vault.json` object.
+The cloud service validates the remote document and an opaque provider version
+token, enforces one-step revision changes, immutable vault identity, retained
+device registrations, and monotonic revocation. Stale writes return a conflict
+without an automatic retry. Existing providers do not implement this optional
+capability, and no production provider metadata write is enabled yet. A Baidu
+adapter must prove strong conditional-write semantics before implementing it;
+the wrapped-key prerequisite for registering a device remains separate.
+
 ## Discovery, creation, and upgrade behavior
 
 | Local state | Remote state | Required behavior |

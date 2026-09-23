@@ -48,7 +48,7 @@ The broker threat model and implementation require a separate security review. T
 
 ## Provider operations
 
-The first transport seam is `internal/cloud.Provider`: upload, list, download, and explicit delete route through a registry. Existing providers remain behind a compatibility adapter, so their behavior is unchanged. The Baidu adapter must extend this seam for capability discovery, authentication status, remote stat, conditional metadata writes, and token refresh without reimplementing snapshot, ancestry, conflict, or restore rules. The current seam is **not** sufficient by itself to publish Baidu sync.
+The first transport seam is `internal/cloud.Provider`: upload, list, download, and explicit delete route through a registry. Existing providers remain behind a compatibility adapter, so their behavior is unchanged. The optional `VaultMetadataProvider` contract now adds validated `vault.json` reads and provider-token compare-and-swap writes; stale tokens stop with a conflict instead of overwriting remote metadata. No current provider implements it. The Baidu adapter must prove official strong conditional-write semantics and also add capability discovery, authentication status, remote stat, and token refresh without reimplementing snapshot, ancestry, conflict, or restore rules. These seams are **not** sufficient by themselves to publish Baidu sync.
 
 ### Upload
 

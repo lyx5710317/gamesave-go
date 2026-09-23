@@ -40,17 +40,22 @@ func validProviderName(name string) bool {
 }
 
 func (s *Service) selectedProvider() (Provider, error) {
+	_, provider, err := s.selectedProviderNamed()
+	return provider, err
+}
+
+func (s *Service) selectedProviderNamed() (string, Provider, error) {
 	cfg, err := s.config()
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	s.providersMu.RLock()
 	provider, ok := s.providers[cfg.Provider]
 	s.providersMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("unsupported cloud sync provider: %s", cfg.Provider)
+		return "", nil, fmt.Errorf("unsupported cloud sync provider: %s", cfg.Provider)
 	}
-	return provider, nil
+	return cfg.Provider, provider, nil
 }
 
 // Upload sends a snapshot zip to the configured provider. Errors are returned
