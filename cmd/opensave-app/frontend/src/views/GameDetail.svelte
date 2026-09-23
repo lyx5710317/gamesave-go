@@ -2,6 +2,7 @@
   import { games, navigate, toast, syncActivity, askConfirm } from '../lib/stores.js';
   import { api, native, coverURL, gameCover } from '../lib/api.js';
   import { addExclusion, addNegation, removeDirectExclusion } from '../lib/ignorerules.js';
+  import { manualUploadOutcome } from '../lib/uploadActivity.js';
 
   export let params = {};
 
@@ -428,9 +429,13 @@
   };
 
   const uploadToCloud = () =>
-    run('Uploaded to cloud', async () => {
+    run(null, async () => {
       const res = await api.post(`/api/cloud/sync-local/${game.id}`);
-      toast(`Uploaded ${res.uploaded}, skipped ${res.skipped}`, 'success');
+      if (manualUploadOutcome(res) === 'failed') {
+        toast(`Uploaded ${res.uploaded}; ${res.failed} failed; ${res.skipped} already current. Check Cloud Backup transfer activity.`, 'error');
+      } else {
+        toast(`Uploaded ${res.uploaded}, skipped ${res.skipped}`, 'success');
+      }
       await loadCloudSnaps();
     });
 

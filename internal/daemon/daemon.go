@@ -303,7 +303,7 @@ func (d *Daemon) runCloudUpload(zipPath, remoteFileName string, log *logging.Log
 
 	if err := d.Cloud.Upload(zipPath, remoteFileName); err != nil {
 		if !cloud.IsNotConfigured(err) {
-			log.Log("error", fmt.Sprintf("cloud upload of %s failed: %v", remoteFileName, err))
+			log.Log("error", fmt.Sprintf("cloud upload of %s failed; check cloud transfer activity", remoteFileName))
 		}
 		return
 	}

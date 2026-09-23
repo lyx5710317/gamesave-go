@@ -71,6 +71,9 @@ type Service struct {
 
 	providersMu   sync.RWMutex
 	providers     map[string]Provider
+	uploadsMu     sync.Mutex
+	uploads       []UploadRecord
+	nextUploadID  uint64
 	driveFolderMu sync.Mutex
 	driveFolderID string // cached id of the auto-managed "OpenSave" Drive folder
 }

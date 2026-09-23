@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -29,12 +28,19 @@ func (s *Server) cloudRoutes(r chi.Router) {
 	r.Post("/api/auth/disconnect", s.handleAuthDisconnect)
 
 	r.Get("/api/cloud/browse", s.handleCloudBrowse)
+	r.Get("/api/cloud/uploads", s.handleCloudUploads)
 	r.Get("/api/cloud/join/local-preview", s.handleCloudJoinLocalPreview)
 	r.Get("/api/cloud/snapshots/{gameId}", s.handleCloudSnapshots)
 	r.Post("/api/cloud/restore/{gameId}", s.handleCloudRestore)
 	r.Post("/api/cloud/delete/{gameId}", s.handleCloudDelete)
 	r.Post("/api/cloud/delete-game/{gameId}", s.handleCloudDeleteGame)
 	r.Post("/api/cloud/sync-local/{gameId}", s.handleCloudSyncLocal)
+}
+
+// handleCloudUploads shows only in-memory transfer activity from this run.
+// The cloud service has already stripped local paths, tokens, and raw errors.
+func (s *Server) handleCloudUploads(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"uploads": s.Daemon.Cloud.UploadActivity()})
 }
 
 // handleCloudJoinLocalPreview only reads current local saves. It does not
@@ -419,20 +425,21 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaded := 0
+	failed := 0
 	for _, p := range pending {
 		progress(uploaded, p.snapID, false)
 		if err := s.Daemon.Cloud.Upload(p.zipPath, p.remoteName); err != nil {
-			if strings.Contains(err.Error(), "not enabled") {
+			if cloud.IsNotConfigured(err) {
 				progress(uploaded, "", true)
-				writeError(w, http.StatusBadRequest, err.Error())
+				writeError(w, http.StatusBadRequest, "cloud backup is not configured or authenticated")
 				return
 			}
-			s.Daemon.Log.Log("warn", fmt.Sprintf("upload %s failed: %v", p.remoteName, err))
-			skipped++
+			s.Daemon.Log.Log("warn", fmt.Sprintf("upload %s failed; check cloud transfer activity", p.remoteName))
+			failed++
 			continue
 		}
 		uploaded++
 	}
 	progress(uploaded, "", true)
-	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": skipped})
+	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": skipped, "failed": failed})
 }

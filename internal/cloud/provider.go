@@ -61,11 +61,14 @@ func (s *Service) selectedProviderNamed() (string, Provider, error) {
 // Upload sends a snapshot zip to the configured provider. Errors are returned
 // so the snapshot hook can report upload failures without losing the snapshot.
 func (s *Service) Upload(filePath, fileName string) error {
-	provider, err := s.selectedProvider()
+	name, provider, err := s.selectedProviderNamed()
 	if err != nil {
 		return err
 	}
-	return provider.Upload(filePath, fileName)
+	id := s.beginUpload(name, fileName)
+	err = provider.Upload(filePath, fileName)
+	s.finishUpload(id, err)
+	return err
 }
 
 // List returns the configured provider's snapshot zips.

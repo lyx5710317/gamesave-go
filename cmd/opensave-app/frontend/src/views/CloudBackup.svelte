@@ -5,6 +5,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
   import { summarizeLocalPreview } from '../lib/localPreview.js';
+  import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
+  import { manualUploadOutcome } from '../lib/uploadActivity.js';
 
   // All routed views share the same component contract. This page currently
   // needs no route parameters, but accepting them keeps dynamic navigation
@@ -363,11 +365,13 @@
     uploading = true;
     try {
       const res = await api.post(`/api/cloud/sync-local/${gameId}`);
-      toast(
-        res.uploaded === 0 && res.skipped > 0
+      const outcome = manualUploadOutcome(res);
+      toast(outcome === 'failed'
+        ? $t('cloud.upload.failed', { uploaded: res.uploaded, failed: res.failed, skipped: res.skipped })
+        : outcome === 'already-current'
           ? $t('cloud.upload.alreadyCurrent', { skipped: res.skipped })
           : $t('cloud.upload.summary', { uploaded: res.uploaded, skipped: res.skipped }),
-        'success'
+        outcome === 'failed' ? 'error' : 'success'
       );
       await browseCloud(); // detailTile re-derives from the fresh listing
     } catch (e) {
@@ -756,6 +760,8 @@
       <p class="quiet">{$t('cloud.joinPreview.remotePending')}</p>
     {/if}
   </div>
+
+  <CloudUploadActivity />
 
   <h3 class="section">{$t('cloud.snapshots.section')}</h3>
   <div class="card export-row">
