@@ -499,7 +499,10 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 
 // uploadDropboxSimple streams one request (≤150 MB per Dropbox's API).
 func (s *Service) uploadDropboxSimple(token, fileName string, f *os.File, size int64) error {
-	args, _ := json.Marshal(map[string]any{"path": "/OpenSave/" + fileName, "mode": "overwrite", "mute": true})
+	args, _ := json.Marshal(map[string]any{
+		"path": "/OpenSave/" + fileName, "mode": "add", "autorename": false,
+		"strict_conflict": true, "mute": true,
+	})
 	req, err := http.NewRequest(http.MethodPost, s.Endpoints.DropboxContent+"/2/files/upload", f)
 	if err != nil {
 		return err
@@ -513,7 +516,7 @@ func (s *Service) uploadDropboxSimple(token, fileName string, f *os.File, size i
 		return err
 	}
 	defer resp.Body.Close()
-	return transferOK(resp)
+	return dropboxUploadResult(resp)
 }
 
 // uploadDropboxSession uses upload sessions for big files: start, append
@@ -534,7 +537,7 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 			return nil, err
 		}
 		defer resp.Body.Close()
-		if err := transferOK(resp); err != nil {
+		if err := dropboxUploadResult(resp); err != nil {
 			return nil, err
 		}
 		var out map[string]any
@@ -574,7 +577,10 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 
 	_, err = call("/2/files/upload_session/finish", map[string]any{
 		"cursor": map[string]any{"session_id": sessionID, "offset": offset},
-		"commit": map[string]any{"path": "/OpenSave/" + fileName, "mode": "overwrite", "mute": true},
+		"commit": map[string]any{
+			"path": "/OpenSave/" + fileName, "mode": "add", "autorename": false,
+			"strict_conflict": true, "mute": true,
+		},
 	}, nil, 0)
 	if err != nil {
 		return fmt.Errorf("session finish: %w", err)
@@ -582,9 +588,23 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 	return nil
 }
 
+func dropboxUploadResult(resp *http.Response) error {
+	if resp.StatusCode == http.StatusConflict {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		var out struct {
+			ErrorSummary string `json:"error_summary"`
+		}
+		if json.Unmarshal(raw, &out) == nil && strings.HasPrefix(out.ErrorSummary, "path/conflict/") {
+			return ErrRemoteSnapshotConflict
+		}
+		return fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return transferOK(resp)
+}
+
 // uploadOneDriveSimple streams one PUT (fine below ~4 MB).
 func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size int64) error {
-	uploadURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/content"
+	uploadURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/content?@microsoft.graph.conflictBehavior=fail"
 	req, err := http.NewRequest(http.MethodPut, uploadURL, f)
 	if err != nil {
 		return err
@@ -597,7 +617,7 @@ func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size 
 		return err
 	}
 	defer resp.Body.Close()
-	return transferOK(resp)
+	return onedriveUploadResult(resp)
 }
 
 // uploadOneDriveSession uses Graph upload sessions: chunks must be
@@ -605,7 +625,7 @@ func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size 
 func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size int64) error {
 	createURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/createUploadSession"
 	body, _ := json.Marshal(map[string]any{
-		"item": map[string]any{"@microsoft.graph.conflictBehavior": "replace"},
+		"item": map[string]any{"@microsoft.graph.conflictBehavior": "fail"},
 	})
 	req, err := http.NewRequest(http.MethodPost, createURL, bytes.NewReader(body))
 	if err != nil {
@@ -620,7 +640,7 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 	var session struct {
 		UploadURL string `json:"uploadUrl"`
 	}
-	if err := transferOK(resp); err != nil {
+	if err := onedriveUploadResult(resp); err != nil {
 		resp.Body.Close()
 		return fmt.Errorf("create upload session: %w", err)
 	}
@@ -647,7 +667,7 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 		}
 		if resp.StatusCode != http.StatusAccepted &&
 			resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			err := transferOK(resp)
+			err := onedriveUploadResult(resp)
 			resp.Body.Close()
 			return fmt.Errorf("upload chunk at %d: %w", offset, err)
 		}
@@ -655,6 +675,22 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 		offset += n
 	}
 	return nil
+}
+
+func onedriveUploadResult(resp *http.Response) error {
+	if resp.StatusCode == http.StatusConflict {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		var out struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &out) == nil && out.Error.Code == "nameAlreadyExists" {
+			return ErrRemoteSnapshotConflict
+		}
+		return fmt.Errorf("OneDrive: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return transferOK(resp)
 }
 
 // List returns the provider's snapshot zips.

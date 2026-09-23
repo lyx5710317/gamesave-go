@@ -490,6 +490,9 @@ func TestDropboxProvider(t *testing.T) {
 			if args["path"] != "/OpenSave/game__main__snap_7.zip" {
 				t.Errorf("upload path = %v", args["path"])
 			}
+			if args["mode"] != "add" || args["autorename"] != false || args["strict_conflict"] != true {
+				t.Errorf("unsafe Dropbox upload args = %#v", args)
+			}
 			fmt.Fprint(w, `{}`)
 		case "/2/files/download":
 			fmt.Fprint(w, "dropbox bytes")
@@ -524,6 +527,55 @@ func TestDropboxProvider(t *testing.T) {
 	got, _ := os.ReadFile(dl)
 	if string(got) != "dropbox bytes" {
 		t.Errorf("downloaded = %q", got)
+	}
+}
+
+func TestDropboxUploadRaceDoesNotOverwrite(t *testing.T) {
+	for _, session := range []bool{false, true} {
+		name := "simple"
+		if session {
+			name = "session"
+		}
+		t.Run(name, func(t *testing.T) {
+			if session {
+				old := dropboxSessionThreshold
+				dropboxSessionThreshold = 1
+				defer func() { dropboxSessionThreshold = old }()
+			}
+			finishCalls := 0
+			content := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/start") {
+					fmt.Fprint(w, `{"session_id":"test-session"}`)
+					return
+				}
+				var args map[string]any
+				if err := json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &args); err != nil {
+					t.Errorf("invalid Dropbox upload args: %v", err)
+				}
+				if strings.HasSuffix(r.URL.Path, "/finish") {
+					finishCalls++
+					args, _ = args["commit"].(map[string]any)
+				}
+				if args["mode"] != "add" || args["autorename"] != false || args["strict_conflict"] != true {
+					t.Errorf("unsafe Dropbox commit: %#v", args)
+				}
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"error_summary":"path/conflict/file/"}`)
+			}))
+			defer content.Close()
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider = true, "dropbox"
+				c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.DropboxContent = content.URL
+			if err := svc.Upload(writeTempZip(t, "bytes"), "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+				t.Fatalf("Dropbox upload race = %v", err)
+			}
+			if session && finishCalls != 1 {
+				t.Fatalf("session finish calls = %d", finishCalls)
+			}
+		})
 	}
 }
 
@@ -654,6 +706,9 @@ func TestOneDriveProvider(t *testing.T) {
 				},
 			})
 		case r.Method == http.MethodPut:
+			if r.URL.Query().Get("@microsoft.graph.conflictBehavior") != "fail" {
+				t.Errorf("OneDrive small upload may replace an existing file: %s", r.URL.RawQuery)
+			}
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{}`)
 		case r.Method == http.MethodGet:
@@ -688,6 +743,50 @@ func TestOneDriveProvider(t *testing.T) {
 	got, _ := os.ReadFile(dl)
 	if string(got) != "onedrive bytes" {
 		t.Errorf("downloaded = %q", got)
+	}
+}
+
+func TestOneDriveUploadRaceDoesNotOverwrite(t *testing.T) {
+	for _, session := range []bool{false, true} {
+		name := "simple"
+		if session {
+			name = "session"
+		}
+		t.Run(name, func(t *testing.T) {
+			if session {
+				old := onedriveSimpleLimit
+				onedriveSimpleLimit = 1
+				defer func() { onedriveSimpleLimit = old }()
+			}
+			var graph *httptest.Server
+			graph = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/createUploadSession") {
+					var args struct {
+						Item map[string]string `json:"item"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&args); err != nil || args.Item["@microsoft.graph.conflictBehavior"] != "fail" {
+						t.Errorf("unsafe OneDrive session args: %#v, %v", args, err)
+					}
+					fmt.Fprintf(w, `{"uploadUrl":%q}`, graph.URL+"/session-upload")
+					return
+				}
+				if r.URL.Path != "/session-upload" && r.URL.Query().Get("@microsoft.graph.conflictBehavior") != "fail" {
+					t.Errorf("unsafe OneDrive small upload: %s", r.URL.RawQuery)
+				}
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"error":{"code":"nameAlreadyExists"}}`)
+			}))
+			defer graph.Close()
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider = true, "onedrive"
+				c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.Graph = graph.URL
+			if err := svc.Upload(writeTempZip(t, "bytes"), "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+				t.Fatalf("OneDrive upload race = %v", err)
+			}
+		})
 	}
 }
 
