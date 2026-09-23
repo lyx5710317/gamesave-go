@@ -32,6 +32,8 @@ describe('translations', () => {
     expect(translate('zh-CN', 'nav.games')).toBe('游戏');
     expect(translate('en', 'cloud.title')).toBe('Cloud Backup');
     expect(translate('zh-CN', 'cloud.title')).toBe('云备份');
+    expect(translate('en', 'cloud.activity.conflict')).toContain('existing backup preserved');
+    expect(translate('zh-CN', 'cloud.activity.conflict')).toContain('已保留原有备份');
     expect(translate('en', 'activity.empty.title')).toBe('Nothing yet');
     expect(translate('zh-CN', 'activity.empty.title')).toBe('暂无活动');
   });

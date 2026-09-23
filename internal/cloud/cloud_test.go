@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,6 +82,51 @@ func TestLocalFolderRoundTrip(t *testing.T) {
 	got, _ := os.ReadFile(dl)
 	if string(got) != "zip bytes" {
 		t.Errorf("downloaded = %q", got)
+	}
+}
+
+func TestLocalFolderUploadCannotReplaceExistingSnapshot(t *testing.T) {
+	svc, db := newTestService(t)
+	dest := t.TempDir()
+	setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider, c.URL = true, "local", dest })
+	name := "game__main__snap.zip"
+	if err := svc.Upload(writeTempZip(t, "first"), name); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Upload(writeTempZip(t, "second"), name); !os.IsExist(err) {
+		t.Fatalf("second upload = %v, want already-exists", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, name))
+	if err != nil || string(got) != "first" {
+		t.Fatalf("existing remote snapshot changed: %q, %v", got, err)
+	}
+}
+
+func TestLocalFolderListingErrorIsNotEmptyRemote(t *testing.T) {
+	svc, db := newTestService(t)
+	notDirectory := writeTempZip(t, "not a directory")
+	setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider, c.URL = true, "local", notDirectory })
+	if err := svc.UploadIfAbsent("source.zip", "game__main__snap.zip"); err == nil {
+		t.Fatal("listing a non-directory was treated as an empty destination")
+	}
+}
+
+func TestWebDAVConditionalUploadRejectsExistingSnapshot(t *testing.T) {
+	var condition string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			condition = r.Header.Get("If-None-Match")
+			w.WriteHeader(http.StatusPreconditionFailed)
+		}
+	}))
+	defer server.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider, c.URL = true, "webdav", server.URL+"/dav" })
+	if err := svc.Upload(writeTempZip(t, "new"), "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+		t.Fatalf("WebDAV collision = %v", err)
+	}
+	if condition != "*" {
+		t.Fatalf("If-None-Match = %q", condition)
 	}
 }
 

@@ -1,6 +1,8 @@
 package cloud
 
 import (
+	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -18,7 +20,7 @@ type UploadRecord struct {
 	SnapshotID string `json:"snapshotId,omitempty"`
 	Provider   string `json:"provider"`
 	Status     string `json:"status"`            // running, succeeded, failed
-	Failure    string `json:"failure,omitempty"` // configuration or transfer
+	Failure    string `json:"failure,omitempty"` // configuration, conflict, or transfer
 	StartedAt  string `json:"startedAt"`
 	FinishedAt string `json:"finishedAt,omitempty"`
 }
@@ -54,6 +56,8 @@ func (s *Service) finishUpload(id uint64, uploadErr error) {
 			s.uploads[i].Failure = "transfer"
 			if IsNotConfigured(uploadErr) {
 				s.uploads[i].Failure = "configuration"
+			} else if errors.Is(uploadErr, ErrRemoteSnapshotConflict) || errors.Is(uploadErr, os.ErrExist) {
+				s.uploads[i].Failure = "conflict"
 			}
 		}
 		break

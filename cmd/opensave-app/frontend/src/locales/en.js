@@ -273,6 +273,7 @@ export default {
   'cloud.activity.running': 'Uploading',
   'cloud.activity.succeeded': 'Uploaded',
   'cloud.activity.configuration': 'Needs cloud setup or sign-in',
+  'cloud.activity.conflict': 'Name conflict — existing backup preserved',
   'cloud.activity.failed': 'Failed — check Activity and retry',
   'cloud.export.pickerTitle': 'Export selected saves',
   'cloud.export.success': 'Exported {exported} saves',

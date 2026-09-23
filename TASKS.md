@@ -70,7 +70,8 @@
   - [x] Show a read-only inventory of recognizable snapshots in the currently saved cloud destination beside the local scan. This is not `vault.json` discovery, verified ancestry, or permission to join or overwrite.
 - [ ] Add remote-state summaries, upload queue visibility, and actionable errors.
   - [x] Show bounded, process-lifetime status for existing automatic and manual uploads; report partial manual failures separately from already-current snapshots, including CLI exit status. This is not a durable retry queue.
-  - [x] Stop manual sync from treating a same-name, same-size object as verified or overwriting a same-name object of different size; surface these unverified objects for explicit review. This is a listing-based guard, not an atomic create-if-absent guarantee. Automatic upload paths, provider-atomic no-overwrite uploads, and verified remote identity remain pending.
+  - [x] Stop manual sync from treating a same-name, same-size object as verified or overwriting a same-name object of different size; surface these unverified objects for explicit review. This is a listing-based guard, not an atomic create-if-absent guarantee. Provider-atomic no-overwrite uploads and verified remote identity remain pending.
+  - [x] Apply the same fail-closed name check to automatic uploads and recheck immediately before manual writes; classify collisions in transfer activity. Local-folder writes now use exclusive creation, and WebDAV sends `If-None-Match: *`. Remote listing can still be incomplete or race across devices; provider-specific atomic guarantees and verified identity remain pending.
   - [ ] Add a durable, resumable queue with verified remote state, retry and recovery after the provider contract is approved.
 - [ ] Implement ancestry-aware conflicts and explicit user resolution.
 - [ ] Test interrupted upload/download, retry, rollback, restore, and concurrent-device scenarios.

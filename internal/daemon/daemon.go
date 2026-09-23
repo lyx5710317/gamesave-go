@@ -301,7 +301,7 @@ func SteamCoverURL(appID string) string {
 func (d *Daemon) runCloudUpload(zipPath, remoteFileName string, log *logging.Logger) {
 	defer d.uploads.Done()
 
-	if err := d.Cloud.Upload(zipPath, remoteFileName); err != nil {
+	if err := d.Cloud.UploadIfAbsent(zipPath, remoteFileName); err != nil {
 		if !cloud.IsNotConfigured(err) {
 			log.Log("error", fmt.Sprintf("cloud upload of %s failed; check cloud transfer activity", remoteFileName))
 		}

@@ -42,6 +42,7 @@
     if (record.status === 'running') return $t('cloud.activity.running');
     if (record.status === 'succeeded') return $t('cloud.activity.succeeded');
     if (record.failure === 'configuration') return $t('cloud.activity.configuration');
+    if (record.failure === 'conflict') return $t('cloud.activity.conflict');
     return $t('cloud.activity.failed');
   }
 </script>

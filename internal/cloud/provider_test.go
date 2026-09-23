@@ -1,12 +1,68 @@
 package cloud
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/opensave/opensave/internal/store"
 )
+
+type guardedProvider struct {
+	files   []CloudFile
+	listErr error
+	uploads int
+}
+
+func (p *guardedProvider) Upload(_, _ string) error   { p.uploads++; return nil }
+func (p *guardedProvider) List() ([]CloudFile, error) { return p.files, p.listErr }
+func (p *guardedProvider) Download(_, _ string) error { return nil }
+func (p *guardedProvider) Delete(CloudFile) error     { return nil }
+
+func TestUploadIfAbsentFailsClosedOnCollisionOrListingFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		files   []CloudFile
+		listErr error
+		wantErr error
+		failure string
+	}{
+		{name: "collision", files: []CloudFile{{Name: "game__main__snap.zip", SizeBytes: 0}}, wantErr: ErrRemoteSnapshotConflict, failure: "conflict"},
+		{name: "list error", listErr: errors.New("list unavailable"), failure: "transfer"},
+		{name: "new snapshot", files: []CloudFile{{Name: "other.zip"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, db := newTestService(t)
+			provider := &guardedProvider{files: tc.files, listErr: tc.listErr}
+			if err := svc.RegisterProvider("guarded_test", provider); err != nil {
+				t.Fatal(err)
+			}
+			setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider = true, "guarded_test" })
+			err := svc.UploadIfAbsent("source.zip", "game__main__snap.zip")
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.listErr != nil && !errors.Is(err, tc.listErr) {
+				t.Fatalf("list error = %v", err)
+			}
+			if tc.wantErr == nil && tc.listErr == nil && err != nil {
+				t.Fatal(err)
+			}
+			wantUploads := 1
+			if tc.failure != "" {
+				wantUploads = 0
+			}
+			if provider.uploads != wantUploads {
+				t.Fatalf("uploads = %d, want %d", provider.uploads, wantUploads)
+			}
+			records := svc.UploadActivity()
+			if len(records) != 1 || records[0].Failure != tc.failure {
+				t.Fatalf("activity = %#v", records)
+			}
+		})
+	}
+}
 
 type recordingProvider struct {
 	calls []string

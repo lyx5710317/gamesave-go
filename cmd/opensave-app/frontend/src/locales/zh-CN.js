@@ -273,6 +273,7 @@ export default {
   'cloud.activity.running': '正在上传',
   'cloud.activity.succeeded': '已上传',
   'cloud.activity.configuration': '需要检查云端设置或重新登录',
+  'cloud.activity.conflict': '同名冲突，已保留原有备份',
   'cloud.activity.failed': '失败，请查看活动记录并重试',
   'cloud.export.pickerTitle': '导出所选存档',
   'cloud.export.success': '已导出 {exported} 个存档',

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -282,15 +283,19 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 		if err := os.MkdirAll(cfg.URL, 0o777); err != nil {
 			return err
 		}
-		out, err := os.Create(filepath.Join(cfg.URL, fileName))
+		// O_EXCL prevents another local process from replacing an existing
+		// snapshot between the listing preflight and this write.
+		out, err := os.OpenFile(filepath.Join(cfg.URL, fileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
 		if err != nil {
 			return err
 		}
 		if _, err := io.Copy(out, f); err != nil {
 			out.Close()
+			os.Remove(filepath.Join(cfg.URL, fileName))
 			return err
 		}
 		if err := out.Close(); err != nil {
+			os.Remove(filepath.Join(cfg.URL, fileName))
 			return err
 		}
 
@@ -305,6 +310,9 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 		}
 		req.ContentLength = size
 		req.Header.Set("Content-Type", "application/zip")
+		// A compliant WebDAV origin rejects an existing object with 412.
+		// Keep the listing guard too; some servers do not honor conditions.
+		req.Header.Set("If-None-Match", "*")
 		applyCustomHeaders(req, cfg.HeadersJSON)
 		applyBasicAuth(req, cfg.Username, cfg.Password)
 		resp, err := s.doTransfer(req)
@@ -312,6 +320,9 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 			return err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusPreconditionFailed {
+			return ErrRemoteSnapshotConflict
+		}
 		if err := transferOK(resp); err != nil {
 			return err
 		}
@@ -655,11 +666,14 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 	switch cfg.Provider {
 	case "local":
 		if cfg.URL == "" {
-			return []CloudFile{}, nil
+			return nil, fmt.Errorf("no local folder destination configured")
 		}
 		entries, err := os.ReadDir(cfg.URL)
 		if err != nil {
-			return []CloudFile{}, nil
+			if errors.Is(err, os.ErrNotExist) {
+				return []CloudFile{}, nil
+			}
+			return nil, err
 		}
 		var files []CloudFile
 		for _, e := range entries {

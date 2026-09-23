@@ -419,7 +419,11 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	for _, p := range pending {
 		progress(uploaded, p.snapID, false)
-		if err := s.Daemon.Cloud.Upload(p.zipPath, p.remoteName); err != nil {
+		if err := s.Daemon.Cloud.UploadIfAbsent(p.zipPath, p.remoteName); err != nil {
+			if errors.Is(err, cloud.ErrRemoteSnapshotConflict) || errors.Is(err, os.ErrExist) {
+				conflicts++
+				continue
+			}
 			if cloud.IsNotConfigured(err) {
 				progress(uploaded, "", true)
 				writeError(w, http.StatusBadRequest, "cloud backup is not configured or authenticated")

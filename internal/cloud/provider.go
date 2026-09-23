@@ -1,6 +1,13 @@
 package cloud
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrRemoteSnapshotConflict means a snapshot name is already present at the
+// destination. Equal names or sizes are not proof of equal save contents.
+var ErrRemoteSnapshotConflict = errors.New("remote snapshot name already exists; refusing to overwrite")
 
 // Provider is the snapshot transport boundary. Implementations must not
 // restore save data themselves: downloads remain subject to the caller's
@@ -67,6 +74,33 @@ func (s *Service) Upload(filePath, fileName string) error {
 	}
 	id := s.beginUpload(name, fileName)
 	err = provider.Upload(filePath, fileName)
+	s.finishUpload(id, err)
+	return err
+}
+
+// UploadIfAbsent is the conservative entry point for automatic and manual
+// snapshot mirroring. Listing failures stop the upload; a name collision is
+// not treated as an already-synced backup. This read-before-write check is
+// not atomic across devices: providers must also enforce create-only writes
+// before this can be a complete multi-device guarantee.
+func (s *Service) UploadIfAbsent(filePath, fileName string) error {
+	name, provider, err := s.selectedProviderNamed()
+	if err != nil {
+		return err
+	}
+	id := s.beginUpload(name, fileName)
+	files, err := provider.List()
+	if err == nil {
+		for _, file := range files {
+			if file.Name == fileName {
+				err = ErrRemoteSnapshotConflict
+				break
+			}
+		}
+	}
+	if err == nil {
+		err = provider.Upload(filePath, fileName)
+	}
 	s.finishUpload(id, err)
 	return err
 }

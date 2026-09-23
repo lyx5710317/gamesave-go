@@ -26,6 +26,22 @@ type existingUploadProvider struct {
 	uploads int
 }
 
+type racingUploadProvider struct {
+	lists   int
+	uploads int
+}
+
+func (p *racingUploadProvider) Upload(_, _ string) error { p.uploads++; return nil }
+func (p *racingUploadProvider) List() ([]cloud.CloudFile, error) {
+	p.lists++
+	if p.lists == 1 {
+		return nil, nil
+	}
+	return []cloud.CloudFile{{Name: "game__main__snap.zip"}}, nil
+}
+func (p *racingUploadProvider) Download(_, _ string) error   { return nil }
+func (p *racingUploadProvider) Delete(cloud.CloudFile) error { return nil }
+
 func (p *existingUploadProvider) Upload(_, _ string) error {
 	p.uploads++
 	return nil
@@ -152,5 +168,39 @@ func TestCloudSyncLocalBlocksListedRemoteName(t *testing.T) {
 				t.Fatalf("unverified remote was overwritten or marked current: %d, %v, uploads=%d", resp.StatusCode, body, provider.uploads)
 			}
 		})
+	}
+}
+
+func TestCloudSyncLocalRechecksNameBeforeUpload(t *testing.T) {
+	ts := startTestServer(t)
+	provider := &racingUploadProvider{}
+	if err := ts.daemon.Cloud.RegisterProvider("racing_test", provider); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ts.daemon.Store.GetCloudConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled, cfg.Provider = true, "racing_test"
+	if err := ts.daemon.Store.UpdateCloudConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.daemon.Store.CreateGame(store.Game{ID: "game", Name: "Game", SavePath: ts.saveDir}); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "save.zip")
+	if err := os.WriteFile(zipPath, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.daemon.Store.CreateSnapshot(store.Snapshot{
+		ID: "snap", GameID: "game", BranchName: "main", Timestamp: "2026-09-23T00:00:00Z",
+		ZipPath: zipPath, SizeBytes: int64(len("archive")),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := ts.do(t, http.MethodPost, "/api/cloud/sync-local/game", nil)
+	if resp.StatusCode != http.StatusOK || string(body["conflicts"]) != "1" ||
+		string(body["uploaded"]) != "0" || provider.lists != 2 || provider.uploads != 0 {
+		t.Fatalf("racing remote snapshot was overwritten: status=%d body=%v lists=%d uploads=%d", resp.StatusCode, body, provider.lists, provider.uploads)
 	}
 }
