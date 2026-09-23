@@ -75,6 +75,10 @@ The first transport seam is `internal/cloud.Provider`: upload, list, download, a
 
 Current OpenSave settings can represent OAuth tokens in SQLite, but that is not sufficient for this provider's release bar. On Windows, store refresh credentials with DPAPI or an equivalently reviewed OS-protected credential facility. Keep only non-secret provider/account display metadata in normal SQLite rows. Migration must preserve existing provider data and have upgrade/rollback tests.
 
+The first protected backend now lives in `internal/cloud/protectedtokens`. On Windows it uses the current user's [Credential Manager generic credentials](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw), scoped by provider and a caller-supplied stable local installation ID (the existing `NodeID` is the planned input). A token pair is replaced in one [CredWriteW](https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credwritew) call; reads and deletion use the matching OS APIs. The record is versioned, rejects incomplete/corrupt data, and enforces the documented 2,560-byte credential-blob limit instead of falling back to plaintext. Non-Windows builds report unsupported until an equivalent secure backend exists. Same-user malware can still access a user's credentials; this is not a substitute for an OAuth/broker security review.
+
+This backend is **not yet wired to Baidu OAuth**, because the app registration, approved redirect, broker, and provider adapter are still pending. It does not migrate or change Google, Dropbox, or OneDrive's existing SQLite tokens. No schema migration is needed for this isolated addition; any future migration of existing providers must retain their data and have upgrade/rollback tests.
+
 ## Vault directory
 
 The logical provider application directory is:

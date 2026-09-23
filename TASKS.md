@@ -55,6 +55,8 @@
 - [x] Decide public-client OAuth versus the minimal broker. Documented code/device flows require `SecretKey`, so use a minimal OAuth broker, pending security review and provider approval.
 - [x] Introduce an isolated provider boundary without deleting existing providers. Snapshot operations now route through `internal/cloud.Provider`; existing providers remain behind a compatibility adapter.
 - [ ] Implement protected token storage, refresh, retries, rate limits, upload, download, and resume.
+  - [x] Add a Windows OS-protected token backend with rotation, isolation, corruption, deletion, and no-plaintext-fallback tests (`internal/cloud/protectedtokens`). It is not yet connected to Baidu OAuth; existing providers are unchanged.
+  - [ ] Integrate the protected backend with approved Baidu OAuth and implement refresh, retries, rate limits, and transfers after app approval and security review.
 - [ ] Add provider contract, failure, and recovery tests.
 - [x] Keep Quark at candidate status until its official access path is confirmed. No Quark API implementation or undocumented path has been added.
 
