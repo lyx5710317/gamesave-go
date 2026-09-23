@@ -67,6 +67,7 @@
 
 - [ ] Implement the vault discovery and explicit second-device join flow.
   - [x] Expose a read-only local save scan in Cloud Backup, using the existing first-join scanner; remote comparison and confirmation remain pending.
+  - [x] Show a read-only inventory of recognizable snapshots in the currently saved cloud destination beside the local scan. This is not `vault.json` discovery, verified ancestry, or permission to join or overwrite.
 - [ ] Add remote-state summaries, upload queue visibility, and actionable errors.
   - [x] Show bounded, process-lifetime status for existing automatic and manual uploads; report partial manual failures separately from already-current snapshots, including CLI exit status. This is not a durable retry queue.
   - [x] Stop manual sync from treating a same-name, same-size object as verified or overwriting a same-name object of different size; surface these unverified objects for explicit review. This is a listing-based guard, not an atomic create-if-absent guarantee. Automatic upload paths, provider-atomic no-overwrite uploads, and verified remote identity remain pending.

@@ -148,6 +148,13 @@ pipeline and shows tracked games, detected locations, and incomplete-scan
 warnings. It does not fetch a remote vault, compare libraries, register a
 device, or enable joining; those remain separate Phase 5 work.
 
+The same screen also lists recognizable remote snapshot ZIPs using the existing
+`GET /api/cloud/browse` inventory for the currently saved provider. A failed
+remote listing is shown as unknown, never as empty, and a local scan can still
+be reviewed if the provider is unavailable. This inventory has no trusted
+content hash, ancestry, `vault.json`, or wrapped-key proof, so matching game
+labels/counts must not authorize an upload, restore, or second-device join.
+
 The comparison produces only these relationships:
 
 | Relationship | Proof |

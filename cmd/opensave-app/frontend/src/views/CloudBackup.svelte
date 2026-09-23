@@ -4,7 +4,7 @@
   import { backdropClose } from '../lib/backdrop.js';
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
-  import { summarizeLocalPreview } from '../lib/localPreview.js';
+  import { summarizeLocalPreview, summarizeRemoteInventory } from '../lib/localPreview.js';
   import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
 
@@ -19,6 +19,8 @@
   let localPreviewBusy = false;
   let localPreviewError = '';
   $: localPreviewSummary = localPreview ? summarizeLocalPreview(localPreview) : null;
+  let remotePreviewSummary = null;
+  let remotePreviewStatus = 'idle'; // idle | ready | unavailable
   let busy = false;
   let authCode = '';
   let authInProgress = false;
@@ -100,10 +102,22 @@
     localPreviewBusy = true;
     localPreview = null;
     localPreviewError = '';
+    remotePreviewSummary = null;
+    remotePreviewStatus = 'idle';
     try {
-      localPreview = await api.get('/api/cloud/join/local-preview');
-    } catch (e) {
-      localPreviewError = e.message;
+      // Both reads are independent. A cloud outage must not hide a completed
+      // local scan, and an unreadable local save must not hide remote inventory.
+      const [local, remote] = await Promise.allSettled([
+        api.get('/api/cloud/join/local-preview'),
+        api.get('/api/cloud/browse')
+      ]);
+      if (local.status === 'fulfilled') localPreview = local.value;
+      else localPreviewError = local.reason?.message ?? String(local.reason);
+
+      if (remote.status === 'fulfilled') {
+        remotePreviewSummary = summarizeRemoteInventory(remote.value);
+      }
+      remotePreviewStatus = remotePreviewSummary ? 'ready' : 'unavailable';
     } finally {
       localPreviewBusy = false;
     }
@@ -730,7 +744,8 @@
     </div>
     {#if localPreviewError}
       <p class="preview-warning" role="alert">{$t('cloud.joinPreview.failed')}: {localPreviewError}</p>
-    {:else if localPreview && localPreviewSummary}
+    {/if}
+    {#if localPreview && localPreviewSummary}
       <p class="preview-summary">
         {$t('cloud.joinPreview.summary', { tracked: localPreviewSummary.trackedCount, detected: localPreviewSummary.detectedCount })}
       </p>
@@ -758,6 +773,21 @@
             </li>
           {/each}
         </ul>
+      {/if}
+    {/if}
+    {#if remotePreviewStatus !== 'idle'}
+      <h4>{$t('cloud.joinPreview.remoteTitle')}</h4>
+      {#if remotePreviewStatus === 'ready'}
+        <p class="preview-summary">{$t('cloud.joinPreview.remoteSummary', { games: remotePreviewSummary.gameCount, snapshots: remotePreviewSummary.snapshotCount })}</p>
+        {#if remotePreviewSummary.games.length}
+          <ul class="preview-list">
+            {#each remotePreviewSummary.games as game (game.gameId)}
+              <li><span>{game.name}</span><span class="quiet">{$t('cloud.joinPreview.snapshots', { count: game.snapshotCount })}</span></li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <p class="preview-warning" role="status">{$t('cloud.joinPreview.remoteUnavailable')}</p>
       {/if}
       <p class="quiet">{$t('cloud.joinPreview.remotePending')}</p>
     {/if}
