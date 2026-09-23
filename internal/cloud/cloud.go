@@ -750,67 +750,133 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		body, _ := json.Marshal(map[string]string{"path": "/OpenSave"})
-		req, _ := http.NewRequest(http.MethodPost, s.Endpoints.DropboxAPI+"/2/files/list_folder", bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := s.httpClient().Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusConflict {
-			return []CloudFile{}, nil // /OpenSave folder doesn't exist yet
-		}
-		if resp.StatusCode >= 400 {
-			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			return nil, fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, raw)
-		}
-		var out struct {
-			Entries []struct {
-				Tag            string `json:".tag"`
-				Name           string `json:"name"`
-				Size           int64  `json:"size"`
-				ClientModified string `json:"client_modified"`
-			} `json:"entries"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return nil, err
-		}
-		var files []CloudFile
-		for _, e := range out.Entries {
-			if e.Tag == "file" && strings.HasSuffix(e.Name, ".zip") {
-				files = append(files, CloudFile{Name: e.Name, SizeBytes: e.Size, CreatedTime: e.ClientModified})
+		files := []CloudFile{}
+		cursor := ""
+		seenCursors := map[string]bool{}
+		for page := 0; page < 1000; page++ {
+			endpoint := s.Endpoints.DropboxAPI + "/2/files/list_folder"
+			args := map[string]string{"path": "/OpenSave"}
+			if page > 0 {
+				endpoint += "/continue"
+				args = map[string]string{"cursor": cursor}
 			}
+			body, _ := json.Marshal(args)
+			req, _ := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := s.httpClient().Do(req)
+			if err != nil {
+				return nil, err
+			}
+			if resp.StatusCode == http.StatusConflict && page == 0 {
+				var notFound struct {
+					ErrorSummary string `json:"error_summary"`
+				}
+				_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&notFound)
+				resp.Body.Close()
+				if strings.HasPrefix(notFound.ErrorSummary, "path/not_found/") {
+					return files, nil // /OpenSave has not been created yet.
+				}
+				return nil, fmt.Errorf("Dropbox: list folder conflict: %s", notFound.ErrorSummary)
+			}
+			if resp.StatusCode >= 400 {
+				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				return nil, fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, raw)
+			}
+			var out struct {
+				Cursor  string `json:"cursor"`
+				HasMore *bool  `json:"has_more"`
+				Entries []struct {
+					Tag            string `json:".tag"`
+					Name           string `json:"name"`
+					Size           int64  `json:"size"`
+					ClientModified string `json:"client_modified"`
+				} `json:"entries"`
+			}
+			err = json.NewDecoder(resp.Body).Decode(&out)
+			resp.Body.Close()
+			if err != nil {
+				return nil, err
+			}
+			if out.HasMore == nil {
+				return nil, fmt.Errorf("Dropbox file listing omitted has_more")
+			}
+			if out.Entries == nil {
+				return nil, fmt.Errorf("Dropbox file listing omitted entries")
+			}
+			for _, e := range out.Entries {
+				if e.Tag == "file" && strings.HasSuffix(e.Name, ".zip") {
+					files = append(files, CloudFile{Name: e.Name, SizeBytes: e.Size, CreatedTime: e.ClientModified})
+				}
+			}
+			if !*out.HasMore {
+				return files, nil
+			}
+			if out.Cursor == "" || seenCursors[out.Cursor] {
+				return nil, fmt.Errorf("Dropbox file listing has a missing or repeated cursor")
+			}
+			seenCursors[out.Cursor] = true
+			cursor = out.Cursor
 		}
-		return files, nil
+		return nil, fmt.Errorf("Dropbox file listing exceeded 1000 pages")
 
 	case "onedrive":
 		token, err := s.getOrRefreshAccessToken("onedrive")
 		if err != nil {
 			return nil, err
 		}
-		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.Graph+"/v1.0/me/drive/special/approot/children", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		var out struct {
-			Value []struct {
-				Name            string          `json:"name"`
-				Size            int64           `json:"size"`
-				CreatedDateTime string          `json:"createdDateTime"`
-				File            json.RawMessage `json:"file"`
-			} `json:"value"`
+		firstURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot/children"
+		origin, err := url.Parse(firstURL)
+		if err != nil {
+			return nil, err
 		}
-		if err := s.doJSON(req, &out); err != nil {
-			return nil, fmt.Errorf("OneDrive: %w", err)
-		}
-		var files []CloudFile
-		for _, f := range out.Value {
-			if f.File != nil && strings.HasSuffix(f.Name, ".zip") {
-				files = append(files, CloudFile{Name: f.Name, SizeBytes: f.Size, CreatedTime: f.CreatedDateTime})
+		nextURL := firstURL
+		seenURLs := map[string]bool{}
+		files := []CloudFile{}
+		for page := 0; page < 1000; page++ {
+			if seenURLs[nextURL] {
+				return nil, fmt.Errorf("OneDrive file listing repeated a page URL")
 			}
+			seenURLs[nextURL] = true
+			req, err := http.NewRequest(http.MethodGet, nextURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			var out struct {
+				NextLink string `json:"@odata.nextLink"`
+				Value    []struct {
+					Name            string          `json:"name"`
+					Size            int64           `json:"size"`
+					CreatedDateTime string          `json:"createdDateTime"`
+					File            json.RawMessage `json:"file"`
+				} `json:"value"`
+			}
+			if err := s.doJSON(req, &out); err != nil {
+				return nil, fmt.Errorf("OneDrive: %w", err)
+			}
+			if out.Value == nil {
+				return nil, fmt.Errorf("OneDrive file listing omitted value")
+			}
+			for _, f := range out.Value {
+				if f.File != nil && strings.HasSuffix(f.Name, ".zip") {
+					files = append(files, CloudFile{Name: f.Name, SizeBytes: f.Size, CreatedTime: f.CreatedDateTime})
+				}
+			}
+			if out.NextLink == "" {
+				return files, nil
+			}
+			// The nextLink is supplied by the server. Never send the bearer token
+			// to a different origin or a different Graph resource.
+			next, err := url.Parse(out.NextLink)
+			if err != nil || next.User != nil || next.Fragment != "" ||
+				next.Scheme != origin.Scheme || next.Host != origin.Host || next.EscapedPath() != origin.EscapedPath() {
+				return nil, fmt.Errorf("OneDrive file listing returned an unsafe next page URL")
+			}
+			nextURL = next.String()
 		}
-		return files, nil
+		return nil, fmt.Errorf("OneDrive file listing exceeded 1000 pages")
 
 	default:
 		return []CloudFile{}, nil

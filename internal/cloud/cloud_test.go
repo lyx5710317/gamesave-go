@@ -472,6 +472,7 @@ func TestDropboxProvider(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/2/files/list_folder" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
+				"has_more": false,
 				"entries": []map[string]any{
 					{".tag": "file", "name": "game__main__snap_7.zip", "size": 512, "client_modified": "2026-07-01T00:00:00Z"},
 					{".tag": "folder", "name": "subfolder"},
@@ -526,6 +527,122 @@ func TestDropboxProvider(t *testing.T) {
 	}
 }
 
+func TestDropboxListingFindsCollisionOnLaterPage(t *testing.T) {
+	requests, uploads := 0, 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer at-db" {
+			t.Errorf("missing Dropbox authorization")
+		}
+		switch r.URL.Path {
+		case "/2/files/list_folder":
+			fmt.Fprint(w, `{"entries":[{".tag":"file","name":"other.zip"}],"cursor":"second","has_more":true}`)
+		case "/2/files/list_folder/continue":
+			var args struct {
+				Cursor string `json:"cursor"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&args); err != nil || args.Cursor != "second" {
+				t.Errorf("continuation cursor = %q, %v", args.Cursor, err)
+			}
+			fmt.Fprint(w, `{"entries":[{".tag":"file","name":"game__main__snap.zip"}],"cursor":"end","has_more":false}`)
+		default:
+			t.Errorf("unexpected Dropbox request: %s", r.URL.Path)
+		}
+	}))
+	defer api.Close()
+	content := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { uploads++ }))
+	defer content.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "dropbox"
+		c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.DropboxAPI, svc.Endpoints.DropboxContent = api.URL, content.URL
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+		t.Fatalf("later-page collision = %v", err)
+	}
+	if requests != 2 || uploads != 0 {
+		t.Fatalf("requests=%d uploads=%d", requests, uploads)
+	}
+}
+
+func TestDropboxIncompleteListingFailsClosed(t *testing.T) {
+	for _, tc := range []struct{ name, first, next string }{
+		{"missing has_more", `{"entries":[]}`, ""},
+		{"missing entries", `{"has_more":false}`, ""},
+		{"missing cursor", `{"entries":[],"has_more":true}`, ""},
+		{"repeated cursor", `{"entries":[],"cursor":"same","has_more":true}`, `{"entries":[],"cursor":"same","has_more":true}`},
+		{"unknown conflict", `{"error_summary":"path/not_folder/"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if tc.name == "unknown conflict" {
+					w.WriteHeader(http.StatusConflict)
+				}
+				if r.URL.Path == "/2/files/list_folder/continue" {
+					fmt.Fprint(w, tc.next)
+				} else {
+					fmt.Fprint(w, tc.first)
+				}
+			}))
+			defer api.Close()
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider = true, "dropbox"
+				c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.DropboxAPI = api.URL
+			if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+				t.Fatal("incomplete Dropbox listing allowed an upload")
+			}
+			if calls > 2 {
+				t.Fatalf("listing did not stop: %d calls", calls)
+			}
+		})
+	}
+}
+
+func TestDropboxMissingFolderIsEmpty(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprint(w, `{"error_summary":"path/not_found/..."}`)
+	}))
+	defer api.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "dropbox"
+		c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.DropboxAPI = api.URL
+	files, err := svc.List()
+	if err != nil || len(files) != 0 {
+		t.Fatalf("missing folder listing = %#v, %v", files, err)
+	}
+}
+
+func TestDropboxLaterPageFailureStopsUpload(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/files/list_folder/continue" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error_summary":"too_many_requests/"}`)
+			return
+		}
+		fmt.Fprint(w, `{"entries":[{".tag":"file","name":"other.zip"}],"cursor":"second","has_more":true}`)
+	}))
+	defer api.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "dropbox"
+		c.AccessToken, c.ExpiryTimeMs = "at-db", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.DropboxAPI = api.URL
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+		t.Fatal("later-page Dropbox error allowed an upload")
+	}
+}
+
 func TestOneDriveProvider(t *testing.T) {
 	graph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -571,6 +688,112 @@ func TestOneDriveProvider(t *testing.T) {
 	got, _ := os.ReadFile(dl)
 	if string(got) != "onedrive bytes" {
 		t.Errorf("downloaded = %q", got)
+	}
+}
+
+func TestOneDriveListingFindsCollisionOnLaterPage(t *testing.T) {
+	requests, uploads := 0, 0
+	var graph *httptest.Server
+	graph = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer at-od" {
+			t.Errorf("missing OneDrive authorization")
+		}
+		if r.Method != http.MethodGet {
+			uploads++
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `{"value":[{"name":"game__main__snap.zip","file":{},"size":9}]}`)
+		} else {
+			fmt.Fprintf(w, `{"@odata.nextLink":%q,"value":[{"name":"other.zip","file":{}}]}`,
+				graph.URL+r.URL.Path+"?page=2")
+		}
+	}))
+	defer graph.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "onedrive"
+		c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.Graph = graph.URL
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+		t.Fatalf("later-page collision = %v", err)
+	}
+	if requests != 2 || uploads != 0 {
+		t.Fatalf("requests=%d uploads=%d", requests, uploads)
+	}
+}
+
+func TestOneDriveUnsafeOrRepeatedNextLinkFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		nextLink func(string) string
+	}{
+		{"external origin", func(string) string { return "https://example.invalid/steal" }},
+		{"other resource", func(base string) string { return base + "/v1.0/me/drive/root/children" }},
+		{"repeated page", func(base string) string { return base + "/v1.0/me/drive/special/approot/children" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			var graph *httptest.Server
+			graph = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				fmt.Fprintf(w, `{"@odata.nextLink":%q,"value":[]}`, tc.nextLink(graph.URL))
+			}))
+			defer graph.Close()
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider = true, "onedrive"
+				c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.Graph = graph.URL
+			if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+				t.Fatal("unsafe OneDrive listing allowed an upload")
+			}
+			if calls != 1 {
+				t.Fatalf("unexpected follow-up request count = %d", calls)
+			}
+		})
+	}
+}
+
+func TestOneDriveLaterPageFailureStopsUpload(t *testing.T) {
+	var graph *httptest.Server
+	graph = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"code":"throttled"}}`)
+			return
+		}
+		fmt.Fprintf(w, `{"@odata.nextLink":%q,"value":[{"name":"other.zip","file":{}}]}`,
+			graph.URL+r.URL.Path+"?page=2")
+	}))
+	defer graph.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "onedrive"
+		c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.Graph = graph.URL
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+		t.Fatal("later-page OneDrive error allowed an upload")
+	}
+}
+
+func TestOneDriveMissingValueStopsUpload(t *testing.T) {
+	graph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{}`)
+	}))
+	defer graph.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider = true, "onedrive"
+		c.AccessToken, c.ExpiryTimeMs = "at-od", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.Graph = graph.URL
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+		t.Fatal("missing OneDrive values allowed an upload")
 	}
 }
 
