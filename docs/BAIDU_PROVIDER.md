@@ -64,6 +64,8 @@ The first transport seam is `internal/cloud.Provider`: upload, list, download, a
 - Never extract or restore directly from the network stream.
 - Pass the verified artifact through the existing snapshot/restore safety path.
 
+The existing cloud-restore route now uses `cloud.Service.DownloadVerified`: it stages the file next to the local backup, checks provider-reported size when available, reads every ZIP entry to verify its CRC, rejects unsafe archive paths, and publishes only after verification. A different local archive with the same snapshot identity is preserved and reported as a conflict (HTTP 409). Interrupted, truncated, corrupt, and path-traversal cases have unit and end-to-end coverage. Existing providers do **not** supply a trusted SHA-256; the helper accepts one for a future authenticated vault manifest, but a hash calculated only after download is not proof of remote authenticity. This work is not Baidu transfer or resume support.
+
 ### Rate limits and retry
 
 - Classify authentication, quota, throttling, transient transport, integrity, and permanent request errors.

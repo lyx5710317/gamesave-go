@@ -58,6 +58,8 @@
   - [x] Add a Windows OS-protected token backend with rotation, isolation, corruption, deletion, and no-plaintext-fallback tests (`internal/cloud/protectedtokens`). It is not yet connected to Baidu OAuth; existing providers are unchanged.
   - [ ] Integrate the protected backend with approved Baidu OAuth and implement refresh, retries, rate limits, and transfers after app approval and security review.
 - [ ] Add provider contract, failure, and recovery tests.
+  - [x] Stage and verify cloud-restored ZIPs before publication, reject local/remote same-name conflicts, and test interrupted/corrupt/path-unsafe downloads without touching live saves or existing local backups.
+  - [ ] Add Baidu adapter contract tests for OAuth, multipart resume, rate limits, quota, and recovery once approved API behavior is confirmed.
 - [x] Keep Quark at candidate status until its official access path is confirmed. No Quark API implementation or undocumented path has been added.
 
 ## Phase 5 — Cloud UX / Conflict / Restore

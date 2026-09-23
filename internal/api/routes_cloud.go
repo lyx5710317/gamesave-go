@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -193,7 +194,7 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g, branch, snapID, ok := snapshot.ParseExportEntryName(body.FileName)
-	if !ok || g != gameID {
+	if !ok || g != gameID || !safeCloudRestorePart(branch) || !safeCloudRestorePart(snapID) {
 		writeError(w, http.StatusBadRequest, "fileName does not belong to this game")
 		return
 	}
@@ -214,8 +215,35 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	destPath := filepath.Join(destDir, snapID+".zip")
 
-	if err := s.Daemon.Cloud.Download(body.FileName, destPath); err != nil {
+	remoteFiles, err := s.Daemon.Cloud.List()
+	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var remote *cloud.CloudFile
+	for i := range remoteFiles {
+		if remoteFiles[i].Name != body.FileName {
+			continue
+		}
+		if remote != nil {
+			writeError(w, http.StatusConflict, "multiple remote snapshots have this name; restore is ambiguous")
+			return
+		}
+		remote = &remoteFiles[i]
+	}
+	if remote == nil {
+		writeError(w, http.StatusNotFound, "remote snapshot not found")
+		return
+	}
+	// Current providers expose size but no trusted SHA-256. The verifier also
+	// checks ZIP CRCs and refuses to replace a different local archive; a
+	// future vault manifest can supply its recorded hash here.
+	if err := s.Daemon.Cloud.DownloadVerified(*remote, destPath, ""); err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, cloud.ErrLocalSnapshotConflict) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	info, err := os.Stat(destPath)
@@ -234,6 +262,19 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	s.BroadcastGamesUpdate()
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "snapshotId": snapID})
+}
+
+func safeCloudRestorePart(part string) bool {
+	if part == "" {
+		return false
+	}
+	for _, ch := range part {
+		if ch != '_' && ch != '-' && (ch < 'a' || ch > 'z') &&
+			(ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // handleCloudDelete removes one snapshot from the cloud provider. Local

@@ -10,6 +10,8 @@ package e2e
 // configured. Pointing it at a temp folder exercises the whole path.
 
 import (
+	"archive/zip"
+	"bytes"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opensave/opensave/internal/snapshot"
 	"github.com/opensave/opensave/testutil"
 )
 
@@ -143,6 +146,75 @@ func TestCloud_RestoreRejectsAFileFromAnotherGame(t *testing.T) {
 	}
 	if got := a.ReadSave("slot1.sav"); got != "mine" {
 		t.Errorf("the save was modified by a rejected restore: %q", got)
+	}
+}
+
+func TestCloud_RestoreRejectsCorruptRemoteWithoutReplacingLocalBackup(t *testing.T) {
+	a := testutil.NewTestDaemon(t, "CloudCorruptRestore")
+	cloudDir := useLocalCloud(t, a)
+	a.WriteSave("slot1.sav", "safe progress")
+	gameID := a.TrackGame("Corrupt Cloud Game")
+	a.API(http.MethodPost, "/api/games/"+gameID+"/snapshot", map[string]any{"comment": "safe"}, nil)
+	name := waitForUpload(t, cloudDir)[0]
+	_, branch, snapID, ok := snapshot.ParseExportEntryName(name)
+	if !ok {
+		t.Fatalf("invalid cloud snapshot name %q", name)
+	}
+	settings, err := a.Daemon.Store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	localBackup := filepath.Join(settings.BackupsDir, gameID, branch, snapID+".zip")
+	original, err := os.ReadFile(localBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloudDir, name), []byte("not a zip"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.WriteSave("slot1.sav", "ruined progress")
+	if status := a.APIStatus(http.MethodPost, "/api/cloud/restore/"+gameID,
+		map[string]any{"fileName": name}, nil); status < 400 {
+		t.Fatalf("corrupt cloud restore returned HTTP %d", status)
+	}
+	if got := a.ReadSave("slot1.sav"); got != "ruined progress" {
+		t.Errorf("live save changed after rejected restore: %q", got)
+	}
+	if got, err := os.ReadFile(localBackup); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("local backup changed after rejected restore: %v", err)
+	}
+	parts, err := filepath.Glob(filepath.Join(filepath.Dir(localBackup), ".opensave-cloud-*.part"))
+	if err != nil || len(parts) != 0 {
+		t.Fatalf("staging files remain: %v, %v", parts, err)
+	}
+	if status := a.APIStatus(http.MethodPost, "/api/cloud/restore/"+gameID,
+		map[string]any{"fileName": gameID + "__..__snap_1.zip"}, nil); status < 400 {
+		t.Fatalf("unsafe cloud restore name returned HTTP %d", status)
+	}
+	var replacement bytes.Buffer
+	zipWriter := zip.NewWriter(&replacement)
+	entry, err := zipWriter.Create("slot1.sav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte("different valid zip")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloudDir, name), replacement.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if status := a.APIStatus(http.MethodPost, "/api/cloud/restore/"+gameID,
+		map[string]any{"fileName": name}, nil); status != http.StatusConflict {
+		t.Fatalf("different remote archive returned HTTP %d, want 409", status)
+	}
+	if got, err := os.ReadFile(localBackup); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("valid but conflicting remote replaced local backup: %v", err)
+	}
+	if got := a.ReadSave("slot1.sav"); got != "ruined progress" {
+		t.Errorf("live save changed after conflicting restore: %q", got)
 	}
 }
 
