@@ -704,27 +704,45 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 			return nil, err
 		}
 		query := fmt.Sprintf("trashed = false and mimeType = 'application/zip' and '%s' in parents", folderID)
-		listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id,name,size,createdTime)")
-		req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		var out struct {
-			Files []struct {
-				ID          string `json:"id"`
-				Name        string `json:"name"`
-				Size        string `json:"size"`
-				CreatedTime string `json:"createdTime"`
-			} `json:"files"`
+		params := url.Values{}
+		params.Set("q", query)
+		params.Set("fields", "nextPageToken,incompleteSearch,files(id,name,size,createdTime)")
+		params.Set("pageSize", "1000")
+		files := []CloudFile{}
+		seenTokens := map[string]bool{}
+		for page := 0; page < 1000; page++ {
+			req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			var out struct {
+				NextPageToken    string `json:"nextPageToken"`
+				IncompleteSearch bool   `json:"incompleteSearch"`
+				Files            []struct {
+					ID          string `json:"id"`
+					Name        string `json:"name"`
+					Size        string `json:"size"`
+					CreatedTime string `json:"createdTime"`
+				} `json:"files"`
+			}
+			if err := s.doJSON(req, &out); err != nil {
+				return nil, googleDriveErr(err)
+			}
+			if out.IncompleteSearch {
+				return nil, fmt.Errorf("Google Drive file listing was incomplete")
+			}
+			for _, f := range out.Files {
+				size, _ := strconv.ParseInt(f.Size, 10, 64)
+				files = append(files, CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime})
+			}
+			if out.NextPageToken == "" {
+				return files, nil
+			}
+			if seenTokens[out.NextPageToken] {
+				return nil, fmt.Errorf("Google Drive file listing repeated a page token")
+			}
+			seenTokens[out.NextPageToken] = true
+			params.Set("pageToken", out.NextPageToken)
 		}
-		if err := s.doJSON(req, &out); err != nil {
-			return nil, googleDriveErr(err)
-		}
-		files := make([]CloudFile, len(out.Files))
-		for i, f := range out.Files {
-			size, _ := strconv.ParseInt(f.Size, 10, 64)
-			files[i] = CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime}
-		}
-		return files, nil
+		return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages")
 
 	case "dropbox":
 		token, err := s.getOrRefreshAccessToken("dropbox")

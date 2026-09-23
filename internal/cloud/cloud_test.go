@@ -297,6 +297,76 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 	}
 }
 
+func TestGoogleDriveListingFindsCollisionOnLaterPage(t *testing.T) {
+	requests := 0
+	uploads := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/upload/") {
+			uploads++
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		requests++
+		if r.URL.Query().Get("pageSize") != "1000" || !strings.Contains(r.URL.Query().Get("fields"), "nextPageToken") {
+			t.Errorf("pagination fields missing: %s", r.URL.RawQuery)
+		}
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			fmt.Fprint(w, `{"nextPageToken":"second","files":[{"id":"one","name":"other.zip","size":"1"}]}`)
+		case "second":
+			fmt.Fprint(w, `{"files":[{"id":"two","name":"game__main__snap.zip","size":"9"}]}`)
+		default:
+			t.Errorf("unexpected page token: %s", r.URL.Query().Get("pageToken"))
+		}
+	}))
+	defer drive.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI = drive.URL
+	svc.Endpoints.GoogleUpload = drive.URL
+	files, err := svc.List()
+	if err != nil || len(files) != 2 || files[1].Name != "game__main__snap.zip" {
+		t.Fatalf("paged listing = %#v, %v", files, err)
+	}
+	if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); !errors.Is(err, ErrRemoteSnapshotConflict) {
+		t.Fatalf("later-page collision = %v", err)
+	}
+	if requests != 4 || uploads != 0 {
+		t.Fatalf("requests=%d uploads=%d", requests, uploads)
+	}
+}
+
+func TestGoogleDriveIncompleteListingFailsClosed(t *testing.T) {
+	for _, tc := range []struct{ name, payload string }{
+		{"incomplete", `{"incompleteSearch":true,"files":[{"name":"first.zip"}]}`},
+		{"repeated token", `{"nextPageToken":"same","files":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				fmt.Fprint(w, tc.payload)
+			}))
+			defer drive.Close()
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+				c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.GoogleAPI = drive.URL
+			if err := svc.UploadIfAbsent("not-read", "game__main__snap.zip"); err == nil {
+				t.Fatal("incomplete Drive listing allowed an upload")
+			}
+			if calls > 2 {
+				t.Fatalf("listing did not stop on malformed pagination: %d calls", calls)
+			}
+		})
+	}
+}
+
 // TestPruneGameBranch verifies cloud retention: newest `keep` snapshots
 // stay, older ones are deleted, other games/branches are untouched.
 func TestPruneGameBranch(t *testing.T) {
