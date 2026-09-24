@@ -666,10 +666,51 @@ func TestSyncPeerMissingGame(t *testing.T) {
 	if res.Status != "peer_missing" {
 		t.Fatalf("status = %q, want peer_missing", res.Status)
 	}
+	results, err := env.engine.SyncGame(context.Background(), "game1", []Peer{env.peer})
+	if err != nil || results[env.peer.ID].Status != "peer_missing" {
+		t.Fatalf("game sync = %+v, %v; want peer_missing", results, err)
+	}
+	peer, err := env.store.GetPeer(env.peer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peer.LastSynced.Valid {
+		t.Fatal("a peer missing the game must not advance last-synced time")
+	}
 
 	// A generic transport error is still a real error (retryable).
 	env.transport.manifestErr = errors.New("connection reset")
 	if _, err := env.engine.SyncWithPeer(context.Background(), "game1", env.peer); err == nil {
 		t.Error("a genuine transport failure must still surface as an error")
+	}
+}
+
+func TestSyncPeerNeedsManualSavePath(t *testing.T) {
+	env := setupEngine(t)
+	write(t, env.localDir, "save.dat", "local only")
+	env.transport.manifestErr = errors.New(`peer returned 404: {"error":"cannot auto-track Game One from an unmapped temporary save path"}`)
+
+	results, err := env.engine.SyncGame(context.Background(), "game1", []Peer{env.peer})
+	if err != nil {
+		t.Fatalf("a path choice is a stable state, not a transport error: %v", err)
+	}
+	if got := results[env.peer.ID].Status; got != "path_mapping_required" {
+		t.Fatalf("status = %q, want path_mapping_required", got)
+	}
+	peer, err := env.store.GetPeer(env.peer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peer.LastSynced.Valid {
+		t.Fatal("a sync blocked on a manual path choice must not advance last-synced time")
+	}
+	if got, err := os.ReadFile(filepath.Join(env.localDir, "save.dat")); err != nil || string(got) != "local only" {
+		t.Fatalf("blocked sync changed the local save: %q, %v", got, err)
+	}
+
+	// Broad 404s and genuine transport failures must not be reclassified.
+	env.transport.manifestErr = errors.New("peer returned 404: unrelated endpoint")
+	if _, err := env.engine.SyncWithPeer(context.Background(), "game1", env.peer); err == nil {
+		t.Fatal("an unrelated 404 must still report an error")
 	}
 }

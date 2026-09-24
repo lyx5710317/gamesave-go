@@ -85,7 +85,8 @@ Current priority (2026-09-24): Google Drive, WebDAV, and local-folder safety. Dr
 - [ ] Test interrupted upload/download, retry, rollback, restore, and concurrent-device scenarios.
   - [x] Pair a Windows 11 VM over LAN and verify a dummy save reaches an isolated host profile with matching file hashes; preserve both sides and require explicit choice when a conflict is reported.
   - [x] Reject automatic peer-game tracking from an unmapped temporary directory, as the Windows VM test showed that profile substitution could silently select a different empty folder. An explicit path translation or manual game path remains available.
-  - [ ] Reproduce the VM's rapid successive-file conflict in an automated two-device test before changing conflict detection; do not relax the ancestry safety rule based on matching timestamps or a shared file alone.
+  - [x] Treat a peer's required manual save path as an actionable non-retryable state, without advancing its last-synced time; show the affected device on manual sync instead of claiming success.
+  - [ ] Reproduce the VM's rapid successive-file conflict in an automated two-device test before changing conflict detection. A regression test for two rapid one-sided additions, including an empty file, passed 20 repetitions but did not reproduce the VM conflict; do not relax the ancestry safety rule based on matching timestamps or a shared file alone.
 
 ## Phase 6 — Windows Packaging / Release
 

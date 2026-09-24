@@ -57,7 +57,7 @@ var perPeerSyncTimeout = 30 * time.Minute
 
 // Result summarizes one game/peer sync run.
 type Result struct {
-	Status    string `json:"status"` // in_sync | updated | updated_bidirectional | deletions_synced | triggered_peer_pull | conflict
+	Status    string `json:"status"` // in_sync | updated | updated_bidirectional | deletions_synced | triggered_peer_pull | conflict | peer_missing | path_mapping_required | error
 	Direction string `json:"direction"`
 	PeerID    string `json:"peerId,omitempty"`
 	PeerName  string `json:"peerName,omitempty"`
@@ -126,6 +126,18 @@ func isGameNotFound(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
+// A peer that cannot map our save path needs a person to choose its actual
+// folder. Retrying every few seconds cannot change that, and must not be
+// mistaken for either a completed sync or a transient network failure.
+func isPathMappingRequired(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unmapped temporary save path") ||
+		strings.Contains(message, "set the game's save path on this device manually")
 }
 
 // SyncBusy reports whether a sync for this game is running, or queued behind
@@ -213,7 +225,8 @@ func (e *Engine) SyncGame(ctx context.Context, gameID string, onlinePeers []Peer
 		// Advancing it on a conflict (or error) would hide the still-unresolved
 		// divergence from the NEXT sync, causing the peer to silently overwrite
 		// its own changes instead of detecting the conflict and asking.
-		if res.Status != "conflict" && res.Status != "error" {
+		if res.Status != "conflict" && res.Status != "error" &&
+			res.Status != "peer_missing" && res.Status != "path_mapping_required" {
 			_ = e.Store.UpdatePeerLastSynced(peer.ID, time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
 		}
 	}
@@ -236,6 +249,10 @@ func (e *Engine) SyncWithPeer(ctx context.Context, gameID string, peer Peer) (Re
 		AppID: game.AppID, CoverURL: game.CoverURL,
 	})
 	if err != nil {
+		if isPathMappingRequired(err) {
+			e.Log("warn", fmt.Sprintf("%q needs a save path set on %q before it can sync", game.Name, peer.Name))
+			return Result{Status: "path_mapping_required", PeerID: peer.ID, PeerName: peer.Name}, nil
+		}
 		// The peer simply isn't tracking this game (they untracked it, or
 		// never had it). That's a stable state, not a transient network
 		// interruption — surface it as "peer_missing" so the resync loop

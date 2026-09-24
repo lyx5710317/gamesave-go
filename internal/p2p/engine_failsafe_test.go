@@ -43,6 +43,15 @@ func TestTrackSyncOutcome(t *testing.T) {
 	if !e.isPending("game3") {
 		t.Error("any failing peer should queue the game")
 	}
+
+	// A manual path choice cannot be repaired by an automatic retry. It also
+	// clears a stale queued retry once the real reason becomes known.
+	e.trackSyncOutcome("game3", map[string]syncengine.Result{
+		"peerB": {Status: "path_mapping_required"},
+	})
+	if e.isPending("game3") {
+		t.Error("a required path choice must stop automatic retrying")
+	}
 }
 
 func (e *Engine) isPending(gameID string) bool {

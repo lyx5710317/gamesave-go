@@ -147,6 +147,7 @@ export default {
   'home.scan.age.years': '{count} years ago',
 
   'activity.title': 'Activity',
+  'game.sync.pathMappingRequired': 'Set this game’s actual save folder on {peer}, or add a path translation there, then sync again.',
   'activity.empty.title': 'Nothing yet',
   'activity.empty.body': 'Sync events, snapshots, and warnings show up here.',
   'activity.levels.info': 'INFO',

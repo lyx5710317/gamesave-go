@@ -147,6 +147,7 @@ export default {
   'home.scan.age.years': '{count} 年前',
 
   'activity.title': '活动',
+  'game.sync.pathMappingRequired': '请在 {peer} 上设置此游戏的实际存档文件夹，或添加路径转换，然后重新同步。',
   'activity.empty.title': '暂无活动',
   'activity.empty.body': '同步事件、存档快照和警告会显示在这里。',
   'activity.levels.info': '信息',

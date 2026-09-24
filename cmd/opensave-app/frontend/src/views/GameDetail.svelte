@@ -3,6 +3,7 @@
   import { api, native, coverURL, gameCover } from '../lib/api.js';
   import { addExclusion, addNegation, removeDirectExclusion } from '../lib/ignorerules.js';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
+  import { peerRequiringSavePath } from '../lib/syncOutcome.js';
   import { t } from '../lib/i18n.js';
 
   export let params = {};
@@ -153,7 +154,11 @@
     }
   }
 
-  const syncNow = () => run('Sync triggered', () => api.post(`/api/games/${game.id}/sync`));
+  const syncNow = () => run('Sync triggered', async () => {
+    const response = await api.post(`/api/games/${game.id}/sync`);
+    const peer = peerRequiringSavePath(response);
+    if (peer) throw new Error($t('game.sync.pathMappingRequired', { peer }));
+  });
   const takeSnapshot = () =>
     run('Snapshot created', async () => {
       await api.post(`/api/games/${game.id}/snapshot`, { comment: snapshotComment });
