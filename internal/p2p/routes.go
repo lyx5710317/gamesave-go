@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -443,6 +444,20 @@ func (e *Engine) ensureManifestGame(gameID string, q manifestGameQuery) (store.G
 		rules[i] = delta.TranslationRule{FromPattern: tr.FromPattern, ToPattern: tr.ToPattern}
 	}
 	localPath := delta.TranslatePathToLocal(q.SavePath, rules)
+	// A peer's temporary directory is not a portable save location. The
+	// built-in user-profile substitution can otherwise turn, for example,
+	// C:\Users\Alice\AppData\Local\Temp\test-saves into a NEW empty folder
+	// under Bob's profile and silently track that instead of Bob's real save.
+	// An explicit translation rule is an intentional mapping and may opt in.
+	// Keep the legacy same-machine case (including test daemons): a temporary
+	// path that already exists *unchanged* on this machine is not a guess.
+	if (temporaryAutoTrackPath(q.SavePath) || temporaryAutoTrackPath(localPath)) &&
+		!hasExplicitPathTranslation(q.SavePath, rules) {
+		_, statErr := os.Stat(localPath)
+		if !strings.EqualFold(filepath.Clean(q.SavePath), filepath.Clean(localPath)) || statErr != nil {
+			return store.Game{}, fmt.Errorf("cannot auto-track %q from an unmapped temporary save path — set the save path on this device manually or add a path translation rule", q.Name)
+		}
+	}
 
 	// Never auto-track at a profile/system-level folder: syncing it would
 	// hash the user's whole profile. Send the requester a clear reason
@@ -481,6 +496,36 @@ func (e *Engine) ensureManifestGame(gameID string, q manifestGameQuery) (store.G
 	e.Log("info", fmt.Sprintf("auto-tracked %q at %q from peer manifest request", q.Name, localPath))
 	e.notifyGamesUpdate()
 	return game, nil
+}
+
+func hasExplicitPathTranslation(remotePath string, rules []delta.TranslationRule) bool {
+	for _, rule := range rules {
+		if rule.FromPattern != "" && strings.HasPrefix(remotePath, rule.FromPattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// temporaryAutoTrackPath is deliberately narrower than DangerousSyncRoot:
+// users may manually track a save in a temporary directory, but an unknown
+// peer game must not create and sync a guessed ephemeral destination there.
+func temporaryAutoTrackPath(path string) bool {
+	p := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(path), `\`, "/"))
+	p = strings.TrimRight(p, "/")
+	for _, root := range []string{"/tmp", "/var/tmp", "/private/tmp"} {
+		if p == root || strings.HasPrefix(p, root+"/") {
+			return true
+		}
+	}
+	parts := strings.Split(p, "/")
+	if len(parts) >= 6 && len(parts[0]) == 2 && parts[0][1] == ':' &&
+		parts[1] == "users" && parts[2] != "" && parts[3] == "appdata" &&
+		parts[4] == "local" && parts[5] == "temp" {
+		return true
+	}
+	return len(parts) >= 3 && len(parts[0]) == 2 && parts[0][1] == ':' &&
+		parts[1] == "windows" && parts[2] == "temp"
 }
 
 // handleManifest serves a game's manifest + branch + latest-snapshot info.

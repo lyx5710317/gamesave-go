@@ -186,6 +186,12 @@ Prefer to run your own relay instead of the hosted one? See
 Once paired, tracked games sync automatically. You do not need to press
 anything.
 
+If a game is stored in a temporary folder on the first device, the second
+device will not guess a new folder under its own user profile. Track the game
+on the second device and set its actual save folder, or configure an explicit
+path translation in Settings → Advanced. An already-existing identical path
+on the same machine remains usable.
+
 Both devices need to be **tracking the same game** for it to sync. If a game is
 named differently on each machine, OpenSave can usually match them by Steam App
 ID — or you can link them by hand under the game's settings.
