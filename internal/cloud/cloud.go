@@ -740,46 +740,7 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		query := fmt.Sprintf("trashed = false and mimeType = 'application/zip' and '%s' in parents", folderID)
-		params := url.Values{}
-		params.Set("q", query)
-		params.Set("fields", "nextPageToken,incompleteSearch,files(id,name,size,createdTime)")
-		params.Set("pageSize", "1000")
-		files := []CloudFile{}
-		seenTokens := map[string]bool{}
-		for page := 0; page < 1000; page++ {
-			req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
-			req.Header.Set("Authorization", "Bearer "+token)
-			var out struct {
-				NextPageToken    string `json:"nextPageToken"`
-				IncompleteSearch bool   `json:"incompleteSearch"`
-				Files            []struct {
-					ID          string `json:"id"`
-					Name        string `json:"name"`
-					Size        string `json:"size"`
-					CreatedTime string `json:"createdTime"`
-				} `json:"files"`
-			}
-			if err := s.doJSON(req, &out); err != nil {
-				return nil, googleDriveErr(err)
-			}
-			if out.IncompleteSearch {
-				return nil, fmt.Errorf("Google Drive file listing was incomplete")
-			}
-			for _, f := range out.Files {
-				size, _ := strconv.ParseInt(f.Size, 10, 64)
-				files = append(files, CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime})
-			}
-			if out.NextPageToken == "" {
-				return files, nil
-			}
-			if seenTokens[out.NextPageToken] {
-				return nil, fmt.Errorf("Google Drive file listing repeated a page token")
-			}
-			seenTokens[out.NextPageToken] = true
-			params.Set("pageToken", out.NextPageToken)
-		}
-		return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages")
+		return s.listGoogleDriveFiles(token, folderID)
 
 	case "dropbox":
 		token, err := s.getOrRefreshAccessToken("dropbox")
@@ -919,6 +880,51 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 	}
 }
 
+// listGoogleDriveFiles returns the full snapshot inventory in one folder.
+// Both upload preflight and restore must reject incomplete pagination.
+func (s *Service) listGoogleDriveFiles(token, folderID string) ([]CloudFile, error) {
+	query := fmt.Sprintf("trashed = false and mimeType = 'application/zip' and '%s' in parents", folderID)
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", "nextPageToken,incompleteSearch,files(id,name,size,createdTime)")
+	params.Set("pageSize", "1000")
+	files := []CloudFile{}
+	seenTokens := map[string]bool{}
+	for page := 0; page < 1000; page++ {
+		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		var out struct {
+			NextPageToken    string `json:"nextPageToken"`
+			IncompleteSearch bool   `json:"incompleteSearch"`
+			Files            []struct {
+				ID          string `json:"id"`
+				Name        string `json:"name"`
+				Size        string `json:"size"`
+				CreatedTime string `json:"createdTime"`
+			} `json:"files"`
+		}
+		if err := s.doJSON(req, &out); err != nil {
+			return nil, googleDriveErr(err)
+		}
+		if out.IncompleteSearch {
+			return nil, fmt.Errorf("Google Drive file listing was incomplete")
+		}
+		for _, f := range out.Files {
+			size, _ := strconv.ParseInt(f.Size, 10, 64)
+			files = append(files, CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime})
+		}
+		if out.NextPageToken == "" {
+			return files, nil
+		}
+		if seenTokens[out.NextPageToken] {
+			return nil, fmt.Errorf("Google Drive file listing repeated a page token")
+		}
+		seenTokens[out.NextPageToken] = true
+		params.Set("pageToken", out.NextPageToken)
+	}
+	return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages")
+}
+
 // Download fetches a remote snapshot to localPath.
 func (s *Service) downloadLegacy(fileName, localPath string) error {
 	cfg, err := s.config()
@@ -970,23 +976,29 @@ func (s *Service) downloadLegacy(fileName, localPath string) error {
 		if err != nil {
 			return err
 		}
-		query := fmt.Sprintf("name = '%s' and trashed = false and '%s' in parents",
-			strings.ReplaceAll(fileName, "'", `\'`), folderID)
-		listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id)")
-		req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		var out struct {
-			Files []struct {
-				ID string `json:"id"`
-			} `json:"files"`
+		files, err := s.listGoogleDriveFiles(token, folderID)
+		if err != nil {
+			return err
 		}
-		if err := s.doJSON(req, &out); err != nil {
-			return googleDriveErr(err)
+		var fileID string
+		matches := 0
+		for _, file := range files {
+			if file.Name != fileName {
+				continue
+			}
+			matches++
+			if matches > 1 {
+				return ErrRemoteSnapshotAmbiguous
+			}
+			fileID = file.ID
 		}
-		if len(out.Files) == 0 {
+		if matches == 0 {
 			return fmt.Errorf("file %q not found on Google Drive", fileName)
 		}
-		dlReq, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files/"+out.Files[0].ID+"?alt=media", nil)
+		if fileID == "" {
+			return fmt.Errorf("Google Drive file %q has no ID; refusing to download", fileName)
+		}
+		dlReq, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files/"+url.PathEscape(fileID)+"?alt=media", nil)
 		dlReq.Header.Set("Authorization", "Bearer "+token)
 		if err := s.fetchToFile(dlReq, localPath); err != nil {
 			return googleDriveErr(err)

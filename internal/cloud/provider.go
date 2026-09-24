@@ -9,6 +9,10 @@ import (
 // destination. Equal names or sizes are not proof of equal save contents.
 var ErrRemoteSnapshotConflict = errors.New("remote snapshot name already exists; refusing to overwrite")
 
+// ErrRemoteSnapshotAmbiguous means a provider has multiple files with the
+// requested snapshot name. A name alone is not enough to select one safely.
+var ErrRemoteSnapshotAmbiguous = errors.New("multiple remote snapshots share this name; refusing to choose one")
+
 // Provider is the snapshot transport boundary. Implementations must not
 // restore save data themselves: downloads remain subject to the caller's
 // snapshot verification and restore safety checks.

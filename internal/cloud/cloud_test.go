@@ -371,6 +371,133 @@ func TestGoogleDriveIncompleteListingFailsClosed(t *testing.T) {
 	}
 }
 
+func TestGoogleDriveDownloadRejectsDuplicateNameAcrossPages(t *testing.T) {
+	const name = "game__main__snap.zip"
+	mediaCalls := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/drive/v3/files" && r.URL.Query().Get("pageToken") == "":
+			fmt.Fprintf(w, `{"nextPageToken":"second","files":[{"id":"first","name":%q}]}`, name)
+		case r.URL.Path == "/drive/v3/files" && r.URL.Query().Get("pageToken") == "second":
+			fmt.Fprintf(w, `{"files":[{"id":"second","name":%q}]}`, name)
+		case strings.HasPrefix(r.URL.Path, "/drive/v3/files/"):
+			mediaCalls++
+			fmt.Fprint(w, "unexpected download")
+		default:
+			t.Errorf("unexpected Drive request: %s", r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer drive.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI = drive.URL
+	dest := filepath.Join(t.TempDir(), "out.zip")
+	if err := svc.Download(name, dest); !errors.Is(err, ErrRemoteSnapshotAmbiguous) {
+		t.Fatalf("duplicate-name download error = %v", err)
+	}
+	if mediaCalls != 0 {
+		t.Fatalf("media downloaded despite ambiguity: %d requests", mediaCalls)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("destination was created despite ambiguity: %v", err)
+	}
+}
+
+func TestGoogleDriveDownloadFindsUniqueNameOnLaterPage(t *testing.T) {
+	const name = "game__main__snap.zip"
+	mediaCalls := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/drive/v3/files" && r.URL.Query().Get("pageToken") == "":
+			fmt.Fprint(w, `{"nextPageToken":"second","files":[{"id":"first","name":"other.zip"}]}`)
+		case r.URL.Path == "/drive/v3/files" && r.URL.Query().Get("pageToken") == "second":
+			fmt.Fprintf(w, `{"files":[{"id":"target","name":%q}]}`, name)
+		case r.URL.Path == "/drive/v3/files/target" && r.URL.Query().Get("alt") == "media":
+			mediaCalls++
+			fmt.Fprint(w, "expected bytes")
+		default:
+			t.Errorf("unexpected Drive request: %s", r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer drive.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI = drive.URL
+	dest := filepath.Join(t.TempDir(), "out.zip")
+	if err := svc.Download(name, dest); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil || string(data) != "expected bytes" || mediaCalls != 1 {
+		t.Fatalf("download bytes=%q, error=%v, media calls=%d", data, err, mediaCalls)
+	}
+}
+
+func TestGoogleDriveDownloadRejectsIncompleteListing(t *testing.T) {
+	mediaCalls := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/drive/v3/files" {
+			fmt.Fprint(w, `{"incompleteSearch":true,"files":[{"id":"target","name":"game__main__snap.zip"}]}`)
+			return
+		}
+		mediaCalls++
+		fmt.Fprint(w, "unexpected download")
+	}))
+	defer drive.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI = drive.URL
+	dest := filepath.Join(t.TempDir(), "out.zip")
+	if err := svc.Download("game__main__snap.zip", dest); err == nil {
+		t.Fatal("incomplete listing allowed download")
+	}
+	if mediaCalls != 0 {
+		t.Fatalf("media downloaded despite incomplete listing: %d requests", mediaCalls)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("destination was created despite incomplete listing: %v", err)
+	}
+}
+
+func TestGoogleDriveDownloadRejectsMissingFileID(t *testing.T) {
+	mediaCalls := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/drive/v3/files" {
+			fmt.Fprint(w, `{"files":[{"name":"game__main__snap.zip"}]}`)
+			return
+		}
+		mediaCalls++
+	}))
+	defer drive.Close()
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI = drive.URL
+	dest := filepath.Join(t.TempDir(), "out.zip")
+	if err := svc.Download("game__main__snap.zip", dest); err == nil {
+		t.Fatal("missing file ID allowed download")
+	}
+	if mediaCalls != 0 {
+		t.Fatalf("media requested without file ID: %d", mediaCalls)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("destination was created without file ID: %v", err)
+	}
+}
+
 // TestPruneGameBranch verifies cloud retention: newest `keep` snapshots
 // stay, older ones are deleted, other games/branches are untouched.
 func TestPruneGameBranch(t *testing.T) {

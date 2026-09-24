@@ -65,6 +65,8 @@
 
 ## Phase 5 — Cloud UX / Conflict / Restore
 
+Current priority (2026-09-24): Google Drive, WebDAV, and local-folder safety. Dropbox and OneDrive remain in the codebase but their further development is deferred at the owner's request.
+
 - [ ] Implement the vault discovery and explicit second-device join flow.
   - [x] Expose a read-only local save scan in Cloud Backup, using the existing first-join scanner; remote comparison and confirmation remain pending.
   - [x] Show a read-only inventory of recognizable snapshots in the currently saved cloud destination beside the local scan. This is not `vault.json` discovery, verified ancestry, or permission to join or overwrite.
@@ -73,6 +75,7 @@
   - [x] Stop manual sync from treating a same-name, same-size object as verified or overwriting a same-name object of different size; surface these unverified objects for explicit review. This is a listing-based guard, not an atomic create-if-absent guarantee. Provider-atomic no-overwrite uploads and verified remote identity remain pending.
   - [x] Apply the same fail-closed name check to automatic uploads and recheck immediately before manual writes; classify collisions in transfer activity. Local-folder writes now use exclusive creation, and WebDAV sends `If-None-Match: *`. Remote listing can still be incomplete or race across devices; provider-specific atomic guarantees and verified identity remain pending.
   - [x] Enumerate every Google Drive snapshot-list page and reject incomplete or cycling pagination before using the listing for upload decisions.
+  - [x] Reuse the complete Google Drive listing for restores; reject duplicate snapshot names, missing IDs, and incomplete inventories before downloading any bytes. This does not establish verified remote identity or atomic name creation.
   - [x] Enumerate Dropbox and OneDrive snapshot-list pages before upload decisions; reject missing/repeated Dropbox cursors, unexpected Dropbox listing conflicts, unsafe/repeated OneDrive next-page URLs, and page failures. Provider-atomic create-only writes and verified remote identity remain pending.
   - [x] Use provider-enforced create-only uploads for Dropbox (strict add, no autorename) and OneDrive (fail-on-conflict for simple and session uploads), including late-conflict tests. Google Drive name uniqueness and verified remote identity remain unresolved; webhook destinations cannot provide a general create-only guarantee.
   - [x] Suspend automatic remote retention pruning until the cloud vault can verify ownership and ancestry; local retention and explicit cloud delete remain available. Unknown remote history is preserved even when the local automatic-snapshot limit is low.
