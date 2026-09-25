@@ -198,6 +198,11 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 		cfg.Enabled = *patch.Enabled
 	}
 	if patch.Provider != nil {
+		if *patch.Provider != cfg.Provider {
+			// A credential from one destination must never be copied into a
+			// different provider's SQLite configuration by a partial patch.
+			cfg.Password = ""
+		}
 		cfg.Provider = *patch.Provider
 	}
 	if patch.URL != nil {
@@ -207,7 +212,9 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 		cfg.Username = *patch.Username
 	}
 	if patch.Password != nil {
-		cfg.Password = *patch.Password
+		if *patch.Password != "" || (cfg.Provider != "jianguoyun" && !cfg.PasswordConfigured) {
+			cfg.Password = *patch.Password
+		}
 	}
 	if patch.Headers != nil {
 		cfg.HeadersJSON = *patch.Headers

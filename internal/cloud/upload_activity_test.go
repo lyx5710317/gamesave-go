@@ -97,3 +97,27 @@ func TestUploadActivityClassifiesMissingAuthWithoutRawError(t *testing.T) {
 		t.Fatalf("configuration failure = %#v", record)
 	}
 }
+
+func TestJianguoyunUploadActivityClassifiesWithoutRawSecrets(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{ErrJianguoyunAuth, "authentication"},
+		{ErrJianguoyunPermission, "permission"},
+		{ErrJianguoyunQuota, "quota"},
+		{ErrJianguoyunRateLimit, "rate_limit"},
+		{ErrJianguoyunNetwork, "network"},
+		{ErrJianguoyunIncomplete, "incomplete_inventory"},
+		{ErrJianguoyunCondition, "unsafe_condition"},
+		{ErrJianguoyunIntegrity, "integrity"},
+	} {
+		svc := &Service{}
+		id := svc.beginUpload("jianguoyun", "game__main__snap.zip")
+		svc.finishUpload(id, tc.err)
+		record := svc.UploadActivity()[0]
+		if record.Failure != tc.want || record.Provider != "jianguoyun" {
+			t.Fatalf("failure for %q = %#v", tc.want, record)
+		}
+	}
+}

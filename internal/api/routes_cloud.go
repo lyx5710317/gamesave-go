@@ -35,6 +35,15 @@ func (s *Server) cloudRoutes(r chi.Router) {
 	r.Post("/api/cloud/delete/{gameId}", s.handleCloudDelete)
 	r.Post("/api/cloud/delete-game/{gameId}", s.handleCloudDeleteGame)
 	r.Post("/api/cloud/sync-local/{gameId}", s.handleCloudSyncLocal)
+	r.Post("/api/cloud/jianguoyun/disconnect", s.handleJianguoyunDisconnect)
+}
+
+func (s *Server) handleJianguoyunDisconnect(w http.ResponseWriter, r *http.Request) {
+	if err := s.Daemon.Store.DisconnectJianguoyun(); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // handleCloudUploads shows only in-memory transfer activity from this run.

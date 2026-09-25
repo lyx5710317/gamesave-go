@@ -58,6 +58,22 @@ func (s *Service) finishUpload(id uint64, uploadErr error) {
 				s.uploads[i].Failure = "configuration"
 			} else if errors.Is(uploadErr, ErrRemoteSnapshotConflict) || errors.Is(uploadErr, os.ErrExist) {
 				s.uploads[i].Failure = "conflict"
+			} else if errors.Is(uploadErr, ErrJianguoyunAuth) {
+				s.uploads[i].Failure = "authentication"
+			} else if errors.Is(uploadErr, ErrJianguoyunPermission) {
+				s.uploads[i].Failure = "permission"
+			} else if errors.Is(uploadErr, ErrJianguoyunQuota) {
+				s.uploads[i].Failure = "quota"
+			} else if errors.Is(uploadErr, ErrJianguoyunRateLimit) {
+				s.uploads[i].Failure = "rate_limit"
+			} else if errors.Is(uploadErr, ErrJianguoyunNetwork) {
+				s.uploads[i].Failure = "network"
+			} else if errors.Is(uploadErr, ErrJianguoyunIncomplete) {
+				s.uploads[i].Failure = "incomplete_inventory"
+			} else if errors.Is(uploadErr, ErrJianguoyunCondition) {
+				s.uploads[i].Failure = "unsafe_condition"
+			} else if errors.Is(uploadErr, ErrJianguoyunIntegrity) {
+				s.uploads[i].Failure = "integrity"
 			}
 		}
 		break

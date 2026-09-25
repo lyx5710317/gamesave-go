@@ -1,10 +1,10 @@
-# Baidu Netdisk Provider Design (Not Implemented)
+# Baidu Netdisk Provider Design (Later Large-Capacity Strategy; Not Implemented)
 
 Status (2026-09-23): official API documentation reviewed; no Baidu adapter, credential, OAuth broker, or production account is included. The project owner supplied a screenshot showing the application as "已上线，仅限个人场景使用" (online, personal-use only) and confirmed that public distribution is the intended release model. This records the owner's application status, not public-distribution approval or a verified grant of particular APIs. Public app approval and the security review remain launch gates.
 
 ## Goal and boundary
 
-Baidu Netdisk is the planned primary mainland-China provider. It must move encrypted/versioned OpenSave snapshot artifacts directly between the Windows client and the user's Baidu account. A GameSave Cloud service must never receive game-save bytes.
+Baidu Netdisk is the later mainland-China large-capacity strategy. The near-term domestic recommendation is the official Jianguoyun WebDAV preset, with its separate release gates. Baidu must move encrypted/versioned OpenSave snapshot artifacts directly between the Windows client and the user's Baidu account. A GameSave Cloud service must never receive game-save bytes.
 
 The official documentation now describes a software-application path, OAuth authorization, application-directory restrictions, quotas, upload limits, and public-release review. It does **not** establish that our open-source Windows app has been approved or that public-client OAuth is supported. Reverse-engineered browser/cookie APIs remain out of scope.
 

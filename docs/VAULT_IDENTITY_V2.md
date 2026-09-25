@@ -114,8 +114,10 @@ metadata with a newer provider version token to bypass the required reread and
 merge. Stale writes return a conflict without an automatic retry. Existing
 providers do not implement this optional capability, and no production provider
 metadata write is enabled yet. A Baidu adapter must prove strong conditional-
-write semantics before implementing it;
-the wrapped-key prerequisite for registering a device remains separate.
+write semantics before implementing it. Jianguoyun's WebDAV snapshot create-only
+check is not proof of strong ETag/CAS replacement for `vault.json`; no
+production Jianguoyun vault metadata writer or second-device cloud join is
+enabled. The wrapped-key prerequisite for registering a device remains separate.
 
 ## Discovery, creation, and upgrade behavior
 

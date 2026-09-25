@@ -46,6 +46,7 @@ type Endpoints struct {
 	DropboxToken   string // https://api.dropbox.com/oauth2/token
 	Graph          string // https://graph.microsoft.com
 	MicrosoftToken string // https://login.microsoftonline.com/common/oauth2/v2.0/token
+	JianguoyunDAV  string // https://dav.jianguoyun.com/dav/ (override only in tests)
 }
 
 // DefaultEndpoints returns the production provider hosts.
@@ -60,6 +61,7 @@ func DefaultEndpoints() Endpoints {
 		DropboxToken:   "https://api.dropbox.com/oauth2/token",
 		Graph:          "https://graph.microsoft.com",
 		MicrosoftToken: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+		JianguoyunDAV:  store.JianguoyunBaseURL,
 	}
 }
 
@@ -70,13 +72,18 @@ type Service struct {
 	Endpoints Endpoints
 	HTTP      *http.Client
 
-	providersMu   sync.RWMutex
-	providers     map[string]Provider
-	uploadsMu     sync.Mutex
-	uploads       []UploadRecord
-	nextUploadID  uint64
-	driveFolderMu sync.Mutex
-	driveFolderID string // cached id of the auto-managed "OpenSave" Drive folder
+	providersMu        sync.RWMutex
+	providers          map[string]Provider
+	uploadsMu          sync.Mutex
+	uploads            []UploadRecord
+	nextUploadID       uint64
+	driveFolderMu      sync.Mutex
+	driveFolderID      string // cached id of the auto-managed "OpenSave" Drive folder
+	jianguoyunMu       sync.Mutex
+	jianguoyunNext     time.Time
+	jianguoyunProbeMu  sync.Mutex
+	jianguoyunProbeOK  bool
+	jianguoyunProbeKey [32]byte
 }
 
 // New creates a production Service.
@@ -91,7 +98,7 @@ func New(s *store.Store, logf func(level, msg string)) *Service {
 	// be registered behind the same call boundary.
 	legacy := legacyProvider{service: svc}
 	svc.providers = map[string]Provider{
-		"local": legacy, "webdav": legacy, "webhook": legacy,
+		"local": legacy, "webdav": legacy, "jianguoyun": legacy, "webhook": legacy,
 		"google_drive": legacy, "dropbox": legacy, "onedrive": legacy,
 	}
 	return svc
@@ -108,6 +115,7 @@ func IsNotConfigured(err error) bool {
 	return strings.Contains(msg, "not enabled") ||
 		strings.Contains(msg, "destination configured") ||
 		strings.Contains(msg, "destination URL configured") ||
+		strings.Contains(msg, "application password is not configured") ||
 		strings.Contains(msg, "not authenticated")
 }
 
@@ -118,6 +126,21 @@ func (s *Service) config() (store.CloudConfig, error) {
 	}
 	if !cfg.Enabled {
 		return store.CloudConfig{}, fmt.Errorf("cloud sync is not enabled")
+	}
+	if cfg.Provider == "jianguoyun" {
+		if cfg.URL != store.JianguoyunBaseURL {
+			return store.CloudConfig{}, fmt.Errorf("Jianguoyun preset requires its official WebDAV address")
+		}
+		cfg.URL = joinURL(s.Endpoints.JianguoyunDAV, "GameSaveGo/")
+	}
+	if cfg.Provider == "webdav" && store.IsJianguoyunHost(cfg.URL) {
+		return store.CloudConfig{}, fmt.Errorf("Jianguoyun WebDAV backups require the dedicated Jianguoyun preset")
+	}
+	if cfg.Provider == "jianguoyun" || cfg.Provider == "webdav" {
+		cfg.Password, err = s.Store.LoadCloudPassword(cfg)
+		if err != nil {
+			return store.CloudConfig{}, fmt.Errorf("Jianguoyun application password is not configured or unavailable: %w", err)
+		}
 	}
 	return cfg, nil
 }
@@ -299,7 +322,10 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 			return err
 		}
 
-	case "webdav":
+	case "webdav", "jianguoyun":
+		if cfg.Provider == "jianguoyun" {
+			return s.uploadJianguoyun(cfg, f, fileName, size)
+		}
 		if cfg.URL == "" {
 			return fmt.Errorf("no destination URL configured")
 		}
@@ -728,7 +754,7 @@ func (s *Service) listLegacy() ([]CloudFile, error) {
 		}
 		return files, nil
 
-	case "webdav":
+	case "webdav", "jianguoyun":
 		return s.listWebDAV(cfg)
 
 	case "google_drive":
@@ -956,12 +982,20 @@ func (s *Service) downloadLegacy(fileName, localPath string) error {
 		}
 		return out.Close()
 
-	case "webdav":
+	case "webdav", "jianguoyun":
+		if cfg.Provider == "jianguoyun" {
+			if err := s.ensureJianguoyunFolder(cfg); err != nil {
+				return err
+			}
+		}
 		req, err := http.NewRequest(http.MethodGet, joinURL(cfg.URL, url.PathEscape(fileName)), nil)
 		if err != nil {
 			return err
 		}
 		applyBasicAuth(req, cfg.Username, cfg.Password)
+		if cfg.Provider == "jianguoyun" {
+			return s.fetchJianguoyunToFile(req, localPath)
+		}
 		if err := s.fetchToFile(req, localPath); err != nil {
 			return fmt.Errorf("WebDAV: %w", err)
 		}
@@ -1042,6 +1076,11 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("no destination URL configured")
 	}
+	if cfg.Provider == "jianguoyun" {
+		if err := s.ensureJianguoyunFolder(cfg); err != nil {
+			return nil, err
+		}
+	}
 	req, err := http.NewRequest("PROPFIND", cfg.URL, nil)
 	if err != nil {
 		return nil, err
@@ -1050,16 +1089,32 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 	req.Header.Set("Content-Type", "text/xml")
 	applyBasicAuth(req, cfg.Username, cfg.Password)
 
-	resp, err := s.httpClient().Do(req)
+	var resp *http.Response
+	if cfg.Provider == "jianguoyun" {
+		resp, err = s.jianguoyunDo(req, false)
+	} else {
+		resp, err = s.httpClient().Do(req)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if cfg.Provider == "jianguoyun" && resp.StatusCode != http.StatusMultiStatus {
+		return nil, jianguoyunStatusError("list", resp.StatusCode)
+	}
+	if cfg.Provider == "jianguoyun" {
+		for _, key := range []string{"Link", "Next-Page", "X-Next-Page", "X-Page-Token", "X-Has-More"} {
+			if resp.Header.Get(key) != "" {
+				return nil, fmt.Errorf("%w：服务端返回未识别的分页响应头", ErrJianguoyunIncomplete)
+			}
+		}
+	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("WebDAV list returned HTTP %d", resp.StatusCode)
 	}
 
 	var ms struct {
+		XMLName   xml.Name `xml:"multistatus"`
 		Responses []struct {
 			Href  string `xml:"href"`
 			Props []struct {
@@ -1068,17 +1123,65 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 			} `xml:"propstat"`
 		} `xml:"response"`
 	}
-	raw, err := io.ReadAll(resp.Body)
+	reader := io.Reader(resp.Body)
+	if cfg.Provider == "jianguoyun" {
+		reader = io.LimitReader(resp.Body, 8<<20)
+	}
+	raw, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Provider == "jianguoyun" && len(raw) >= 8<<20 {
+		return nil, fmt.Errorf("%w：目录响应过大", ErrJianguoyunIncomplete)
+	}
+	if cfg.Provider == "jianguoyun" {
+		depth := 0
+		decoder := xml.NewDecoder(bytes.NewReader(raw))
+		for {
+			token, decodeErr := decoder.Token()
+			if decodeErr == io.EOF {
+				break
+			}
+			if decodeErr != nil {
+				return nil, fmt.Errorf("%w：目录 XML 损坏", ErrJianguoyunIncomplete)
+			}
+			switch v := token.(type) {
+			case xml.StartElement:
+				depth++
+				local := strings.ToLower(v.Name.Local)
+				if strings.Contains(local, "cursor") || strings.Contains(local, "next") || strings.Contains(local, "hasmore") || strings.Contains(local, "page") {
+					return nil, fmt.Errorf("%w：未识别的分页字段", ErrJianguoyunIncomplete)
+				}
+				if depth == 2 && v.Name.Local != "response" {
+					return nil, fmt.Errorf("%w：未识别的分页或扩展字段", ErrJianguoyunIncomplete)
+				}
+			case xml.EndElement:
+				depth--
+			}
+		}
+	}
 	if err := xml.Unmarshal(raw, &ms); err != nil {
+		if cfg.Provider == "jianguoyun" {
+			return nil, fmt.Errorf("%w：目录 XML 损坏", ErrJianguoyunIncomplete)
+		}
 		return nil, fmt.Errorf("parse WebDAV multistatus: %w", err)
+	}
+	if cfg.Provider == "jianguoyun" && len(ms.Responses) >= 750 {
+		return nil, fmt.Errorf("%w：单次目录请求达到 750 项，官方分页协议尚未验证；请减少该目录对象数", ErrJianguoyunIncomplete)
+	}
+	if cfg.Provider == "jianguoyun" && len(ms.Responses) == 0 {
+		return nil, fmt.Errorf("%w：缺少目录响应", ErrJianguoyunIncomplete)
 	}
 
 	baseName := path.Base(strings.TrimSuffix(cfg.URL, "/"))
 	var files []CloudFile
+	seenNames := map[string]bool{}
 	for _, r := range ms.Responses {
+		if cfg.Provider == "jianguoyun" {
+			if err := validateJianguoyunHref(cfg.URL, r.Href); err != nil {
+				return nil, fmt.Errorf("%w：异常对象地址", ErrJianguoyunIncomplete)
+			}
+		}
 		href, err := url.PathUnescape(strings.TrimSpace(r.Href))
 		if err != nil {
 			href = r.Href
@@ -1087,16 +1190,31 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 		if name == "" || name == baseName {
 			continue
 		}
+		if cfg.Provider == "jianguoyun" {
+			if seenNames[name] || !strings.HasSuffix(name, ".zip") {
+				return nil, fmt.Errorf("%w：重复或异常对象", ErrJianguoyunIncomplete)
+			}
+			seenNames[name] = true
+		}
 		f := CloudFile{Name: name, CreatedTime: time.Now().UTC().Format(time.RFC3339)}
+		foundLength := false
 		for _, p := range r.Props {
 			if p.Length != "" {
-				f.SizeBytes, _ = strconv.ParseInt(strings.TrimSpace(p.Length), 10, 64)
+				parsed, parseErr := strconv.ParseInt(strings.TrimSpace(p.Length), 10, 64)
+				if cfg.Provider == "jianguoyun" && (parseErr != nil || parsed < 0) {
+					return nil, fmt.Errorf("%w：无效文件大小", ErrJianguoyunIncomplete)
+				}
+				f.SizeBytes = parsed
+				foundLength = true
 			}
 			if p.Modified != "" {
 				if t, err := time.Parse(time.RFC1123, strings.TrimSpace(p.Modified)); err == nil {
 					f.CreatedTime = t.UTC().Format(time.RFC3339)
 				}
 			}
+		}
+		if cfg.Provider == "jianguoyun" && !foundLength {
+			return nil, fmt.Errorf("%w：缺少文件大小", ErrJianguoyunIncomplete)
 		}
 		files = append(files, f)
 	}
@@ -1118,13 +1236,24 @@ func (s *Service) deleteLegacy(f CloudFile) error {
 		}
 		return os.Remove(filepath.Join(cfg.URL, f.Name))
 
-	case "webdav":
+	case "webdav", "jianguoyun":
 		req, err := http.NewRequest(http.MethodDelete, joinURL(cfg.URL, url.PathEscape(f.Name)), nil)
 		if err != nil {
 			return err
 		}
 		applyCustomHeaders(req, cfg.HeadersJSON)
 		applyBasicAuth(req, cfg.Username, cfg.Password)
+		if cfg.Provider == "jianguoyun" {
+			resp, err := s.jianguoyunDo(req, false)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return jianguoyunStatusError("delete", resp.StatusCode)
+			}
+			return nil
+		}
 		return s.doOK(req)
 
 	case "google_drive":

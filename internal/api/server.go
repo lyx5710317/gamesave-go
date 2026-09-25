@@ -298,13 +298,16 @@ func (s *Server) settingsWire() map[string]any {
 	_ = json.Unmarshal(raw, &out)
 
 	cloud, err := s.Daemon.Store.GetCloudConfig()
-	if err == nil {
+	if err != nil {
+		out["cloudSyncError"] = "protected cloud configuration is unavailable; settings were not changed"
+	} else {
 		out["cloudSync"] = map[string]any{
 			"enabled":             cloud.Enabled,
 			"provider":            cloud.Provider,
 			"url":                 cloud.URL,
 			"username":            cloud.Username,
 			"password":            cloud.Password,
+			"passwordConfigured":  cloud.PasswordConfigured,
 			"headers":             cloud.HeadersJSON,
 			"folderId":            cloud.FolderID,
 			"customClientIds":     cloud.CustomClientIDs,
