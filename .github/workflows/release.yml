@@ -3,6 +3,12 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: "Expected desktop tag (for example v1.1.1); builds an unsigned Windows candidate only"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check desktop release tag against package metadata
         shell: bash
+        env:
+          EXPECTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_version || github.ref_name }}
         run: |
           python3 - <<'PY'
           import json
@@ -21,7 +29,9 @@ jobs:
           import re
           from pathlib import Path
 
-          tag = os.environ['GITHUB_REF_NAME']
+          tag = os.environ['EXPECTED_TAG']
+          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch' and os.environ['GITHUB_REF'].startswith('refs/tags/'):
+              raise SystemExit('Candidate builds must use a branch, not a release tag')
           product = json.loads(Path('cmd/opensave-app/wails.json').read_text(encoding='utf-8'))['info']['productVersion']
           windows = json.loads(Path('cmd/opensave-app/build/windows/info.json').read_text(encoding='utf-8'))
           frontend = json.loads(Path('cmd/opensave-app/frontend/package.json').read_text(encoding='utf-8'))['version']
@@ -81,7 +91,11 @@ jobs:
         working-directory: cmd/opensave-app
         shell: bash
         run: |
-          wails build -nsis -ldflags "-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          LD="-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            LD="-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} $LD"
+          fi
+          wails build -nsis -ldflags "$LD"
       # The tag is the GameSave Go desktop release, not the inherited
       # core/peer protocol version. Keep the latter at internal/version.Version
       # until its cross-device migration is designed. BuildTime still lets
@@ -115,13 +129,10 @@ jobs:
       # Wails 2.12 doesn't reliably embed Windows versioninfo, so stamp it
       # onto the built binaries with rcedit (what electron-builder uses).
       - name: Stamp version metadata (rcedit)
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          # Windows file-versions must be numeric (x.y.z.w) — strip any
-          # semver pre-release suffix ("2.1.0-beta.1" -> "2.1.0.0").
-          FV="${V%%-*}.0"
+          V=$(node -p 'require("./cmd/opensave-app/wails.json").info.productVersion')
+          FV="${V}.0"
           # the npm "rcedit" package is a library with no CLI — fetch the real binary
           curl -sL --retry 3 -o "$RUNNER_TEMP/rcedit.exe" \
             https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe
@@ -142,7 +153,7 @@ jobs:
       # Optional Authenticode signing — runs only when the repo has a
       # WINDOWS_CERT_BASE64 (+ WINDOWS_CERT_PASSWORD) secret configured.
       - name: Code sign (optional)
-        if: env.HAS_SIGNING == 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: env.HAS_SIGNING == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           WIN_CERT_B64: ${{ secrets.WINDOWS_CERT_BASE64 }}
@@ -168,6 +179,7 @@ jobs:
 
   linux:
     needs: [preflight]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -325,6 +337,7 @@ jobs:
           path: OpenSave.flatpak
 
   relay-docker:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -336,7 +349,7 @@ jobs:
     needs: [windows, linux, flatpak]
     # Off by default. Publishing requires an explicit repository-level gate,
     # completed release checklist, and a configured signing identity.
-    if: startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

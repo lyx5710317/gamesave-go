@@ -205,16 +205,40 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	var workflow struct {
+		On struct {
+			WorkflowDispatch struct {
+				Inputs map[string]struct {
+					Required bool   `yaml:"required"`
+					Type     string `yaml:"type"`
+				} `yaml:"inputs"`
+			} `yaml:"workflow_dispatch"`
+		} `yaml:"on"`
 		Jobs map[string]struct {
 			If          string            `yaml:"if"`
 			Permissions map[string]string `yaml:"permissions"`
 			Steps       []struct {
-				Run string `yaml:"run"`
+				Name string            `yaml:"name"`
+				If   string            `yaml:"if"`
+				Env  map[string]string `yaml:"env"`
+				Run  string            `yaml:"run"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		t.Fatal(err)
+	}
+	candidate, ok := workflow.On.WorkflowDispatch.Inputs["candidate_version"]
+	if !ok || !candidate.Required || candidate.Type != "string" {
+		t.Fatal("manual candidate builds must require an expected desktop version")
+	}
+	preflight, ok := workflow.Jobs["preflight"]
+	if !ok {
+		t.Fatal("missing release preflight")
+	}
+	if len(preflight.Steps) < 2 ||
+		!strings.Contains(preflight.Steps[1].Env["EXPECTED_TAG"], "inputs.candidate_version") ||
+		!strings.Contains(preflight.Steps[1].Run, "refs/tags/") {
+		t.Fatal("candidate preflight does not validate the requested version on a branch")
 	}
 	for _, jobName := range []string{"windows", "linux"} {
 		job, ok := workflow.Jobs[jobName]
@@ -236,11 +260,32 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 			t.Errorf("%s release build omits desktop release identity", jobName)
 		}
 	}
+	windows := workflow.Jobs["windows"]
+	var candidateBuild, signingStep string
+	for _, step := range windows.Steps {
+		switch step.Name {
+		case "Build Windows app (NSIS installer + portable exe)":
+			candidateBuild = step.Run
+		case "Code sign (optional)":
+			signingStep = step.If
+		}
+	}
+	if !strings.Contains(candidateBuild, `if [ "$GITHUB_EVENT_NAME" = "push" ]; then`) ||
+		!strings.Contains(candidateBuild, `wails build -nsis -ldflags "$LD"`) ||
+		!strings.Contains(signingStep, "github.event_name == 'push'") {
+		t.Fatal("manual candidate build must remain unsigned and avoid stamping a branch as a release")
+	}
+	if !strings.Contains(workflow.Jobs["linux"].If, "github.event_name == 'push'") ||
+		!strings.Contains(workflow.Jobs["relay-docker"].If, "github.event_name == 'push'") {
+		t.Fatal("manual Windows candidates must not start other release builds")
+	}
 	release, ok := workflow.Jobs["release"]
 	if !ok {
 		t.Fatal("missing release job")
 	}
-	if !strings.Contains(release.If, "GAMESAVE_GO_PUBLIC_RELEASE_READY") || release.Permissions["contents"] != "write" {
+	if !strings.Contains(release.If, "github.event_name == 'push'") ||
+		!strings.Contains(release.If, "GAMESAVE_GO_PUBLIC_RELEASE_READY") ||
+		release.Permissions["contents"] != "write" {
 		t.Fatal("public release is not behind its explicit write-permission gate")
 	}
 	var releaseScripts strings.Builder

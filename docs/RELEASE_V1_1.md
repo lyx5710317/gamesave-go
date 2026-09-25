@@ -35,6 +35,19 @@ review below. Do not set it or create a release tag until all blockers have
 been signed off. The preflight currently accepts only an exact stable tag,
 not a beta suffix. The workflow has not yet been exercised on GitHub runners.
 
+The same workflow also defines a manual Windows **candidate-only** run with a
+required `candidate_version` input, currently `v1.1.1`. It checks the input
+against package metadata, requires a branch ref, builds the NSIS installer and
+portable executable, and stores them as a workflow artifact. It does not stamp
+the branch name as a desktop release identity, sign the binaries, run the
+Linux/Flatpak release jobs, or publish a GitHub Release. The artifact is for
+inspection, not distribution. GitHub requires the manual-trigger definition
+to exist on the default branch before the run can be started; this branch-local
+change alone does not enable the button. After the change is reviewed and
+merged, select the reviewed candidate branch/ref and supply its matching
+version. Record the workflow run URL and artifact hash. None of these runner
+steps are marked passed until actually executed.
+
 Before enabling publication, verify on an isolated clean Windows VM:
 
 1. Build a candidate installer and portable executable; inspect ProductName,
