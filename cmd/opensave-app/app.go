@@ -21,10 +21,11 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// AppVersion mirrors internal/version.Version — the single source of
-// truth for the app version. Keep wails.json's info.productVersion (which
-// drives the Windows executable/installer metadata) in sync with it.
-var AppVersion = version.Version
+// AppVersion is the GameSave Go desktop release shown in the UI and used for
+// releases from this fork. The inherited core/peer build version remains in
+// internal/version until its cross-device update compatibility is migrated.
+// Keep the Wails and Windows executable metadata in sync with this value.
+var AppVersion = "1.1"
 
 // productName is the user-facing name of this fork. Compatibility-sensitive
 // identifiers (package paths, .opensave data, protocol names, and the

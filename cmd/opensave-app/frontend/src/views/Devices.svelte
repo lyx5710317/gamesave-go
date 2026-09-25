@@ -79,7 +79,7 @@
           <div class="peer-meta">
             {peer.address === 'relay' ? $t('devices.internetRelay') : `🖧 ${peer.address}:${peer.port}`}
             · {$t('devices.lastSynced', { time: fmtTime(peer.lastSynced) })}
-            {#if peer.appVersion}· GameSave Go {peer.appVersion}{/if}
+            {#if peer.appVersion}· {$t('devices.syncBuild', { version: peer.appVersion })}{/if}
           </div>
         </div>
         {#if peer.hasNewerBuild && peer.status === 'online'}

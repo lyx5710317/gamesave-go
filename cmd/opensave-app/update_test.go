@@ -4,11 +4,60 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"github.com/opensave/opensave/internal/selfupdate"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/opensave/opensave/internal/selfupdate"
 )
+
+func TestDesktopProductVersion(t *testing.T) {
+	if AppVersion != "1.1" {
+		t.Fatalf("desktop version = %q, want 1.1", AppVersion)
+	}
+	if got := NewApp().AppInfo()["version"]; got != AppVersion {
+		t.Fatalf("About version = %q, want %q", got, AppVersion)
+	}
+	for _, tc := range []struct {
+		path, section, field, want string
+	}{
+		{"wails.json", "info", "productVersion", "1.1.0"},
+		{"build/windows/info.json", "fixed", "file_version", "1.1.0.0"},
+		{"build/windows/info.json", "0000", "ProductVersion", "1.1"},
+	} {
+		data, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		section := metadata[tc.section]
+		if tc.section == "0000" {
+			section = metadata["info"].(map[string]any)["0000"]
+		}
+		value := section.(map[string]any)[tc.field]
+		if value != tc.want {
+			t.Errorf("%s %s = %v, want %s", tc.path, tc.field, value, tc.want)
+		}
+	}
+}
+
+func TestVersionStampUsesDesktopRelease(t *testing.T) {
+	home := t.TempDir()
+	if previous := stampVersionFile(home); previous != "" {
+		t.Fatalf("first run returned previous version %q", previous)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "last-version"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte(AppVersion+"|")) {
+		t.Fatalf("version stamp %q does not use desktop release %q", data, AppVersion)
+	}
+}
 
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {

@@ -399,6 +399,7 @@
       {scanning ? $t('home.scanning') : `🔍 ${$t('home.autoScan')}`}
     </button>
     <button class="btn" on:click={syncAll} disabled={$gameList.length === 0}>⟳ {$t('home.syncAll')}</button>
+    <button class="btn primary" on:click={() => navigate('devices')}>+ {$t('home.addDevice')}</button>
     <button class="btn primary" on:click={() => (showAdd = !showAdd)}>+ {$t('home.trackFolder')}</button>
   </div>
 </div>

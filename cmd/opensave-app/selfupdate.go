@@ -287,7 +287,7 @@ func (a *App) applyUpdate(newExePath string) error {
 // when the build hasn't changed.
 func stampVersionFile(homeDir string) (updatedFrom string) {
 	path := filepath.Join(homeDir, "last-version")
-	stamp := version.Version + "|" + strconv.FormatInt(version.BuildTimeMs(), 10)
+	stamp := AppVersion + "|" + strconv.FormatInt(version.BuildTimeMs(), 10)
 
 	prev := ""
 	if raw, err := os.ReadFile(path); err == nil {
