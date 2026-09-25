@@ -43,6 +43,9 @@
     if (record.status === 'succeeded') return $t('cloud.activity.succeeded');
     if (record.failure === 'configuration') return $t('cloud.activity.configuration');
     if (record.failure === 'conflict') return $t('cloud.activity.conflict');
+    if (record.provider === 'jianguoyun' && ['authentication', 'permission', 'quota', 'rate_limit', 'network', 'incomplete_inventory', 'unsafe_condition', 'integrity'].includes(record.failure)) {
+      return $t(`cloud.activity.jianguoyun.${record.failure}`);
+    }
     return $t('cloud.activity.failed');
   }
 </script>

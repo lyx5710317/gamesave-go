@@ -7,6 +7,8 @@
   import { summarizeLocalPreview, summarizeRemoteInventory } from '../lib/localPreview.js';
   import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
+  import { JIANGUOYUN_BASE_URL, JIANGUOYUN_REMOTE_FOLDER, recommendJianguoyunForUnset, selectCloudProvider } from '../lib/jianguoyun.js';
+  import { isTemporarilyHiddenProvider, visibleCloudProviders } from '../lib/cloudProviderVisibility.js';
 
   // All routed views share the same component contract. This page currently
   // needs no route parameters, but accepting them keeps dynamic navigation
@@ -15,6 +17,7 @@
   $: params;
 
   let config = null;
+  let cloudConfigLoadError = '';
   let localPreview = null;
   let localPreviewBusy = false;
   let localPreviewError = '';
@@ -59,11 +62,13 @@
   onDestroy(unsubUpload);
 
   const providers = [
+    { id: 'jianguoyun', labelKey: 'cloud.providers.jianguoyun', oauth: false, icon: 'cloud', recommended: true },
+    { id: 'baidu', labelKey: 'cloud.providers.baidu', unavailable: true, icon: 'cloud' },
     { id: 'google_drive', labelKey: 'cloud.providers.googleDrive', oauth: true, img: 'cloud/googledrive.png' },
     { id: 'onedrive', labelKey: 'cloud.providers.oneDrive', oauth: true, img: 'cloud/onedrive.png' },
     { id: 'dropbox', labelKey: 'cloud.providers.dropbox', oauth: true, img: 'cloud/dropbox.png' },
     { id: 'local', labelKey: 'cloud.providers.local', oauth: false, icon: 'folder' },
-    { id: 'webdav', labelKey: 'cloud.providers.webdav', oauth: false, icon: 'cloud' },
+    { id: 'webdav', labelKey: 'cloud.providers.webdav', oauth: false, icon: 'cloud', advanced: true },
     { id: 'webhook', labelKey: 'cloud.providers.webhook', oauth: false, icon: 'webhook' }
   ];
 
@@ -87,13 +92,21 @@
   // connectedProvider/config change (a closure over `config` would go stale).
   function providerStatus(id, connected, cfg) {
     if (!cfg) return '';
+    if (id === 'baidu') return $t('cloud.status.baiduPending');
     if (id === connected) {
       const email = cfg.tokens?.userEmail;
       return isEmail(email) ? email : $t('cloud.status.connected');
     }
     if (['google_drive', 'onedrive', 'dropbox'].includes(id)) return $t('cloud.status.clickToSignIn');
-    if (id === cfg.provider && cfg.url) return $t('cloud.status.configured');
+    if (id === cfg.provider && cfg.url && (id !== 'jianguoyun' || cfg.passwordConfigured)) return $t('cloud.status.configured');
     return $t('cloud.status.notConfigured');
+  }
+
+  function chooseProvider(p) {
+    if (p.unavailable) return;
+    config = selectCloudProvider(config, p.id);
+    cloudGames = null;
+    detailId = null;
   }
 
   onMount(load);
@@ -124,11 +137,13 @@
   }
 
   async function load() {
+    cloudConfigLoadError = '';
     try {
       const settings = await api.get('/api/settings');
-      config = settings.cloudSync ?? {
+      if (settings.cloudSyncError) throw new Error($t('cloud.jianguoyun.protectedUnavailable'));
+      config = recommendJianguoyunForUnset(settings.cloudSync ?? {
         enabled: false, provider: 'local', url: '', username: '', password: '', headers: '{}', folderId: ''
-      };
+      });
       // OAuth tokens survive a provider switch (so switching back reconnects
       // instantly) — but only the OAuth provider they belong to is
       // "connected"; never badge local/webdav/webhook off someone's tokens.
@@ -137,6 +152,8 @@
           ? config.provider
           : null;
     } catch (e) {
+      config = null;
+      cloudConfigLoadError = e.message;
       toast(e.message, 'error');
     }
   }
@@ -145,7 +162,24 @@
     busy = true;
     try {
       settings.set(await api.post('/api/settings', { cloudSync: config }));
+      await load(); // never keep an entered application password in the form
       toast($t('cloud.toast.settingsSaved'), 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function disconnectJianguoyun() {
+    if (!(await askConfirm($t('cloud.jianguoyun.disconnectConfirm'), {
+      title: $t('cloud.jianguoyun.disconnect'), confirmText: $t('cloud.jianguoyun.disconnect')
+    }))) return;
+    busy = true;
+    try {
+      await api.post('/api/cloud/jianguoyun/disconnect');
+      await load();
+      toast($t('cloud.toast.disconnected'), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -456,7 +490,7 @@
   const runExport = async () => {
     const chosen = (exportItems ?? []).filter((it) => exportSel[it.id]);
     if (!chosen.length) return;
-    const target = await native.selectSaveFile($t('cloud.export.pickerTitle'), 'opensave-saves.sscb');
+    const target = await native.selectSaveFile($t('cloud.export.pickerTitle'), 'gamesavego-saves.sscb');
     if (!target) return;
     exporting = true;
     try {
@@ -530,16 +564,18 @@
 </div>
 
 {#if !config}
-  <p class="quiet">{$t('cloud.loading')}</p>
+  <p class="quiet" role={cloudConfigLoadError ? 'alert' : undefined}>{cloudConfigLoadError || $t('cloud.loading')}</p>
 {:else}
   <div class="card">
     <div class="provider-label" style="margin-top: 0;">{$t('cloud.selectProvider')}</div>
     <div class="provider-grid">
-      {#each providers as p}
+      {#each visibleCloudProviders(providers) as p}
         <button
           class="provider-card"
           class:active={config.provider === p.id}
-          on:click={() => { config.provider = p.id; cloudGames = null; detailId = null; }}
+          class:unavailable={p.unavailable}
+          disabled={p.unavailable}
+          on:click={() => chooseProvider(p)}
         >
           {#if p.id === connectedProvider}
             <span class="prov-check" title={$t('cloud.status.connected')}>✓</span>
@@ -551,7 +587,7 @@
               <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d={iconPaths[p.icon]} /></svg>
             {/if}
           </div>
-          <div class="provider-name">{$t(p.labelKey)}</div>
+          <div class="provider-name">{$t(p.labelKey)}{#if p.recommended} <span class="badge online">{$t('cloud.jianguoyun.recommended')}</span>{/if}{#if p.advanced} <span class="quiet">{$t('cloud.jianguoyun.advanced')}</span>{/if}</div>
           <div class="provider-status" class:is-connected={p.id === connectedProvider}>
             {providerStatus(p.id, connectedProvider, config)}
           </div>
@@ -559,18 +595,42 @@
       {/each}
     </div>
 
-    {#if config.provider === 'local'}
+    {#if isTemporarilyHiddenProvider(config.provider)}
+      <p class="quiet" role="status">{$t('cloud.hiddenExistingProvider')}</p>
+    {:else if config.provider === 'local'}
       <div class="field">
         <label for="cb-folder">{$t('cloud.fields.destination')}</label>
         <div class="path-row">
-          <input id="cb-folder" bind:value={config.url} placeholder="D:\Backups\OpenSave" />
+          <input id="cb-folder" bind:value={config.url} placeholder="D:\Backups\GameSaveGo" />
           <button class="btn" on:click={pickLocalFolder}>{$t('cloud.fields.browse')}</button>
         </div>
       </div>
+    {:else if config.provider === 'jianguoyun'}
+      <p class="quiet" role="status">{$t('cloud.jianguoyun.backupOnly')}</p>
+      <div class="field">
+        <label for="cb-jianguoyun-url">{$t('cloud.jianguoyun.server')}</label>
+        <input id="cb-jianguoyun-url" value={JIANGUOYUN_BASE_URL} readonly />
+        <p class="quiet">{$t('cloud.jianguoyun.remoteFolder', { folder: JIANGUOYUN_REMOTE_FOLDER })}</p>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label for="cb-jianguoyun-email">{$t('cloud.jianguoyun.email')}</label>
+          <input id="cb-jianguoyun-email" type="email" autocomplete="username" bind:value={config.username} />
+        </div>
+        <div class="field">
+          <label for="cb-jianguoyun-password">{$t('cloud.jianguoyun.appPassword')}</label>
+          <input id="cb-jianguoyun-password" type="password" autocomplete="new-password" bind:value={config.password} placeholder={config.passwordConfigured ? $t('cloud.jianguoyun.keepPassword') : ''} />
+        </div>
+      </div>
+      <p class="quiet">{$t('cloud.jianguoyun.passwordHelp')}</p>
+      <p class="quiet">{$t('cloud.jianguoyun.limits')}</p>
+      {#if config.passwordConfigured}
+        <button class="btn small danger" disabled={busy} on:click={disconnectJianguoyun}>{$t('cloud.jianguoyun.disconnect')}</button>
+      {/if}
     {:else if config.provider === 'webdav'}
       <div class="field">
         <label for="cb-url">{$t('cloud.fields.webdavUrl')}</label>
-        <input id="cb-url" bind:value={config.url} placeholder="https://nas.local/dav/opensave/" />
+        <input id="cb-url" bind:value={config.url} placeholder="https://nas.local/dav/gamesavego/" />
       </div>
       <div class="two">
         <div class="field">
@@ -582,6 +642,8 @@
           <input id="cb-pass" type="password" bind:value={config.password} />
         </div>
       </div>
+    {:else if config.provider === 'baidu'}
+      <p class="quiet" role="status">{$t('cloud.jianguoyun.baiduPending')}</p>
     {:else if config.provider === 'webhook'}
       <div class="field">
         <label for="cb-hook">{$t('cloud.fields.webhookUrl')}</label>
@@ -616,7 +678,11 @@
       {:else}
         {#if connectedProvider}
           <p class="quiet" style="margin-bottom: 10px;">
-            {$t('cloud.oauth.replacing', { provider: $t(providers.find((x) => x.id === connectedProvider)?.labelKey ?? '') })}
+            {#if isTemporarilyHiddenProvider(connectedProvider)}
+              {$t('cloud.hiddenExistingConnection')}
+            {:else}
+              {$t('cloud.oauth.replacing', { provider: $t(providers.find((x) => x.id === connectedProvider)?.labelKey ?? '') })}
+            {/if}
           </p>
         {/if}
         {#if !authInProgress}
@@ -727,7 +793,9 @@
       <span class="quiet" style="margin-right: auto;">
         {$t('cloud.automaticHint', { path: $t('cloud.automaticHintPath') })}
       </span>
-      <button class="btn primary" disabled={busy} on:click={save}>{$t('cloud.saveSettings')}</button>
+      {#if !isTemporarilyHiddenProvider(config.provider)}
+        <button class="btn primary" disabled={busy} on:click={save}>{$t('cloud.saveSettings')}</button>
+      {/if}
     </div>
   </div>
 
@@ -1254,6 +1322,13 @@
   .provider-card:hover {
     border-color: var(--border-strong);
     transform: translateY(-1px);
+  }
+  .provider-card.unavailable {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .provider-card.unavailable:hover {
+    transform: none;
   }
   .provider-card.active {
     border-color: var(--accent);

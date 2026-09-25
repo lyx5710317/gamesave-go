@@ -2,6 +2,7 @@
   import { peers, discoveredPeers, wanRoom, appUpdate, toast, askConfirm } from '../lib/stores.js';
   import { api, native } from '../lib/api.js';
   import InternetSync from './InternetSync.svelte';
+  import { locale, t } from '../lib/i18n.js';
 
   export let params = {};
 
@@ -23,45 +24,45 @@
       await fn();
       if (okMsg) toast(okMsg, 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('devices.operationFailed') : e.message, 'error');
     } finally {
       busy = false;
     }
   }
 
   const pairDiscovered = (d) =>
-    run(() => api.post('/api/peers/pair', { address: d.address, port: d.port }), `Pairing request sent to ${d.deviceName}`);
+    run(() => api.post('/api/peers/pair', { address: d.address, port: d.port }), $t('devices.pairSentTo', { name: d.deviceName }));
   const pairManual = () =>
-    run(() => api.post('/api/peers/pair', { address: manualIp, port: Number(manualPort) }), 'Pairing request sent');
+    run(() => api.post('/api/peers/pair', { address: manualIp, port: Number(manualPort) }), $t('devices.pairSent'));
   const unpair = async (peer) => {
-    if (!(await askConfirm(`Unpair "${peer.name}"? Their games stay on both devices; syncing between you stops.`, { title: 'Unpair device?', confirmText: 'Unpair', danger: true }))) return;
-    run(() => api.del(`/api/peers/${peer.id}`), `Unpaired ${peer.name}`);
+    if (!(await askConfirm($t('devices.unpairConfirm', { name: peer.name }), { title: $t('devices.unpairTitle'), confirmText: $t('devices.unpair'), danger: true }))) return;
+    run(() => api.del(`/api/peers/${peer.id}`), $t('devices.unpaired', { name: peer.name }));
   };
 
   // Peer-to-peer app update: pull the newer build the peer is running and
   // install it here — no manually copying the exe between machines.
   const updateFromPeer = async (peer) => {
     const ok = await askConfirm(
-      `${peer.name} is running a newer GameSave Go build (${peer.appVersion}). Download it from ${peer.name} and update this device? GameSave Go restarts itself when done.`,
-      { title: 'Update GameSave Go?', confirmText: 'Update & restart' }
+      $t('devices.updateConfirm', { name: peer.name, version: peer.appVersion }),
+      { title: $t('devices.updateTitle'), confirmText: $t('devices.updateAction') }
     );
     if (!ok) return;
     const err = await native.installFromPeer(peer.id);
-    if (err) toast(err, 'error');
+    if (err) toast($locale === 'zh-CN' ? $t('devices.operationFailed') : err, 'error');
   };
 
-  const fmtTime = (t) => (t ? new Date(t).toLocaleString() : 'never');
+  const fmtTime = (time) => (time ? new Date(time).toLocaleString($locale) : $t('devices.never'));
 </script>
 
 <div class="head">
-  <h2 class="page-title">Devices</h2>
+  <h2 class="page-title">{$t('devices.title')}</h2>
 </div>
 
-<h3 class="section">Paired devices</h3>
+<h3 class="section">{$t('devices.pairedSection')}</h3>
 {#if pairedList.length === 0}
   <div class="empty">
-    <h3>No paired devices</h3>
-    <p>Pair a device below — on your Wi-Fi it appears automatically, or connect over the internet with a room code.</p>
+    <h3>{$t('devices.emptyTitle')}</h3>
+    <p>{$t('devices.emptyHint')}</p>
   </div>
 {:else}
   <div class="list">
@@ -72,42 +73,42 @@
           <div class="peer-name">
             {peer.name}
             <span class="badge" class:online={peer.status === 'online'} class:offline={peer.status !== 'online'}>
-              {peer.status}
+              {$t(peer.status === 'online' ? 'devices.online' : 'devices.offline')}
             </span>
           </div>
           <div class="peer-meta">
-            {peer.address === 'relay' ? '🌐 internet relay' : `🖧 ${peer.address}:${peer.port}`}
-            · last synced {fmtTime(peer.lastSynced)}
+            {peer.address === 'relay' ? $t('devices.internetRelay') : `🖧 ${peer.address}:${peer.port}`}
+            · {$t('devices.lastSynced', { time: fmtTime(peer.lastSynced) })}
             {#if peer.appVersion}· GameSave Go {peer.appVersion}{/if}
           </div>
         </div>
         {#if peer.hasNewerBuild && peer.status === 'online'}
           <button class="btn small primary" disabled={busy || !!$appUpdate} on:click={() => updateFromPeer(peer)}>
-            ⬆ Update from this device
+            ⬆ {$t('devices.updateFromPeer')}
           </button>
         {/if}
-        <button class="btn small danger" disabled={busy} on:click={() => unpair(peer)}>Unpair</button>
+        <button class="btn small danger" disabled={busy} on:click={() => unpair(peer)}>{$t('devices.unpair')}</button>
       </div>
     {/each}
   </div>
 {/if}
 
-<h3 class="section">Add a device</h3>
+<h3 class="section">{$t('devices.addSection')}</h3>
 <div class="pill-tabs connect-tabs">
-  <button class:active={connectTab === 'lan'} on:click={() => (connectTab = 'lan')}>🖧 On this network</button>
+  <button class:active={connectTab === 'lan'} on:click={() => (connectTab = 'lan')}>🖧 {$t('devices.localTab')}</button>
   <button class:active={connectTab === 'wan'} on:click={() => (connectTab = 'wan')}>
-    🌐 Over the internet
+    🌐 {$t('devices.internetTab')}
     {#if $wanRoom?.connected}<span class="tab-dot"></span>{/if}
   </button>
 </div>
 
 {#if connectTab === 'lan'}
   <p class="quiet lan-intro">
-    Devices running GameSave Go on the same Wi-Fi/Ethernet discover each other automatically. No setup needed.
+    {$t('devices.lanHint')}
   </p>
-  <h4 class="subsection">Found on your network</h4>
+  <h4 class="subsection">{$t('devices.foundSection')}</h4>
   {#if lanDiscovered.length === 0}
-    <p class="quiet">No unpaired devices found on the local network. Make sure GameSave Go is running on the other device.</p>
+    <p class="quiet">{$t('devices.noneFound')}</p>
   {:else}
     <div class="list">
       {#each lanDiscovered as d (d.id)}
@@ -117,17 +118,17 @@
             <div class="peer-name">{d.deviceName}</div>
             <div class="peer-meta">{d.address}:{d.port}</div>
           </div>
-          <button class="btn small primary" disabled={busy} on:click={() => pairDiscovered(d)}>Pair</button>
+          <button class="btn small primary" disabled={busy} on:click={() => pairDiscovered(d)}>{$t('devices.pair')}</button>
         </div>
       {/each}
     </div>
   {/if}
 
-  <h4 class="subsection">Add by IP address</h4>
+  <h4 class="subsection">{$t('devices.addByIp')}</h4>
   <div class="card manual">
     <input placeholder="192.168.1.42" bind:value={manualIp} />
     <input class="port" type="number" bind:value={manualPort} />
-    <button class="btn primary" disabled={!manualIp || busy} on:click={pairManual}>Send pairing request</button>
+    <button class="btn primary" disabled={!manualIp || busy} on:click={pairManual}>{$t('devices.sendPair')}</button>
   </div>
 {:else}
   <InternetSync />

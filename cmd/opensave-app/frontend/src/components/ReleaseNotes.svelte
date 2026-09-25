@@ -4,6 +4,7 @@
   // and "**" markers. Parsing happens in Go; this only lays it out.
   export let releases = [];
   export let compact = false;
+  import { t } from '../lib/i18n.js';
 
   // Inline code is the one marker left in the text by the parser, because it
   // wants styling rather than removing. Split on backtick pairs so it can be
@@ -72,7 +73,7 @@
       {/each}
     </section>
   {:else}
-    <p class="empty">No release notes available.</p>
+    <p class="empty">{$t('changelog.empty')}</p>
   {/each}
 </div>
 
@@ -149,8 +150,7 @@
     background: rgba(224, 192, 126, 0.1);
     border-color: rgba(224, 192, 126, 0.25);
   }
-  /* Discord's blurple — the one section heading that is an invitation
-     rather than a category of change. */
+  /* Community entries in historical release notes keep their own tint. */
   .kind.community {
     color: #b9bbfa;
     background: rgba(88, 101, 242, 0.16);

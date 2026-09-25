@@ -2,6 +2,7 @@
   import { native } from '../lib/api.js';
   import { PRODUCT_NAME } from '../lib/branding.js';
   import logoUrl from '../assets/logo.png';
+  import { t } from '../lib/i18n.js';
 </script>
 
 <div class="titlebar" role="banner" style="--wails-draggable: drag" on:dblclick={() => native.toggleMaximise()}>
@@ -10,13 +11,13 @@
     <span class="title">{PRODUCT_NAME}</span>
   </div>
   <div class="controls" style="--wails-draggable: no-drag">
-    <button on:click={() => native.minimise()} title="Minimise" aria-label="Minimise">
+    <button on:click={() => native.minimise()} title={$t('titlebar.minimise')} aria-label={$t('titlebar.minimise')}>
       <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
-    <button on:click={() => native.toggleMaximise()} title="Maximise" aria-label="Maximise">
+    <button on:click={() => native.toggleMaximise()} title={$t('titlebar.maximise')} aria-label={$t('titlebar.maximise')}>
       <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
-    <button class="close" on:click={() => native.close()} title="Close" aria-label="Close">
+    <button class="close" on:click={() => native.close()} title={$t('common.close')} aria-label={$t('common.close')}>
       <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
   </div>

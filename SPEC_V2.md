@@ -40,12 +40,17 @@ Prefer changing an existing implementation, then extending it, and only then int
 
 Provider priority is:
 
-1. Mainland China primary: Baidu Netdisk.
-2. Mainland China candidate: Quark Netdisk, only after official native-client access is confirmed.
-3. Advanced: WebDAV.
-4. International: Google Drive, with existing Dropbox, OneDrive, local-folder, and webhook support retained.
+1. Near-term mainland-China recommendation: Jianguoyun through its officially documented WebDAV endpoint and a dedicated `GameSaveGo/` directory. This is a hardened WebDAV preset, not a separate snapshot or sync engine. Its current scope is conservative backup, not verified multi-device cloud sync; see [`docs/JIANGUOYUN_PROVIDER.md`](docs/JIANGUOYUN_PROVIDER.md).
+2. Later mainland-China large-capacity strategy: Baidu Netdisk, gated on public-app approval, approved API scope, and security review. Its design and provider seam remain intact.
+3. Advanced: other user-supplied WebDAV destinations.
+4. Mainland-China candidate: Quark Netdisk, only after official third-party native-client access is confirmed.
+5. International: Google Drive, with existing Dropbox, OneDrive, local-folder, and webhook support retained.
+
+For the current desktop release, show Jianguoyun, Google Drive, local folder, other WebDAV, and webhook as selectable setup entries. Temporarily hide Baidu, OneDrive, and Dropbox from new setup without deleting their providers, saved configurations, credentials, or roadmap. An existing hidden-provider selection must remain intact and be reported honestly rather than silently converted to another provider.
 
 Each provider must be isolated behind a stable internal boundary, use bounded retries and rate-limit handling, and expose failures without weakening snapshot safety. No provider may require game-save bytes to transit a GameSave Cloud service.
+
+Jianguoyun's official documentation gives a default 500 MB WebDAV single-file limit, free-account 600 requests per 30 minutes (paid: 1,500), and at most 750 entries per directory request with pagination. The public help page does not specify a pagination request/response contract or atomic conditional-write guarantees. Until these are established by official clarification and repeatable real-account tests, a full/ambiguous directory listing must fail closed, and `vault.json` conditional multi-device writes remain disabled. Snapshot create-only checks and vault metadata CAS are distinct capabilities. A successful local backup or remote ZIP inventory is not evidence of safe remote ancestry or a joined device.
 
 ## Identity model
 
@@ -83,6 +88,8 @@ Synchronization must be resumable, observable, and conservative. A newly joined 
 ## Settings and persistence
 
 SQLite remains the backend store, with versioned migrations required for every schema change. The initial language preference is deliberately stored under `opensave.locale` in frontend `localStorage`: it is UI-only, device-local, available before the daemon API finishes booting, and does not justify a database migration. English is the fallback; Simplified Chinese is selected from compatible system locales when no preference exists.
+
+The desktop UI should present its settings, game-management, cloud-backup, device, and conflict-decision text in the selected language. GameSave Go is the user-facing product name; technical paths, protocol names, legacy command names, and required upstream copyright attribution remain unchanged. The separate inherited `docs/*.html` marketing site is not a localized GameSave Go release site until its content and links receive a dedicated review.
 
 ## Security and data ownership
 

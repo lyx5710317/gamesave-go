@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { initApi, connectWS, native } from './lib/api.js';
   import { applyMessage, wsConnected, view, appUpdate, toast, showAbout } from './lib/stores.js';
-  import { t } from './lib/i18n.js';
+  import { locale, t } from './lib/i18n.js';
   import { PRODUCT_NAME } from './lib/branding.js';
 
   import logoUrl from './assets/logo.png';
@@ -111,34 +111,34 @@
     <div class="update-banner installing">
       <span>
         {#if $appUpdate.state === 'downloading'}
-          ⬇️ Updating {PRODUCT_NAME} — downloading {$appUpdate.percentage ?? 0}%…
+          ⬇️ {$t('app.updateDownloading', { app: PRODUCT_NAME, percentage: $appUpdate.percentage ?? 0 })}
         {:else if $appUpdate.state === 'installing'}
-          🔧 Installing update…
+          🔧 {$t('app.updateInstalling')}
         {:else}
-          🔄 Restarting with the new version…
+          🔄 {$t('app.updateRestarting')}
         {/if}
-        <em>The app restarts itself when done — your games keep syncing.</em>
+        <em>{$t('app.updateRestartHint')}</em>
       </span>
     </div>
   {:else if update}
     <div class="update-banner">
-      <span>🎉 {PRODUCT_NAME} {update.latest} is available — you're on {update.current}.</span>
+      <span>🎉 {$t('app.updateAvailable', { app: PRODUCT_NAME, latest: update.latest, current: update.current })}</span>
       <div class="update-actions">
         {#if update.notes}
           <button class="dismiss" on:click={() => (showNotes = !showNotes)}>
-            {showNotes ? 'Hide notes' : "What's new"}
+            {showNotes ? $t('app.hideNotes') : $t('app.whatsNew')}
           </button>
         {/if}
         {#if update.assetUrl}
           <button class="link" disabled={installStarted} on:click={installRelease}>
-            {installStarted ? $t('app.updateStarting') : 'Install & restart'}
+            {installStarted ? $t('app.updateStarting') : $t('app.installRestart')}
           </button>
         {:else if update.flatpak}
-          <button class="link" on:click={() => native.openExternal(update.url)}>Get .flatpak</button>
+          <button class="link" on:click={() => native.openExternal(update.url)}>{$t('app.getFlatpak')}</button>
         {:else}
-          <button class="link" on:click={() => native.openExternal(update.url)}>Download</button>
+          <button class="link" on:click={() => native.openExternal(update.url)}>{$t('app.download')}</button>
         {/if}
-        <button class="dismiss" on:click={() => (update = null)} aria-label="Dismiss">✕</button>
+        <button class="dismiss" on:click={() => (update = null)} aria-label={$t('app.dismiss')}>✕</button>
       </div>
     </div>
     {#if showNotes && update.notes}
@@ -146,10 +146,10 @@
     {/if}
   {:else if updatedTo}
     <div class="update-banner">
-      <span>🎉 {PRODUCT_NAME} was updated to v{updatedTo}.</span>
+      <span>🎉 {$t('app.updatedTo', { app: PRODUCT_NAME, version: updatedTo })}</span>
       <div class="update-actions">
-        <button class="link" on:click={openWhatsNew}>What's new</button>
-        <button class="dismiss" on:click={() => (updatedTo = '')} aria-label="Dismiss">✕</button>
+        <button class="link" on:click={openWhatsNew}>{$t('app.whatsNew')}</button>
+        <button class="dismiss" on:click={() => (updatedTo = '')} aria-label={$t('app.dismiss')}>✕</button>
       </div>
     </div>
   {/if}
@@ -166,12 +166,12 @@
       <div class="boot-error">
         <img class="boot-logo" src={logoUrl} alt={PRODUCT_NAME} />
         <h2>{$t('app.failedToStart', { app: PRODUCT_NAME })}</h2>
-        <p>{bootError}</p>
+        <p>{$locale === 'zh-CN' ? $t('app.bootError') : bootError}</p>
         <button class="btn primary" disabled={retrying} on:click={boot}>
           {retrying ? $t('app.retrying') : $t('app.retry')}
         </button>
         <p class="boot-hint">
-          Details are saved to <code>.opensave\opensave.log</code> in your user folder.
+          {$t('app.bootLogHint')} <code>.opensave\opensave.log</code>
         </p>
       </div>
     {:else if ready}

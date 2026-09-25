@@ -3,6 +3,7 @@
   import { pairingRequests, toast } from '../lib/stores.js';
   import { api } from '../lib/api.js';
   import { demandAttention } from '../lib/notify.js';
+  import { locale, t } from '../lib/i18n.js';
 
   let busy = false;
   let seen = new Set(); // request ids we've already chimed for
@@ -14,13 +15,13 @@
     const fresh = list.filter((r) => !seen.has(r.peerId));
     if (fresh.length > 0) {
       demandAttention();
-      const who = fresh[0].deviceName ?? 'A device';
-      toast(`${who} wants to pair`, 'info');
+      const who = fresh[0].deviceName ?? $t('pairing.unknownDevice');
+      toast($t('pairing.request', { name: who }), 'info');
     }
     seen = new Set(list.map((r) => r.peerId));
   }
 
-  const approve = (req) => act('/api/peers/approve', req, `Paired with ${req.deviceName}`);
+  const approve = (req) => act('/api/peers/approve', req, $t('pairing.paired', { name: req.deviceName }));
   const reject = (req) => act('/api/peers/reject', req, null);
 
   async function act(path, req, okMsg) {
@@ -30,13 +31,13 @@
       await api.post(path, { peerId: req.peerId });
       if (okMsg) toast(okMsg, 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('pairing.failed') : e.message, 'error');
     } finally {
       busy = false;
     }
   }
 
-  const source = (req) => (req.isWan ? '🌐 over the internet' : `🖧 ${req.address}`);
+  const source = (req) => (req.isWan ? $t('pairing.internet') : `🖧 ${req.address}`);
 </script>
 
 {#if $pairingRequests.length > 0}
@@ -45,12 +46,12 @@
       <div class="pair-card" transition:fly={{ y: -20, duration: 200 }}>
         <div class="pair-icon">🔗</div>
         <div class="pair-body">
-          <div class="pair-title"><strong>{req.deviceName ?? 'A device'}</strong> wants to pair</div>
-          <div class="pair-sub">{source(req)} · approve to start syncing your saves</div>
+          <div class="pair-title">{$t('pairing.request', { name: req.deviceName ?? $t('pairing.unknownDevice') })}</div>
+          <div class="pair-sub">{source(req)} · {$t('pairing.approveHint')}</div>
         </div>
         <div class="pair-actions">
-          <button class="btn small" disabled={busy} on:click={() => reject(req)}>Ignore</button>
-          <button class="btn small primary" disabled={busy} on:click={() => approve(req)}>Approve</button>
+          <button class="btn small" disabled={busy} on:click={() => reject(req)}>{$t('pairing.ignore')}</button>
+          <button class="btn small primary" disabled={busy} on:click={() => approve(req)}>{$t('pairing.approve')}</button>
         </div>
       </div>
     {/each}

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { native } from '../lib/api.js';
   import ReleaseNotes from '../components/ReleaseNotes.svelte';
-  import DiscordBanner from '../components/DiscordBanner.svelte';
+  import { t } from '../lib/i18n.js';
 
   export let params = {};
   $: params;
@@ -26,21 +26,19 @@
 <div class="page">
   <header class="head">
     <div>
-      <h1>Changelog</h1>
-      <p class="sub">Everything that's changed, newest first.</p>
+      <h1>{$t('changelog.title')}</h1>
+      <p class="sub">{$t('changelog.subtitle')}</p>
     </div>
     {#if current}
-      <div class="running" title="The version you're running">
-        <span>Running</span>
+      <div class="running" title={$t('changelog.runningTitle')}>
+        <span>{$t('changelog.running')}</span>
         {current}
       </div>
     {/if}
   </header>
 
-  <div class="banner-slot"><DiscordBanner /></div>
-
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{$t('changelog.loading')}</p>
   {:else}
     <ReleaseNotes {releases} />
   {/if}
@@ -87,9 +85,6 @@
     letter-spacing: 0.07em;
     color: var(--text-faint);
     margin-bottom: 1px;
-  }
-  .banner-slot {
-    margin-bottom: 26px;
   }
   .muted {
     color: var(--text-faint);

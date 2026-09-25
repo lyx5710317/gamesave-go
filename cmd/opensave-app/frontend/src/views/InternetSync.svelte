@@ -2,6 +2,7 @@
   import { settings, wanRoom, peers, toast } from '../lib/stores.js';
   import { api } from '../lib/api.js';
   import { generateRoomCode } from '../lib/roomcode.js';
+  import { locale, t } from '../lib/i18n.js';
 
   let codeDraft = '';
   let relayDraft = '';
@@ -44,7 +45,7 @@
       await fn();
       if (okMsg) toast(okMsg, 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('internet.operationFailed') : e.message, 'error');
     } finally {
       busy = false;
     }
@@ -58,9 +59,9 @@
       if (!code) {
         if ($wanRoom?.enabled) {
           await saveSettings({ syncCode: '', relayUrl: relayDraft.trim() });
-          toast('Left the relay room', 'success');
+          toast($t('internet.leftRoom'), 'success');
         } else {
-          toast('Enter a room code first', 'error');
+          toast($t('internet.enterCode'), 'error');
         }
         return;
       }
@@ -68,39 +69,38 @@
       await saveSettings({ syncCode: code, relayUrl: relayDraft.trim() });
       // Saving identical settings doesn't re-dial, so force a fresh attempt.
       if (rejoining) await api.post('/api/relay/reconnect');
-      toast(rejoining ? `Reconnecting to room “${code}”…` : `Joining room “${code}”…`);
+      toast(rejoining ? $t('internet.reconnectingRoom', { code }) : $t('internet.joiningRoom', { code }));
     });
 
   const retryConnect = () =>
     run(async () => {
       await api.post('/api/relay/reconnect');
-      toast('Reconnecting to relay…');
+      toast($t('internet.reconnecting'));
     });
   const leaveRoom = () => {
     codeDraft = '';
-    return run(() => saveSettings({ syncCode: '' }), 'Left the relay room');
+    return run(() => saveSettings({ syncCode: '' }), $t('internet.leftRoom'));
   };
   const pairWan = (p) =>
-    run(() => api.post('/api/peers/pair', { peerId: p.id, address: 'relay' }), `Pairing request sent to ${p.deviceName}`);
+    run(() => api.post('/api/peers/pair', { peerId: p.id, address: 'relay' }), $t('devices.pairSentTo', { name: p.deviceName }));
 
   async function checkHealth() {
     health = null;
     try {
       health = await api.get('/api/relay/health');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('internet.operationFailed') : e.message, 'error');
     }
   }
 
   function copyCode() {
     navigator.clipboard?.writeText($wanRoom?.roomCode ?? codeDraft);
-    toast('Room code copied');
+    toast($t('internet.codeCopied'));
   }
 </script>
 
 <p class="lead">
-  Sync across the internet with no port forwarding: both devices join the same room code on a relay,
-  and the connection to it is encrypted. The relay stores nothing — no copy of a save is written to it.
+  {$t('internet.intro')}
 </p>
 
 <!-- Said here, at the point where somebody decides whether to use the public
@@ -113,10 +113,7 @@
      save, which is the opposite of the case. Whoever runs the relay is being
      trusted, and the person choosing is the one who should get to weigh it. -->
 <p class="lead subtle">
-  That encryption ends at the relay rather than at your other device, so whoever runs the relay could
-  read the saves passing through it. For the public relay, that is us. Running
-  <a href="https://github.com/Liquid-co/OpenSave/blob/main/docs/RELAY.md" target="_blank" rel="noreferrer">your own relay</a>
-  makes it you instead.
+  {$t('internet.trustWarning')}
 </p>
 
 <!-- Always-visible connection status: exactly one of four states. Keyed
@@ -126,93 +123,91 @@
   <div class="status idle">
     <span class="status-dot gray"></span>
     <div class="status-text">
-      <strong>Not in a room</strong>
-      <span>Enter a room code below and press <strong>Join room</strong> to start syncing over the internet.</span>
+      <strong>{$t('internet.notInRoom')}</strong>
+      <span>{$t('internet.notInRoomHint')}</span>
     </div>
   </div>
 {:else if $wanRoom?.connected}
   <div class="status ok">
     <span class="status-dot green"></span>
     <div class="status-text">
-      <strong>In room “{$wanRoom.roomCode}”</strong>
-      <span>{roomPeers.length === 0 ? 'Waiting for your other device to join with the same code.' : `${roomPeers.length} other device${roomPeers.length === 1 ? '' : 's'} here.`}</span>
+      <strong>{$t('internet.inRoom', { code: $wanRoom.roomCode })}</strong>
+      <span>{roomPeers.length === 0 ? $t('internet.waitingForPeer') : $t('internet.peerCount', { count: roomPeers.length })}</span>
     </div>
   </div>
 {:else if $wanRoom?.state === 'connecting'}
   <div class="status wait">
     <span class="sspin"></span>
     <div class="status-text">
-      <strong>Connecting to relay…</strong>
-      <span>Free-hosted relays can take up to a minute to wake from sleep — hang tight, we retry automatically.</span>
+      <strong>{$t('internet.connecting')}</strong>
+      <span>{$t('internet.connectingHint')}</span>
     </div>
   </div>
 {:else}
   <div class="status err">
     <span class="status-dot red"></span>
     <div class="status-text">
-      <strong>Not connected</strong>
-      <span>{$wanRoom?.error ?? 'The relay connection is down.'} Retrying automatically every few seconds.</span>
+      <strong>{$t('internet.disconnected')}</strong>
+      <span>{$t('internet.disconnectedHint')}</span>
     </div>
-    <button class="btn small" disabled={busy} on:click={retryConnect}>Retry now</button>
+    <button class="btn small" disabled={busy} on:click={retryConnect}>{$t('internet.retry')}</button>
   </div>
 {/if}
 
 <div class="card">
-  <h3>Relay room</h3>
+  <h3>{$t('internet.roomSection')}</h3>
   <div class="row">
     <div class="field grow">
-      <label for="room-code">Room code — share this with your other device</label>
+      <label for="room-code">{$t('internet.roomCode')}</label>
       <div class="code-row">
         <input id="room-code" placeholder="e.g. k7m2-9xqp-4wnt" bind:value={codeDraft} />
         <button class="btn" on:click={randomCode}>🎲</button>
         {#if $wanRoom?.enabled}
-          <button class="btn" on:click={copyCode}>Copy</button>
+          <button class="btn" on:click={copyCode}>{$t('internet.copy')}</button>
         {/if}
       </div>
     </div>
   </div>
   <div class="row">
     <div class="field grow">
-      <label for="relay-url">Relay server (self-hostable)</label>
+      <label for="relay-url">{$t('internet.server')}</label>
       <!-- Pinned by the environment: shown, because it is the relay actually
            in use, but not editable, because typing here would be discarded. -->
       <input id="relay-url" bind:value={relayDraft} readonly={$settings?.relayUrlLocked} />
       {#if $settings?.relayUrlLocked}
         <span class="hint">
-          Set by the <code>OPENSAVE_RELAY_URL</code> environment variable, so it can't be changed
-          here. Change the variable and restart GameSave Go, or unset it to go back to the saved
-          setting.
+          {$t('internet.lockedBefore')} <code>OPENSAVE_RELAY_URL</code> {$t('internet.lockedAfter')}
         </span>
       {:else}
-        <span class="hint">Run your own with the opensave-relay binary and point this at it.</span>
+        <span class="hint">{$t('internet.selfHostHint')}</span>
       {/if}
     </div>
   </div>
   <div class="actions">
-    <button class="btn" on:click={checkHealth}>Test relay</button>
+    <button class="btn" on:click={checkHealth}>{$t('internet.testRelay')}</button>
     {#if $wanRoom?.enabled}
-      <button class="btn danger" disabled={busy} on:click={leaveRoom}>Leave room</button>
+      <button class="btn danger" disabled={busy} on:click={leaveRoom}>{$t('internet.leaveRoom')}</button>
     {/if}
     <button class="btn primary" disabled={busy} on:click={joinRoom}>
-      {$wanRoom?.enabled ? 'Update' : 'Join room'}
+      {$wanRoom?.enabled ? $t('internet.update') : $t('internet.joinRoom')}
     </button>
   </div>
   {#if health}
     <div class="health" class:ok={health.reachable}>
       {#if health.reachable}
-        ✓ Relay reachable — {health.health?.clients ?? 0} client(s) in {health.health?.rooms ?? 0} room(s)
+        ✓ {$t('internet.reachable', { clients: health.health?.clients ?? 0, rooms: health.health?.rooms ?? 0 })}
       {:else}
-        ✕ Relay unreachable: {health.error}
+        ✕ {$t('internet.unreachable')}
       {/if}
     </div>
   {/if}
 </div>
 
 {#if $wanRoom?.enabled}
-  <h3 class="section">In this room</h3>
+  <h3 class="section">{$t('internet.inThisRoom')}</h3>
   {#if roomPeers.length === 0}
     <p class="quiet">
-      No other devices in the room yet. Enter the same code on your other device and it will appear here.
+      {$t('internet.noPeers')}
     </p>
   {:else}
     <div class="list">
@@ -222,13 +217,13 @@
           <div class="peer-info">
             <div class="peer-name">
               {p.deviceName}
-              <span class="badge" class:online={p.online} class:offline={!p.online}>{p.online ? 'online' : 'away'}</span>
+              <span class="badge" class:online={p.online} class:offline={!p.online}>{p.online ? $t('devices.online') : $t('internet.away')}</span>
             </div>
           </div>
           {#if p.paired || pairedIds.has(p.id)}
-            <span class="badge online">paired</span>
+            <span class="badge online">{$t('internet.paired')}</span>
           {:else}
-            <button class="btn small primary" disabled={busy} on:click={() => pairWan(p)}>Pair</button>
+            <button class="btn small primary" disabled={busy} on:click={() => pairWan(p)}>{$t('devices.pair')}</button>
           {/if}
         </div>
       {/each}
@@ -250,10 +245,6 @@
     color: var(--text-faint);
     font-size: 0.85rem;
     margin-top: -12px;
-  }
-  .lead.subtle a {
-    color: var(--text-dim);
-    text-decoration: underline;
   }
   .status {
     display: flex;

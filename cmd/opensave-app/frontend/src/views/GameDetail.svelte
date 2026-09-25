@@ -4,7 +4,7 @@
   import { addExclusion, addNegation, removeDirectExclusion } from '../lib/ignorerules.js';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
   import { peerRequiringSavePath } from '../lib/syncOutcome.js';
-  import { t } from '../lib/i18n.js';
+  import { t, locale } from '../lib/i18n.js';
 
   export let params = {};
 
@@ -86,7 +86,7 @@
       filesTruncated = !!res?.truncated;
       filesError = '';
     } catch (e) {
-      filesError = e.message;
+      filesError = $locale === 'zh-CN' ? $t('game.filesError') : e.message;
     }
   }
 
@@ -138,7 +138,7 @@
     .flatMap((b) => (b.snapshots ?? []).map((s) => ({ ...s, branch: b.name })))
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
 
-  const fmtTime = (t) => (t ? new Date(t).toLocaleString() : '—');
+  const fmtTime = (time, language) => (time ? new Date(time).toLocaleString(language) : '—');
   const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1024).toFixed(1) + ' KB');
 
   async function run(label, fn) {
@@ -148,25 +148,25 @@
       await fn();
       if (label) toast(label, 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' && !/\p{Script=Han}/u.test(e.message) ? $t('game.operationFailed') : e.message, 'error');
     } finally {
       busy = false;
     }
   }
 
-  const syncNow = () => run('Sync triggered', async () => {
+  const syncNow = () => run($t('game.syncTriggered'), async () => {
     const response = await api.post(`/api/games/${game.id}/sync`);
     const peer = peerRequiringSavePath(response);
     if (peer) throw new Error($t('game.sync.pathMappingRequired', { peer }));
   });
   const takeSnapshot = () =>
-    run('Snapshot created', async () => {
+    run($t('game.snapshotCreated'), async () => {
       await api.post(`/api/games/${game.id}/snapshot`, { comment: snapshotComment });
       snapshotComment = '';
     });
   const rollback = async (snap) => {
-    if (!(await askConfirm(`Restore snapshot ${snap.id} over your current save? Your current state is snapshotted first, so this is reversible.`, { title: 'Restore snapshot?', confirmText: 'Restore' }))) return;
-    return run(`Restored ${snap.id}`, () => api.post(`/api/games/${game.id}/rollback`, { snapshotId: snap.id }));
+    if (!(await askConfirm($t('game.restoreConfirm', { id: snap.id }), { title: $t('game.restoreTitle'), confirmText: $t('game.restore') }))) return;
+    return run($t('game.restored', { id: snap.id }), () => api.post(`/api/games/${game.id}/rollback`, { snapshotId: snap.id }));
   };
   // Creating a branch asks what it starts from in its own dialog rather than
   // a checkbox beside the name field. The two answers do materially
@@ -183,7 +183,7 @@
   }
   const createBranch = () => {
     branchDialog = false;
-    return run(branchCopySave ? 'Branch created from your current save' : 'Empty branch created', async () => {
+    return run($t(branchCopySave ? 'game.branchCopied' : 'game.branchEmptyCreated'), async () => {
       await api.post(`/api/games/${game.id}/branch`, {
         name: newBranch,
         copyCurrentSave: branchCopySave,
@@ -192,14 +192,14 @@
     });
   };
   const switchBranch = (name) =>
-    run(`Switched to "${name}"`, () => api.post(`/api/games/${game.id}/branch/switch`, { name }));
+    run($t('game.branchSwitched', { name }), () => api.post(`/api/games/${game.id}/branch/switch`, { name }));
   async function deleteBranch(name) {
-    if (!(await askConfirm(`Delete branch "${name}" and all its snapshots? Your current save and other branches aren't affected.`, { title: 'Delete branch?', confirmText: 'Delete', danger: true }))) return;
-    run(`Deleted branch "${name}"`, () => api.del(`/api/games/${game.id}/branch/${encodeURIComponent(name)}`));
+    if (!(await askConfirm($t('game.deleteBranchConfirm', { name }), { title: $t('game.deleteBranchTitle'), confirmText: $t('game.delete'), danger: true }))) return;
+    run($t('game.branchDeleted', { name }), () => api.del(`/api/games/${game.id}/branch/${encodeURIComponent(name)}`));
   }
   async function deleteSnapshot(snap) {
-    if (!(await askConfirm(`Delete snapshot ${snap.id}? This can't be undone; your current save isn't affected.`, { title: 'Delete snapshot?', confirmText: 'Delete', danger: true }))) return;
-    run('Snapshot deleted', () => api.del(`/api/games/${game.id}/snapshot/${snap.id}`));
+    if (!(await askConfirm($t('game.deleteSnapshotConfirm', { id: snap.id }), { title: $t('game.deleteSnapshotTitle'), confirmText: $t('game.delete'), danger: true }))) return;
+    run($t('game.snapshotDeleted'), () => api.del(`/api/games/${game.id}/snapshot/${snap.id}`));
   }
 
   async function browseSnapshot(snap) {
@@ -207,22 +207,22 @@
       const files = await api.get(`/api/games/${game.id}/snapshot/${snap.id}/files`);
       browsing = { snapshotId: snap.id, files };
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('game.operationFailed') : e.message, 'error');
     }
   }
 
   const restoreFile = async (relPath) => {
-    if (!(await askConfirm(`Restore "${relPath}" from ${browsing.snapshotId} over the current file?`, { title: 'Restore file?', confirmText: 'Restore' }))) return;
-    return run(`Restored ${relPath}`, () =>
+    if (!(await askConfirm($t('game.restoreFileConfirm', { path: relPath, id: browsing.snapshotId }), { title: $t('game.restoreFileTitle'), confirmText: $t('game.restore') }))) return;
+    return run($t('game.fileRestored', { path: relPath }), () =>
       api.post(`/api/games/${game.id}/snapshot/${browsing.snapshotId}/restore-file`, { relPath })
     );
   };
 
   async function untrack() {
-    if (!(await askConfirm(`Stop tracking "${game.name}"? Snapshot files stay on disk.`, { title: 'Stop tracking?', confirmText: 'Stop tracking', danger: true }))) return;
+    if (!(await askConfirm($t('game.untrackConfirm', { name: game.name }), { title: $t('game.untrackTitle'), confirmText: $t('game.untrack'), danger: true }))) return;
     const gameId = game.id;
     const gameName = game.name;
-    await run('Stopped tracking', () => api.del(`/api/games/${gameId}`));
+    await run($t('game.untracked'), () => api.del(`/api/games/${gameId}`));
     navigate('home');
 
     // Cloud copies would otherwise linger forever — offer to clean them up.
@@ -231,21 +231,21 @@
       if (settings.cloudSync?.enabled) {
         if (
           await askConfirm(
-            `Also delete "${gameName}"'s snapshots from the cloud? Local snapshot files stay on disk either way.`,
-            { title: 'Clean up cloud copies?', confirmText: 'Delete from cloud', cancelText: 'Keep them', danger: true }
+            $t('game.cloudDeleteConfirm', { name: gameName }),
+            { title: $t('game.cloudDeleteTitle'), confirmText: $t('game.cloudDelete'), cancelText: $t('game.keepCloud'), danger: true }
           )
         ) {
           const res = await api.post(`/api/cloud/delete-game/${gameId}`);
           toast(
             res.deleted > 0
-              ? `Removed ${res.deleted} cloud snapshot(s)`
-              : 'No cloud snapshots to remove',
+              ? $t('game.cloudDeleted', { count: res.deleted })
+              : $t('game.noCloudSnapshots'),
             'success'
           );
         }
       }
     } catch (e) {
-      toast(`Cloud cleanup failed: ${e.message}`, 'error');
+      toast($locale === 'zh-CN' ? $t('game.cloudCleanupFailed') : `Cloud cleanup failed: ${e.message}`, 'error');
     }
   }
 
@@ -273,9 +273,9 @@
   async function pickLocation(name) {
     const label = String(name ?? '').trim();
     if (!label || busy) return;
-    const dir = await native.selectDirectory(`Folder for “${label}” — ${game.name}`);
+    const dir = await native.selectDirectory($t('game.pickLocation', { label, name: game.name }));
     if (!dir) return;
-    await run(`“${label}” now covered`, async () => {
+    await run($t('game.locationAdded', { label }), async () => {
       await api.post(`/api/games/${game.id}/roots`, { name: label, path: dir });
       newLocation = '';
       locationsFor = null; // force a reload
@@ -286,12 +286,12 @@
   async function removeLocation(name) {
     if (
       !(await askConfirm(
-        `Stop covering the “${name}” folder for ${game.name}? Its files are left exactly where they are — this only stops GameSave Go syncing and snapshotting them.`,
-        { title: 'Remove save location?', confirmText: 'Remove', danger: true }
+        $t('game.removeLocationConfirm', { name, gameName: game.name }),
+        { title: $t('game.removeLocationTitle'), confirmText: $t('game.remove'), danger: true }
       ))
     )
       return;
-    await run(`Removed “${name}”`, async () => {
+    await run($t('game.locationRemoved', { name }), async () => {
       await api.del(`/api/games/${game.id}/roots/${encodeURIComponent(name)}`);
       locationsFor = null;
       await loadLocations();
@@ -365,18 +365,18 @@
     // "removed from your library" for the second would be a lie about a
     // destructive step that isn't happening.
     const message = remote
-      ? `Link "${remote.name}" on ${remote.peerName} to "${game.name}"? The two will be treated as the same game when these devices sync. Nothing on either device is removed.`
-      : `Link "${other?.name ?? linkTarget}" into "${game.name}"? They'll be treated as the same game when syncing across devices. "${other?.name ?? linkTarget}" is removed from your library here — its save files and snapshots on disk are kept.`;
+      ? $t('game.linkRemoteConfirm', { other: remote.name, peer: remote.peerName, name: game.name })
+      : $t('game.linkLocalConfirm', { other: other?.name ?? linkTarget, name: game.name });
 
-    const ok = await askConfirm(message, { title: 'Link games?', confirmText: 'Link' });
+    const ok = await askConfirm(message, { title: $t('game.linkTitle'), confirmText: $t('game.link') });
     if (!ok) return;
     const canonicalId = game.id;
-    await run('Games linked', () => api.post(`/api/games/${canonicalId}/link`, { alias: linkTarget }));
+    await run($t('game.linked'), () => api.post(`/api/games/${canonicalId}/link`, { alias: linkTarget }));
     linkTarget = '';
     await loadAliases();
   }
   async function unlink(aliasId) {
-    await run('Link removed', () => api.del(`/api/games/${game.id}/alias/${aliasId}`));
+    await run($t('game.unlinked'), () => api.del(`/api/games/${game.id}/alias/${aliasId}`));
     await loadAliases();
   }
 
@@ -389,11 +389,11 @@
   async function saveConfig() {
     const appId = (cfg.appId ?? '').trim();
     if (appId !== '' && !/^\d+$/.test(appId)) {
-      appIdError = 'A Steam App ID is digits only — the number in the store URL.';
+      appIdError = $t('game.appIdError');
       return;
     }
     appIdError = '';
-    await run('Configuration saved', () =>
+    await run($t('game.configSaved'), () =>
       api.patch(`/api/games/${game.id}`, {
         appId,
         exePath: cfg.exePath,
@@ -407,7 +407,7 @@
   }
 
   async function browseExe() {
-    const file = await native.selectFile('Select the game executable');
+    const file = await native.selectFile($t('game.selectExecutable'));
     if (file) cfg.exePath = file;
   }
 
@@ -418,7 +418,7 @@
     try {
       cloudSnaps = await api.get(`/api/cloud/snapshots/${game.id}`);
     } catch (e) {
-      toast(e.message, 'error');
+      toast($locale === 'zh-CN' ? $t('game.cloudLoadFailed') : e.message, 'error');
       cloudSnaps = [];
     } finally {
       cloudLoading = false;
@@ -428,8 +428,8 @@
   $: if (game && tab === 'cloud' && cloudSnaps === null && !cloudLoading) loadCloudSnaps();
 
   const restoreCloud = async (snap) => {
-    if (!(await askConfirm(`Download and restore cloud snapshot ${snap.snapshotId} over your current save?`, { title: 'Restore from cloud?', confirmText: 'Download & restore' }))) return;
-    return run('Restored from cloud', async () => {
+    if (!(await askConfirm($t('game.restoreCloudConfirm', { id: snap.snapshotId }), { title: $t('game.restoreCloudTitle'), confirmText: $t('game.downloadRestore') }))) return;
+    return run($t('game.restoredCloud'), async () => {
       await api.post(`/api/cloud/restore/${game.id}`, { fileName: snap.name });
     });
   };
@@ -440,15 +440,15 @@
       if (manualUploadOutcome(res) === 'conflict') {
         toast($t('cloud.upload.conflict', { uploaded: res.uploaded, conflicts: res.conflicts, failed: res.failed }), 'error');
       } else if (manualUploadOutcome(res) === 'failed') {
-        toast(`Uploaded ${res.uploaded}; ${res.failed} failed; ${res.skipped} already current. Check Cloud Backup transfer activity.`, 'error');
+        toast($t('game.uploadPartial', { uploaded: res.uploaded, failed: res.failed, skipped: res.skipped }), 'error');
       } else {
-        toast(`Uploaded ${res.uploaded}, skipped ${res.skipped}`, 'success');
+        toast($t('game.uploadDone', { uploaded: res.uploaded, skipped: res.skipped }), 'success');
       }
       await loadCloudSnaps();
     });
 
   async function launchGame() {
-    await run('Launching…', () => api.post(`/api/games/${game.id}/launch`));
+    await run($t('game.launching'), () => api.post(`/api/games/${game.id}/launch`));
   }
 
   let editPath = false;
@@ -457,21 +457,21 @@
   // The bridge returns a message when it can't (e.g. the folder was deleted).
   async function openSaveFolder() {
     const problem = await native.openFolder(game.savePath);
-    if (problem) toast(problem, 'error');
+    if (problem) toast($locale === 'zh-CN' ? $t('game.openFolderFailed') : problem, 'error');
   }
 
   async function savePath() {
-    await run('Save path updated', () => api.patch(`/api/games/${game.id}`, { savePath: pathDraft }));
+    await run($t('game.pathUpdated'), () => api.patch(`/api/games/${game.id}`, { savePath: pathDraft }));
     editPath = false;
   }
 
 </script>
 
 {#if !game}
-  <div class="empty"><h3>Game not found</h3></div>
+  <div class="empty"><h3>{$t('game.notFound')}</h3></div>
 {:else}
   <div class="head">
-    <button class="btn icon back" on:click={() => navigate('home')} title="Back">←</button>
+    <button class="btn icon back" on:click={() => navigate('home')} title={$t('game.back')}>←</button>
     {#if gameCover(game)}
       <img
         class="head-cover"
@@ -484,67 +484,67 @@
     <div class="title-block">
       <h2 class="page-title">{game.name}</h2>
       <div class="sub">
-        branch <strong>{game.activeBranch}</strong>
+        {$t('game.branch')} <strong>{game.activeBranch}</strong>
         {#if activity?.state === 'running'}
-          · <span class="syncing">syncing {activity.percentage ?? 0}%</span>
+          · <span class="syncing">{$t('game.syncing', { percent: activity.percentage ?? 0 })}</span>
         {/if}
       </div>
     </div>
     <div class="head-actions">
       {#if game.appId || game.exePath}
-        <button class="btn" disabled={busy} on:click={launchGame}>▶ Launch</button>
+        <button class="btn" disabled={busy} on:click={launchGame}>▶ {$t('game.launch')}</button>
       {/if}
-      <button class="btn primary" disabled={busy} on:click={syncNow}>⟳ Sync now</button>
+      <button class="btn primary" disabled={busy} on:click={syncNow}>⟳ {$t('game.syncNow')}</button>
     </div>
   </div>
 
   <div class="path-line">
     {#if editPath}
       <input class="path-input" bind:value={pathDraft} />
-      <button class="btn small" on:click={async () => (pathDraft = (await native.selectDirectory('Select save folder')) || pathDraft)}>Browse</button>
-      <button class="btn small primary" on:click={savePath}>Save</button>
-      <button class="btn small" on:click={() => (editPath = false)}>Cancel</button>
+      <button class="btn small" on:click={async () => (pathDraft = (await native.selectDirectory($t('game.selectSaveFolder'))) || pathDraft)}>{$t('game.browse')}</button>
+      <button class="btn small primary" on:click={savePath}>{$t('game.save')}</button>
+      <button class="btn small" on:click={() => (editPath = false)}>{$t('game.cancel')}</button>
     {:else}
       <span class="path" title={game.savePath}>{game.savePath}</span>
-      <button class="btn small" on:click={openSaveFolder} title="Show this folder in your file manager">
-        📂 Open folder
+      <button class="btn small" on:click={openSaveFolder} title={$t('game.openFolderHint')}>
+        📂 {$t('game.openFolder')}
       </button>
-      <button class="btn small" on:click={() => { pathDraft = game.savePath; editPath = true; }}>Edit</button>
+      <button class="btn small" on:click={() => { pathDraft = game.savePath; editPath = true; }}>{$t('game.edit')}</button>
     {/if}
   </div>
 
   <div class="pill-tabs tabs">
-    <button class:active={tab === 'snapshots'} on:click={() => (tab = 'snapshots')}>Snapshots</button>
-    <button class:active={tab === 'branches'} on:click={() => (tab = 'branches')}>Branches</button>
-    <button class:active={tab === 'cloud'} on:click={() => (tab = 'cloud')}>☁️ Cloud</button>
-    <button class:active={tab === 'config'} on:click={() => (tab = 'config')}>Configuration</button>
-    <button class:active={tab === 'danger'} on:click={() => (tab = 'danger')}>Manage</button>
+    <button class:active={tab === 'snapshots'} on:click={() => (tab = 'snapshots')}>{$t('game.snapshots')}</button>
+    <button class:active={tab === 'branches'} on:click={() => (tab = 'branches')}>{$t('game.branches')}</button>
+    <button class:active={tab === 'cloud'} on:click={() => (tab = 'cloud')}>☁️ {$t('game.cloud')}</button>
+    <button class:active={tab === 'config'} on:click={() => (tab = 'config')}>{$t('game.config')}</button>
+    <button class:active={tab === 'danger'} on:click={() => (tab = 'danger')}>{$t('game.manage')}</button>
   </div>
 
   {#if tab === 'snapshots'}
     <div class="card snap-new">
-      <input placeholder="Snapshot comment (optional)" bind:value={snapshotComment} />
-      <button class="btn primary" disabled={busy} on:click={takeSnapshot}>📸 Snapshot now</button>
+      <input placeholder={$t('game.snapshotComment')} bind:value={snapshotComment} />
+      <button class="btn primary" disabled={busy} on:click={takeSnapshot}>📸 {$t('game.snapshotNow')}</button>
     </div>
 
     {#if browsing}
       <div class="card browse">
         <div class="browse-head">
-          <h3>Files in {browsing.snapshotId}</h3>
-          <button class="btn small" on:click={() => (browsing = null)}>Close</button>
+          <h3>{$t('game.filesInSnapshot', { id: browsing.snapshotId })}</h3>
+          <button class="btn small" on:click={() => (browsing = null)}>{$t('game.close')}</button>
         </div>
         {#each browsing.files.filter((f) => !f.isDir) as f}
           <div class="file-row">
             <span class="file-path">{f.path}</span>
             <span class="file-size">{fmtSize(f.size)}</span>
-            <button class="btn small" disabled={busy} on:click={() => restoreFile(f.path)}>Restore file</button>
+            <button class="btn small" disabled={busy} on:click={() => restoreFile(f.path)}>{$t('game.restoreFile')}</button>
           </div>
         {/each}
       </div>
     {/if}
 
     {#if allSnapshots.length === 0}
-      <div class="empty"><h3>No snapshots yet</h3><p>Snapshots are created automatically when your save changes.</p></div>
+      <div class="empty"><h3>{$t('game.noSnapshots')}</h3><p>{$t('game.noSnapshotsHint')}</p></div>
     {:else}
       <div class="snap-list">
         {#each allSnapshots as snap (snap.id)}
@@ -553,15 +553,15 @@
               <div class="snap-top">
                 <span class="snap-id">{snap.id}</span>
                 <span class="badge offline">{snap.branch}</span>
-                {#if snap.isSystemAuto}<span class="badge offline">auto</span>{/if}
+                {#if snap.isSystemAuto}<span class="badge offline">{$t('game.auto')}</span>{/if}
               </div>
               <div class="snap-comment">{snap.comment}</div>
-              <div class="snap-meta">{fmtTime(snap.timestamp)} · {fmtSize(snap.sizeBytes)}</div>
+              <div class="snap-meta">{fmtTime(snap.timestamp, $locale)} · {fmtSize(snap.sizeBytes)}</div>
             </div>
             <div class="snap-actions">
-              <button class="btn small" on:click={() => browseSnapshot(snap)}>Browse files</button>
-              <button class="btn small primary" disabled={busy} on:click={() => rollback(snap)}>Restore</button>
-              <button class="btn small danger" disabled={busy} on:click={() => deleteSnapshot(snap)}>Delete</button>
+              <button class="btn small" on:click={() => browseSnapshot(snap)}>{$t('game.browseFiles')}</button>
+              <button class="btn small primary" disabled={busy} on:click={() => rollback(snap)}>{$t('game.restore')}</button>
+              <button class="btn small danger" disabled={busy} on:click={() => deleteSnapshot(snap)}>{$t('game.delete')}</button>
             </div>
           </div>
         {/each}
@@ -571,15 +571,14 @@
     <div class="card branch-new">
       <div class="snap-new-row">
         <input
-          placeholder="New branch name (e.g. ng-plus)"
+          placeholder={$t('game.newBranchPlaceholder')}
           bind:value={newBranch}
           on:keydown={(e) => e.key === 'Enter' && openBranchDialog()}
         />
-        <button class="btn primary" disabled={!newBranch || busy} on:click={openBranchDialog}>+ Create branch</button>
+        <button class="btn primary" disabled={!newBranch || busy} on:click={openBranchDialog}>+ {$t('game.createBranch')}</button>
       </div>
       <span class="hint">
-        A branch is a separate line of saves — a second playthrough, or a run you want to keep
-        apart from your main one. You'll be asked what it starts from.
+        {$t('game.branchIntro')}
       </span>
     </div>
     <div class="snap-list">
@@ -588,18 +587,18 @@
           <div class="snap-info">
             <div class="snap-top">
               <span class="snap-id">{branch.name}</span>
-              {#if branch.name === game.activeBranch}<span class="badge online">active</span>{/if}
+              {#if branch.name === game.activeBranch}<span class="badge online">{$t('game.active')}</span>{/if}
             </div>
-            <div class="snap-meta">{branch.snapshots?.length ?? 0} snapshot(s)</div>
+            <div class="snap-meta">{$t('game.snapshotCount', { count: branch.snapshots?.length ?? 0 })}</div>
           </div>
           {#if branch.name !== game.activeBranch}
             <div class="branch-actions">
               <button class="btn small primary" disabled={busy} on:click={() => switchBranch(branch.name)}>
-                Switch to
+                {$t('game.switchTo')}
               </button>
               {#if branch.name !== 'main'}
                 <button class="btn small danger" disabled={busy} on:click={() => deleteBranch(branch.name)}>
-                  Delete
+                  {$t('game.delete')}
                 </button>
               {/if}
             </div>
@@ -608,46 +607,43 @@
       {/each}
     </div>
     <p class="branch-hint">
-      Switching branches snapshots your current save first, then restores the other branch's latest
-      state. A branch you just created has no state of its own yet, so it starts from whatever is in
-      your save folder now — the two diverge from the first snapshot you take on it.
+      {$t('game.branchSwitchHint')}
     </p>
   {:else if tab === 'cloud'}
     <div class="card">
       <div class="cloud-head">
         <div>
-          <h3>☁️ Cloud snapshots for {game.name}</h3>
-          <p class="cloud-sub">Snapshots backed up to your configured cloud provider.</p>
+          <h3>☁️ {$t('game.cloudFor', { name: game.name })}</h3>
+          <p class="cloud-sub">{$t('game.cloudSubtitle')}</p>
         </div>
         <div class="cloud-actions">
-          <button class="btn small" disabled={busy} on:click={loadCloudSnaps}>↻ Refresh</button>
-          <button class="btn small primary" disabled={busy} on:click={uploadToCloud}>↑ Upload local snapshots</button>
+          <button class="btn small" disabled={busy} on:click={loadCloudSnaps}>↻ {$t('game.refresh')}</button>
+          <button class="btn small primary" disabled={busy} on:click={uploadToCloud}>↑ {$t('game.uploadLocal')}</button>
         </div>
       </div>
 
       {#if cloudLoading}
-        <div class="cloud-loading"><span class="cspin"></span> Loading cloud snapshots…</div>
+        <div class="cloud-loading"><span class="cspin"></span> {$t('game.cloudLoading')}</div>
       {:else if !cloudSnaps || cloudSnaps.length === 0}
         <div class="cloud-empty">
-          <p>No cloud snapshots for this game yet.</p>
+          <p>{$t('game.cloudEmpty')}</p>
           <p class="cloud-hint">
-            Enable a provider in <button class="linklike" on:click={() => navigate('cloud')}>Cloud Backup</button>,
-            then use “Upload local snapshots”.
+            {$t('game.cloudEmptyBefore')} <button class="linklike" on:click={() => navigate('cloud')}>{$t('nav.cloud')}</button>{$t('game.cloudEmptyAfter')}
           </p>
         </div>
       {:else}
         <table class="cloud-table">
           <thead>
-            <tr><th>Branch</th><th>Date</th><th>Size</th><th></th></tr>
+            <tr><th>{$t('game.branch')}</th><th>{$t('game.date')}</th><th>{$t('game.size')}</th><th></th></tr>
           </thead>
           <tbody>
             {#each cloudSnaps as snap (snap.name)}
               <tr>
                 <td><span class="badge offline">{snap.branch}</span></td>
-                <td class="mono">{new Date(snap.createdTime).toLocaleString()}</td>
+                <td class="mono">{new Date(snap.createdTime).toLocaleString($locale)}</td>
                 <td class="mono">{fmtSize(snap.sizeBytes)}</td>
                 <td class="right">
-                  <button class="btn small primary" disabled={busy} on:click={() => restoreCloud(snap)}>Restore</button>
+                  <button class="btn small primary" disabled={busy} on:click={() => restoreCloud(snap)}>{$t('game.restore')}</button>
                 </td>
               </tr>
             {/each}
@@ -666,56 +662,49 @@
           {/if}
         </div>
         <div class="config-fields">
-          <h3>Launch &amp; sync configuration</h3>
+          <h3>{$t('game.configTitle')}</h3>
           <div class="field">
-            <label for="c-appid">Steam App ID</label>
-            <input id="c-appid" placeholder="e.g. 1091500" bind:value={cfg.appId} />
+            <label for="c-appid">{$t('game.steamAppId')}</label>
+            <input id="c-appid" placeholder={$t('game.appIdPlaceholder')} bind:value={cfg.appId} />
             <span class="hint">
-              Launches via Steam, fetches cover art, and — with “Match games by Steam App ID”
-              turned on in Settings — lets this game sync with a copy tracked under a different
-              name on another device. Filled in automatically when it can be worked out; a save
-              under <code>AppData</code> often has nothing to work it out from, so you can set it
-              here. It's the number in the game's Steam store URL.
+              {$t('game.steamAppIdHint')}
             </span>
             {#if appIdError}<span class="hint hint-error">{appIdError}</span>{/if}
           </div>
           <div class="field">
-            <label for="c-exe">Executable path (non-Steam)</label>
+            <label for="c-exe">{$t('game.exePath')}</label>
             <div class="path-row">
-              <input id="c-exe" placeholder="Browse to the game .exe" bind:value={cfg.exePath} />
-              <button class="btn" on:click={browseExe}>Browse</button>
+              <input id="c-exe" placeholder={$t('game.exePlaceholder')} bind:value={cfg.exePath} />
+              <button class="btn" on:click={browseExe}>{$t('game.browse')}</button>
             </div>
           </div>
           <div class="field">
-            <label for="c-cover">Custom cover image URL</label>
-            <input id="c-cover" placeholder="https://…  (great for emulator games)" bind:value={cfg.coverUrl} />
-            <span class="hint">Leave blank to auto-use Steam art from the App ID. Paste any image URL for emulators.</span>
+            <label for="c-cover">{$t('game.coverUrl')}</label>
+            <input id="c-cover" placeholder={$t('game.coverPlaceholder')} bind:value={cfg.coverUrl} />
+            <span class="hint">{$t('game.coverHint')}</span>
           </div>
           <label class="check">
             <input type="checkbox" bind:checked={cfg.autoSync} />
-            Auto-sync saves when changes are detected
+            {$t('game.autoSync')}
           </label>
           <div class="field" style="margin-top: 12px;">
-            <label for="c-max">Automatic snapshot limit</label>
+            <label for="c-max">{$t('game.autoSnapshotLimit')}</label>
             <input id="c-max" type="number" min="0" bind:value={cfg.maxSnapshots} />
             <span class="hint">
-              Max <em>automatic</em> snapshots kept per branch (0 = unlimited). Oldest are pruned first.
+              {$t('game.autoSnapshotHint')}
             </span>
           </div>
           <div class="field">
-            <label for="c-max-manual">Manual snapshot limit</label>
+            <label for="c-max-manual">{$t('game.manualSnapshotLimit')}</label>
             <input id="c-max-manual" type="number" min="0" bind:value={cfg.maxManualSnapshots} />
             <span class="hint">
-              Snapshots you took yourself get their own budget, so a game that auto-saves often
-              can't push them out. <strong>0 = keep forever</strong> (the default).
+              {$t('game.manualSnapshotHint')}
             </span>
           </div>
           <div class="excludes">
-            <h4>Files that shouldn't sync</h4>
+            <h4>{$t('game.excludeTitle')}</h4>
             <p class="hint">
-              Some games keep device-specific settings in the same folder as the save, and copying
-              those to another machine can break the game there. List them here and they stay put:
-              never sent, never received, never deleted by a sync.
+              {$t('game.excludeIntro')}
             </p>
             <textarea
               class="exclude-box"
@@ -725,24 +714,20 @@
               bind:value={cfg.syncIgnore}
             ></textarea>
             <span class="hint">
-              One pattern per line, like a <code>.gitignore</code> — <code>Config.gs</code> by name,
-              <code>/Config.gs</code> only at the top, <code>*.log</code> by extension,
-              <code>logs/</code> for a whole folder, <code>!keep.log</code> for an exception. Case
-              doesn't matter. Set the same list on your other devices; each one applies its own.
+              {$t('game.excludePatternHint')}
             </span>
             <span class="hint">
-              <strong>Snapshots still capture these files</strong>, so a restore brings them back —
-              excluding something stops it travelling, it never stops it being backed up.
+              {$t('game.excludeSnapshotHint')}
             </span>
 
             <div class="picker-head">
               <button class="btn small" on:click={toggleFilePicker}>
-                {showFiles ? '▾' : '▸'} Pick from your save folder
+                {showFiles ? '▾' : '▸'} {$t('game.pickFiles')}
               </button>
               {#if showFiles && saveFiles}
                 <span class="hint picker-count">
-                  {excludedCount} of {saveFiles.length} files excluded
-                  {#if filesTruncated}· first {saveFiles.length} shown{/if}
+                  {$t('game.excludedCount', { excluded: excludedCount, total: saveFiles.length })}
+                  {#if filesTruncated}· {$t('game.filesTruncated', { count: saveFiles.length })}{/if}
                 </span>
               {/if}
             </div>
@@ -751,9 +736,9 @@
               {#if filesError}
                 <p class="hint err">{filesError}</p>
               {:else if !saveFiles}
-                <p class="hint"><span class="cspin"></span> Reading the save folder…</p>
+                <p class="hint"><span class="cspin"></span> {$t('game.readingFiles')}</p>
               {:else if saveFiles.length === 0}
-                <p class="hint">This game's folders are empty, so there is nothing to pick yet.</p>
+                <p class="hint">{$t('game.noFiles')}</p>
               {:else}
                 <div class="file-picker">
                   {#each saveFiles as f (f.location + '/' + f.path)}
@@ -762,31 +747,26 @@
                       <span class="file-name">
                         {#if f.location}<span class="file-loc">{f.location} ›</span>{/if}{f.path}
                       </span>
-                      <span class="file-verdict">{f.excluded ? "won't sync" : 'syncs'}</span>
+                      <span class="file-verdict">{$t(f.excluded ? 'game.wontSync' : 'game.willSync')}</span>
                     </label>
                   {/each}
                 </div>
                 <span class="hint">
-                  Ticking a file writes the pattern for you, anchored so it can only ever mean that
-                  one file. Unticking a file caught by a wildcard adds a <code>!</code> exception
-                  rather than deleting the wildcard.
+                  {$t('game.filePickerHint')}
                   {#if locations.length > 0}
-                    A pattern applies to <strong>every one of this game's folders</strong>, so a
-                    name that appears in two of them is excluded in both.
+                    {$t('game.filePickerLocationsHint')}
                   {/if}
                 </span>
               {/if}
             {/if}
           </div>
           <div class="locations">
-            <h4>Save locations</h4>
+            <h4>{$t('game.locationsTitle')}</h4>
             <p class="hint">
-              Some games keep their save split across more than one folder — the save data in one
-              place, settings or mods in another. Add each extra folder here and it is synced,
-              snapshotted and restored along with the main one.
+              {$t('game.locationsIntro')}
             </p>
             <div class="loc-row">
-              <span class="loc-name">main save</span>
+              <span class="loc-name">{$t('game.mainSave')}</span>
               <span class="loc-path" title={game.savePath}>{game.savePath}</span>
             </div>
             {#each locations as loc (loc.name)}
@@ -796,42 +776,38 @@
                   <span class="loc-path" title={loc.path}>{loc.path}</span>
                 {:else}
                   <span class="loc-path missing">
-                    no folder on this device — this location isn't being synced
+                    {$t('game.unmappedLocation')}
                   </span>
                 {/if}
                 <button class="btn small" disabled={busy} on:click={() => pickLocation(loc.name)}>
-                  {loc.mapped ? 'Change' : 'Choose folder'}
+                  {$t(loc.mapped ? 'game.change' : 'game.chooseFolder')}
                 </button>
                 <button class="btn small danger" disabled={busy} on:click={() => removeLocation(loc.name)}>
-                  Remove
+                  {$t('game.remove')}
                 </button>
               </div>
             {/each}
             <div class="loc-add">
-              <input placeholder="Name for the folder (e.g. config)" bind:value={newLocation} />
+              <input placeholder={$t('game.newLocationPlaceholder')} bind:value={newLocation} />
               <button class="btn" disabled={!newLocation || busy} on:click={() => pickLocation(newLocation)}>
-                + Add a folder
+                + {$t('game.addFolder')}
               </button>
             </div>
             <span class="hint">
-              Give the same <strong>name</strong> on your other devices — that is what the two
-              sides match on, since the folder lives somewhere different on each machine. Removing
-              a location here never deletes its files.
+              {$t('game.locationNameHint')}
             </span>
           </div>
           <div class="config-save">
-            <button class="btn primary" disabled={busy} on:click={saveConfig}>Save configuration</button>
+            <button class="btn primary" disabled={busy} on:click={saveConfig}>{$t('game.saveConfig')}</button>
           </div>
         </div>
       </div>
     {/if}
   {:else}
     <div class="card">
-      <h3>Linked copies</h3>
+      <h3>{$t('game.linkedCopies')}</h3>
       <p class="danger-desc">
-        If this game is tracked under a different name or drive on another PC (e.g. a Steam copy vs. a
-        portable copy), link the copies so their saves sync across devices. Linking merges another tracked
-        game here into this one — its save files and snapshots on disk are kept.
+        {$t('game.linkedCopiesIntro')}
       </p>
       {#if aliases.length > 0}
         <div class="alias-list">
@@ -840,7 +816,7 @@
               <span class="alias-id" title={a.savePath || a.id}>
                 🔗 {a.name || a.id}{a.savePath ? ` — ${a.savePath}` : ''}
               </span>
-              <button class="btn small" disabled={busy} on:click={() => unlink(a.id)}>Unlink</button>
+              <button class="btn small" disabled={busy} on:click={() => unlink(a.id)}>{$t('game.unlink')}</button>
             </div>
           {/each}
         </div>
@@ -848,9 +824,9 @@
       {#if otherGames.length > 0 || peerGames.length > 0}
         <div class="link-row">
           <select bind:value={linkTarget}>
-            <option value="">Choose a game to link…</option>
+            <option value="">{$t('game.chooseLink')}</option>
             {#if otherGames.length > 0}
-              <optgroup label="On this device (merges the entry)">
+              <optgroup label={$t('game.linkLocalGroup')}>
                 {#each otherGames as g}
                   <!-- Same-named entries are normal now that one game can be
                        tracked at several save locations, so show the path too —
@@ -860,35 +836,33 @@
               </optgroup>
             {/if}
             {#if peerGames.length > 0}
-              <optgroup label="On a paired device (nothing is removed)">
+              <optgroup label={$t('game.linkPeerGroup')}>
                 {#each peerGames as g}
                   <option value={g.id}>{g.name} — {g.peerName}</option>
                 {/each}
               </optgroup>
             {/if}
           </select>
-          <button class="btn small primary" disabled={busy || !linkTarget} on:click={linkGame}>Link</button>
+          <button class="btn small primary" disabled={busy || !linkTarget} on:click={linkGame}>{$t('game.link')}</button>
         </div>
         {#if peerGamesLoading}
-          <p class="danger-desc">Checking paired devices…</p>
+          <p class="danger-desc">{$t('game.checkingPeers')}</p>
         {/if}
       {:else if peerGamesLoading}
-        <p class="danger-desc">Checking paired devices…</p>
+        <p class="danger-desc">{$t('game.checkingPeers')}</p>
       {:else}
         <p class="danger-desc">
-          Nothing to link to. Track the other copy on this device, or pair the device that
-          has it and make sure it's online — its games appear here once it answers.
+          {$t('game.noLinkTargets')}
         </p>
       {/if}
     </div>
 
     <div class="card" style="margin-top: 16px;">
-      <h3>Stop tracking</h3>
+      <h3>{$t('game.untrackTitle')}</h3>
       <p class="danger-desc">
-        Removes "{game.name}" from GameSave Go. Your save files and existing snapshot archives on disk are
-        kept.
+        {$t('game.untrackHint', { name: game.name })}
       </p>
-      <button class="btn danger" disabled={busy} on:click={untrack}>Stop tracking this game</button>
+      <button class="btn danger" disabled={busy} on:click={untrack}>{$t('game.untrackThis')}</button>
     </div>
   {/if}
 {/if}
@@ -900,17 +874,15 @@
   <div class="overlay" on:click={() => (branchDialog = false)}>
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
     <div class="modal card" on:click|stopPropagation>
-      <h3>🌱 New branch — {newBranch}</h3>
-      <p class="desc">What should it start from?</p>
+      <h3>🌱 {$t('game.newBranchTitle', { name: newBranch })}</h3>
+      <p class="desc">{$t('game.branchStartQuestion')}</p>
 
       <label class="choice" class:sel={branchCopySave}>
         <input type="radio" bind:group={branchCopySave} value={true} />
         <span class="c-body">
-          <span class="c-title">A copy of my current save</span>
+          <span class="c-title">{$t('game.copyCurrent')}</span>
           <span class="c-desc">
-            "{newBranch}" begins exactly where you are now. The two only diverge from the first
-            snapshot you take on it — so this is the one for trying something without losing your
-            place.
+            {$t('game.copyCurrentHint', { name: newBranch })}
           </span>
         </span>
       </label>
@@ -918,22 +890,19 @@
       <label class="choice" class:sel={!branchCopySave}>
         <input type="radio" bind:group={branchCopySave} value={false} />
         <span class="c-body">
-          <span class="c-title">A fresh start — no save</span>
+          <span class="c-title">{$t('game.freshStart')}</span>
           <span class="c-desc">
-            "{newBranch}" begins empty, for a new playthrough from scratch. Switching to it clears
-            your save folder — your current save is snapshotted first and comes straight back when
-            you switch to <strong>{game.activeBranch}</strong>.
+            {$t('game.freshStartHint', { name: newBranch, current: game.activeBranch })}
           </span>
         </span>
       </label>
 
       <div class="actions">
-        <button class="btn" on:click={() => (branchDialog = false)}>Cancel</button>
-        <button class="btn primary" disabled={busy} on:click={createBranch}>Create branch</button>
+        <button class="btn" on:click={() => (branchDialog = false)}>{$t('game.cancel')}</button>
+        <button class="btn primary" disabled={busy} on:click={createBranch}>{$t('game.createBranch')}</button>
       </div>
       <p class="hint-line">
-        🛡️ Either way nothing is lost. Switching between branches snapshots whatever is in your
-        save folder first, and refuses to change anything if that snapshot can't be taken.
+        🛡️ {$t('game.branchSafetyHint')}
       </p>
     </div>
   </div>

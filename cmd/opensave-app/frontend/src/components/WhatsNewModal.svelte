@@ -1,9 +1,9 @@
 <script>
   import { backdropClose } from '../lib/backdrop.js';
   import ReleaseNotes from './ReleaseNotes.svelte';
-  import DiscordBanner from './DiscordBanner.svelte';
   import { navigate } from '../lib/stores.js';
   import { PRODUCT_NAME } from '../lib/branding.js';
+  import { t } from '../lib/i18n.js';
 
   export let releases = [];
   export let version = '';
@@ -23,23 +23,22 @@
 <svelte:window on:keydown={onKeydown} />
 
 <div class="backdrop" use:backdropClose={onClose} role="presentation">
-  <div class="modal" role="dialog" aria-modal="true" aria-label={`What's new in ${PRODUCT_NAME}`}>
-    <button class="x" on:click={onClose} title="Close" aria-label="Close">✕</button>
+  <div class="modal" role="dialog" aria-modal="true" aria-label={$t('whatsNew.ariaLabel', { app: PRODUCT_NAME })}>
+    <button class="x" on:click={onClose} title={$t('common.close')} aria-label={$t('common.close')}>✕</button>
 
     <div class="hero">
-      <div class="badge">Updated</div>
+      <div class="badge">{$t('whatsNew.updated')}</div>
       <h2>{PRODUCT_NAME} {version}</h2>
-      {#if from}<p class="from">You were on {from}</p>{/if}
+      {#if from}<p class="from">{$t('whatsNew.previousVersion', { version: from })}</p>{/if}
     </div>
 
     <div class="body">
-      <div class="banner-slot"><DiscordBanner compact /></div>
       <ReleaseNotes {releases} compact />
     </div>
 
     <footer>
-      <button class="ghost" on:click={openFullChangelog}>Full changelog</button>
-      <button class="primary" on:click={onClose}>Got it</button>
+      <button class="ghost" on:click={openFullChangelog}>{$t('whatsNew.fullChangelog')}</button>
+      <button class="primary" on:click={onClose}>{$t('whatsNew.gotIt')}</button>
     </footer>
   </div>
 </div>
@@ -116,9 +115,6 @@
     padding: 22px 28px;
     overflow-y: auto;
     flex: 1;
-  }
-  .banner-slot {
-    margin-bottom: 20px;
   }
   footer {
     display: flex;

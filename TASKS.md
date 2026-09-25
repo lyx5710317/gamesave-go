@@ -34,6 +34,9 @@
   - [x] Translate the Games page shell, empty state, library controls, and game-card status.
   - [x] Translate the auto-scan dialog as one reviewed interaction.
   - [x] Translate Cloud Backup and Activity in separate slices.
+  - [x] Remove obsolete Support, Discord, and donation controls from the desktop UI; keep the current project-source link and upstream license attribution.
+  - [x] Translate Settings, device/relay screens, game details, pairing/status, and conflict decisions to Simplified Chinese with paired English catalog entries and markup regression tests.
+  - [ ] Replace or explicitly retire the separate upstream `docs/*.html` marketing site before publishing it as GameSave Go; it still contains old product copy and upstream download/community links. Do not treat it as a localized product site.
 - [x] Apply the GameSave Go user-facing brand and supplied icon while preserving compatibility identifiers.
 - [x] Point the in-app repository and release checks at the `gamesave-go` fork, with legacy update-asset fallback.
 - [x] Validate keyboard, scaling, tray, and Windows WebView behavior.
@@ -49,7 +52,23 @@
 - [x] Require a successful safety snapshot before restore or incoming replacement.
 - [x] Design and implement provider-independent first-join scanning and conflict previews with no silent overwrite. See `internal/vaultmeta` and `docs/VAULT_IDENTITY_V2.md`.
 
-## Phase 4 — Baidu Netdisk
+## Phase 4 — Mainland-China Cloud Providers
+
+Near-term recommendation: Jianguoyun via official WebDAV. Baidu is the later large-capacity strategy; no Baidu code is removed or prematurely enabled. See `docs/JIANGUOYUN_PROVIDER.md` and `docs/BAIDU_PROVIDER.md`.
+
+### Jianguoyun WebDAV preset
+
+- [x] Add a distinct recommended Jianguoyun Cloud Backup card using the official `https://dav.jianguoyun.com/dav/` base and a fixed `GameSaveGo/` remote folder; retain other WebDAV as an advanced option and show Baidu as unavailable pending approval.
+- [x] Protect Jianguoyun application passwords with Windows Credential Manager, migrate legacy plaintext official-host WebDAV rows on read, mask settings responses, preserve credentials on blank updates, and delete only on explicit disconnect. Windows migration/rollback and API masking tests use synthetic credentials.
+- [x] Add a conservative 500 MB pre-upload guard, bounded metadata retries, free-tier request pacing, status-only error classification, `MKCOL` folder creation, same-name preflight, a conditional-create probe, and mandatory remote length verification. These are mocked-contract safeguards, not proof of real-account behavior.
+- [x] Fail closed when a Jianguoyun directory response reaches 750 entries, contains an unrecognized page marker, duplicates, malformed XML, or an unsafe href. Do not treat such a listing as an empty/complete remote inventory.
+- [ ] Obtain the official Jianguoyun WebDAV pagination request/response contract and implement complete bounded enumeration (including interrupted, repeated, and cycling pages). Until then, a full or ambiguous directory remains blocked; no claim of full-pagination support.
+- [ ] Run a synthetic and then real-account compatibility matrix for free/paid request limits, 500 MB boundary, folder creation races, 401/403/404/412/429/507, network interruption, ignored conditions, concurrent same-name PUT, HEAD size, ETag, Range and locks. Record PASS/FAIL/BLOCKED without committing credentials.
+- [ ] Prove snapshot create-only semantics on a real account across concurrent devices. A local conditional-write probe is not sufficient proof for production multi-device publishing.
+- [ ] Prove strong provider CAS for `vault.json` separately before any Jianguoyun remote-vault write or second-device join. Keep the UI explicitly backup-only until ancestry, device registration, and conflict resolution are complete.
+- [ ] Review per-process request pacing versus multiple clients, and add a durable recovery queue with remote identity verification before public release.
+
+### Baidu Netdisk
 
 - [ ] Verify official third-party native-app eligibility, scopes, redirects, quotas, and current API terms. Documentation findings are recorded in `docs/BAIDU_PROVIDER.md`; the owner reports the app is online for personal use only. Public-app approval, granted APIs, and approved redirect remain open.
 - [x] Decide public-client OAuth versus the minimal broker. Documented code/device flows require `SecretKey`, so use a minimal OAuth broker, pending security review and provider approval.
@@ -65,7 +84,10 @@
 
 ## Phase 5 — Cloud UX / Conflict / Restore
 
-Current priority (2026-09-24): Google Drive, WebDAV, and local-folder safety. Dropbox and OneDrive remain in the codebase but their further development is deferred at the owner's request.
+Current priority (2026-09-24): Jianguoyun official-WebDAV backup safety, then Google Drive and local-folder safeguards. Baidu remains the later large-capacity path. Dropbox and OneDrive remain in the codebase but their further development is deferred at the owner's request.
+
+- [x] Temporarily hide Baidu, OneDrive, and Dropbox setup cards without removing providers or rewriting existing selections; explain an existing hidden selection and prevent accidental re-save from its hidden panel.
+- [ ] Revisit these three setup entries only when the owner requests them and provider-specific release gates are met.
 
 - [ ] Implement the vault discovery and explicit second-device join flow.
   - [x] Expose a read-only local save scan in Cloud Backup, using the existing first-join scanner; remote comparison and confirmation remain pending.

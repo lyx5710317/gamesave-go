@@ -2,28 +2,10 @@
   import { onMount } from 'svelte';
   import { settings, toast, askConfirm, gameList, navigate, pairingRequests } from '../lib/stores.js';
   import { api, native } from '../lib/api.js';
-  import qrcode from 'qrcode-generator';
-  import { DISCORD_URL, DONATE_URL } from '../lib/links.js';
   import { locale, t } from '../lib/i18n.js';
 
   export let params = {};
   $: params;
-
-  // QR of the same URL, generated locally so paying from a phone (where
-  // Apple/Google Pay is a single tap) needs no typing. Built once — the URL
-  // is constant. Error-correction level M tolerates a bit of screen glare.
-  const qrSvg = (() => {
-    const qr = qrcode(0, 'M');
-    qr.addData(DONATE_URL);
-    qr.make();
-    return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
-  })();
-
-  let donateOpened = false;
-  function openDonatePage() {
-    native.openExternal(DONATE_URL);
-    donateOpened = true;
-  }
 
   let tab = 'general';
   let draft = null;
@@ -53,12 +35,12 @@
       const mb = (res.freedBytes / 1048576).toFixed(1);
       toast(
         res.removed > 0
-          ? `Removed ${res.removed} old snapshot${res.removed === 1 ? '' : 's'}, freed ${mb} MB`
-          : 'Nothing to clean up — all games are within their limit',
+          ? $t('settings.cleanup.removed', { count: res.removed, size: mb })
+          : $t('settings.cleanup.none'),
         'success'
       );
     } catch (e) {
-      toast(e.message, 'error');
+      toast($t('settings.error.cleanup'), 'error');
     } finally {
       pruning = false;
     }
@@ -85,7 +67,7 @@
       draft = structuredClone(updated);
       toast($t('settings.saved'), 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($t('settings.error.save'), 'error');
     } finally {
       busy = false;
     }
@@ -101,7 +83,7 @@
 
   // Custom scan paths
   async function addScanPath() {
-    const dir = await native.selectDirectory('Add a folder to auto-scan');
+    const dir = await native.selectDirectory($t('settings.scanner.addPicker'));
     if (dir) draft.customScanPaths = [...(draft.customScanPaths ?? []), dir];
   }
   function removeScanPath(i) {
@@ -110,7 +92,7 @@
 
   // Excluded folders — locations the auto-scan should skip entirely.
   async function addExcludePath() {
-    const dir = await native.selectDirectory('Choose a folder to exclude from auto-scan');
+    const dir = await native.selectDirectory($t('settings.scanner.excludePicker'));
     if (dir) draft.excludePaths = [...(draft.excludePaths ?? []), dir];
   }
   function removeExcludePath(i) {
@@ -126,28 +108,28 @@
     const n = $gameList.length;
     if (n === 0) return;
     const ok = await askConfirm(
-      `Untrack all ${n} game${n === 1 ? '' : 's'}? They'll be removed from your library so you can re-add them from the correct locations. Your save snapshots on disk are kept — nothing is deleted.`,
-      { title: 'Reset tracking?', confirmText: `Untrack ${n}`, danger: true }
+      $t('settings.reset.confirmMessage', { count: n }),
+      { title: $t('settings.reset.confirmTitle'), confirmText: $t('settings.reset.confirmAction', { count: n }), danger: true }
     );
     if (!ok) return;
     resetting = true;
     try {
       const res = await api.post('/api/games/untrack-bulk', { all: true });
-      toast(`Untracked ${res.untracked} game${res.untracked === 1 ? '' : 's'} — snapshots kept`, 'success');
+      toast($t('settings.reset.success', { count: res.untracked }), 'success');
     } catch (e) {
-      toast(e.message, 'error');
+      toast($t('settings.error.reset'), 'error');
     } finally {
       resetting = false;
     }
   }
 
   async function pickBackupsDir() {
-    const dir = await native.selectDirectory('Select snapshots storage folder');
+    const dir = await native.selectDirectory($t('settings.storage.backupsPicker'));
     if (dir) draft.backupsDir = dir;
   }
 
   async function pickSyncBackupsDir() {
-    const dir = await native.selectDirectory('Select pre-sync safety backups folder');
+    const dir = await native.selectDirectory($t('settings.storage.safetyPicker'));
     if (dir) draft.syncBackupsDir = dir;
   }
 
@@ -170,7 +152,7 @@
       relayInfo = await api.get('/api/relay/ips');
       relayInfoShown = true;
     } catch (e) {
-      toast(e.message, 'error');
+      toast($t('settings.error.relayInfo'), 'error');
     } finally {
       relayInfoLoading = false;
     }
@@ -192,18 +174,6 @@
     <button class:active={tab === 'sync'} on:click={() => (tab = 'sync')}>{$t('settings.tabs.sync')}</button>
     <button class:active={tab === 'storage'} on:click={() => (tab = 'storage')}>{$t('settings.tabs.storage')}</button>
     <button class:active={tab === 'advanced'} on:click={() => (tab = 'advanced')}>{$t('settings.tabs.advanced')}</button>
-    <button class="support-tab" class:active={tab === 'support'} on:click={() => (tab = 'support')}>💜 Support</button>
-    <!-- Not a tab: it leaves the app. Shaped like its neighbour so the pair
-         reads as one group, marked with ↗ so nobody expects a panel. -->
-    <button class="discord-tab" on:click={() => native.openExternal(DISCORD_URL)} title="Open the upstream OpenSave Discord in your browser">
-      <span class="discord-glyph" aria-hidden="true">
-        <svg viewBox="0 0 24 18" width="17" height="13" fill="currentColor">
-          <path d="M20.32 1.53A19.8 19.8 0 0 0 15.43 0c-.21.38-.46.9-.63 1.31a18.3 18.3 0 0 0-5.6 0C9.03.9 8.77.38 8.56 0A19.74 19.74 0 0 0 3.67 1.53C.57 6.19-.27 10.73.15 15.21A19.9 19.9 0 0 0 6.18 18c.49-.66.92-1.37 1.29-2.11-.71-.27-1.39-.6-2.03-.98.17-.13.34-.26.5-.4a14.2 14.2 0 0 0 12.12 0c.16.14.33.27.5.4-.64.38-1.32.71-2.03.98.37.74.8 1.45 1.29 2.11a19.87 19.87 0 0 0 6.03-2.79c.5-5.19-.84-9.69-3.53-13.68ZM8.02 12.46c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Z" />
-        </svg>
-      </span>
-      Upstream Discord
-      <span class="ext" aria-hidden="true">↗</span>
-    </button>
   </div>
 
   {#if tab === 'general'}
@@ -220,144 +190,138 @@
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🖥️ Device identity</h3>
+      <h3 class="section-title">🖥️ {$t('settings.device.section')}</h3>
       <div class="field">
-        <label for="s-name">Device name — how other devices see you</label>
+        <label for="s-name">{$t('settings.device.name')}</label>
         <input id="s-name" bind:value={draft.deviceName} />
       </div>
       <div class="field">
-        <label for="s-type">Device type</label>
+        <label for="s-type">{$t('settings.device.type')}</label>
         <select id="s-type" bind:value={draft.deviceType}>
-          <option value="desktop">Desktop (Windows / macOS / Linux PC)</option>
-          <option value="deck">Steam Deck (SteamOS handheld)</option>
-          <option value="handheld">Handheld (ROG Ally / Legion Go / emulator)</option>
-          <option value="mobile">Companion (mobile device)</option>
+          <option value="desktop">{$t('settings.device.types.desktop')}</option>
+          <option value="deck">{$t('settings.device.types.deck')}</option>
+          <option value="handheld">{$t('settings.device.types.handheld')}</option>
+          <option value="mobile">{$t('settings.device.types.mobile')}</option>
         </select>
-        <span class="hint">Shown to other devices when they discover you.</span>
+        <span class="hint">{$t('settings.device.typeHint')}</span>
       </div>
       <div class="field">
-        <label for="s-node">Device ID</label>
+        <label for="s-node">{$t('settings.device.id')}</label>
         <input id="s-node" value={draft.nodeId ?? ''} readonly class="mono" />
-        <span class="hint">This device's unique network identifier (read-only).</span>
+        <span class="hint">{$t('settings.device.idHint')}</span>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🚀 Startup</h3>
+      <h3 class="section-title">🚀 {$t('settings.startup.section')}</h3>
       <label class="check">
         <input type="checkbox" bind:checked={draft.startOnBoot} />
-        Start GameSave Go when the computer starts
+        {$t('settings.startup.enable')}
       </label>
       <p class="hint" style="margin-top: 6px;">
-        Launches minimized to the system tray so syncing runs in the background.
+        {$t('settings.startup.hint')}
       </p>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🧪 Updates</h3>
+      <h3 class="section-title">🧪 {$t('settings.updates.section')}</h3>
       <label class="check">
         <input
           type="checkbox"
           checked={draft.updateChannel === 'beta'}
           on:change={(e) => (draft.updateChannel = e.currentTarget.checked ? 'beta' : 'stable')}
         />
-        Offer me beta versions
+        {$t('settings.updates.beta')}
       </label>
       <p class="hint" style="margin-top: 6px;">
         {#if onPreRelease}
-          You're running <strong>{appVersion}</strong>, which is a beta, so you'll be offered newer
-          betas whether or not this is ticked — otherwise there'd be no way forward until the final
-          release caught up. Untick it and you'll move to the stable release as soon as it's newer
-          than what you have.
+          {$t('settings.updates.prereleaseBefore')} <strong>{appVersion}</strong>{$t('settings.updates.prereleaseAfter')}
         {:else}
-          Betas ship early with the newest fixes and are less tested. You'll be offered the stable
-          release whenever it's newer, so this isn't a one-way door.
+          {$t('settings.updates.hint')}
         {/if}
       </p>
     </div>
 
   {:else if tab === 'sync'}
     <div class="card">
-      <h3 class="section-title">🔄 Sync behavior</h3>
+      <h3 class="section-title">🔄 {$t('settings.sync.section')}</h3>
       <label class="check">
         <input type="checkbox" bind:checked={draft.autoSyncOnTrack} />
-        Sync a game immediately when it's first tracked
+        {$t('settings.sync.onTrack')}
       </label>
       <label class="check" style="margin-top: 18px;">
         <input type="checkbox" bind:checked={draft.matchByAppId} />
-        Match saves across PCs by Steam App ID
+        {$t('settings.sync.matchAppId')}
       </label>
-      <span class="hint" style="margin-top: 6px;">Links the same game across devices even when it was tracked under different names or drives (e.g. a Steam copy on one PC, a standalone copy on another). Leave this off if you deliberately keep two separate copies of the same game that shouldn't merge. You can always link games by hand from a game's page.</span>
+      <span class="hint" style="margin-top: 6px;">{$t('settings.sync.matchAppIdHint')}</span>
       <div class="field" style="margin-top: 14px;">
-        <label for="s-limit">Internet bandwidth limit</label>
+        <label for="s-limit">{$t('settings.sync.bandwidth')}</label>
         <select id="s-limit" bind:value={draft.speedLimit}>
-          <option value={0}>Unlimited (max speed)</option>
-          <option value={100}>100 KB/s (very low)</option>
-          <option value={500}>500 KB/s (medium)</option>
-          <option value={1024}>1 MB/s (high)</option>
-          <option value={5120}>5 MB/s (very high)</option>
-          <option value={10240}>10 MB/s (ultra)</option>
+          <option value={0}>{$t('settings.sync.speeds.unlimited')}</option>
+          <option value={100}>{$t('settings.sync.speeds.veryLow')}</option>
+          <option value={500}>{$t('settings.sync.speeds.medium')}</option>
+          <option value={1024}>{$t('settings.sync.speeds.high')}</option>
+          <option value={5120}>{$t('settings.sync.speeds.veryHigh')}</option>
+          <option value={10240}>{$t('settings.sync.speeds.ultra')}</option>
         </select>
-        <span class="hint">Only applies to relay (internet) syncs — LAN is never throttled.</span>
+        <span class="hint">{$t('settings.sync.bandwidthHint')}</span>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🌐 Internet relay</h3>
+      <h3 class="section-title">🌐 {$t('settings.relay.section')}</h3>
       <div class="field">
-        <label for="s-relay-url">WebSocket relay URL</label>
+        <label for="s-relay-url">{$t('settings.relay.url')}</label>
         <input id="s-relay-url" bind:value={draft.relayUrl} placeholder="wss://relay.opensave.org" />
-        <span class="hint">The relay that carries syncs across the internet. Join a room from <strong>Internet Sync</strong>.</span>
+        <span class="hint">{$t('settings.relay.urlHint')}</span>
       </div>
       <label class="check">
         <input type="checkbox" bind:checked={draft.hostRelay} />
-        Host a WAN relay server on this device
+        {$t('settings.relay.host')}
       </label>
       <p class="hint" style="margin-top: 6px;">
-        Lets friends connect directly to you instead of the public relay.
+        {$t('settings.relay.hostHint')}
       </p>
       {#if draft.hostRelay}
         <div class="field" style="margin-top: 12px;">
-          <label for="s-relay-port">Relay hosting port</label>
+          <label for="s-relay-port">{$t('settings.relay.port')}</label>
           <input id="s-relay-port" type="number" bind:value={draft.relayPort} />
-          <span class="hint">Forward this TCP port on your router so friends on the internet can reach you.</span>
+          <span class="hint">{$t('settings.relay.portHint')}</span>
         </div>
         <button class="btn small" on:click={toggleRelayInfo} disabled={relayInfoLoading}>
           {#if relayInfoLoading}
-            Looking up…
+            {$t('settings.relay.lookingUp')}
           {:else if relayInfoShown}
-            Hide my addresses
+            {$t('settings.relay.hideAddresses')}
           {:else}
-            Show my addresses to share
+            {$t('settings.relay.showAddresses')}
           {/if}
         </button>
         {#if relayInfoShown && relayInfo}
           <div class="share-banner">
-            <div class="share-title">📡 Share these with your friend</div>
-            <div class="share-row"><span>LAN IPs:</span> {relayInfo.lanIps?.join(', ') || '—'}</div>
-            <div class="share-row"><span>Public IP:</span> {relayInfo.publicIp || 'unavailable'}</div>
-            <div class="share-row"><span>Relay port:</span> {relayInfo.relayPort}</div>
+            <div class="share-title">📡 {$t('settings.relay.shareTitle')}</div>
+            <div class="share-row"><span>{$t('settings.relay.lanIps')}</span> {relayInfo.lanIps?.join(', ') || '—'}</div>
+            <div class="share-row"><span>{$t('settings.relay.publicIp')}</span> {relayInfo.publicIp || $t('settings.relay.unavailable')}</div>
+            <div class="share-row"><span>{$t('settings.relay.port')}</span> {relayInfo.relayPort}</div>
           </div>
         {/if}
       {/if}
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">☁️ Cloud backup</h3>
+      <h3 class="section-title">☁️ {$t('settings.cloud.section')}</h3>
       <label class="check">
         <input type="checkbox" bind:checked={draft.cloudSync.enabled} />
-        Mirror every new snapshot to the cloud automatically
+        {$t('settings.cloud.autoMirror')}
       </label>
       <p class="hint" style="margin-top: 6px;">
-        On by default — uploads only happen once a provider is connected on the
-        <strong>Cloud Backup</strong> page. Snapshots are stored in an <strong>OpenSave</strong> folder.
+        {$t('settings.cloud.autoMirrorHint')}
       </p>
       <div class="field" style="margin-top: 14px;">
-        <label for="s-driveid">Google Drive folder ID (optional)</label>
-        <input id="s-driveid" bind:value={draft.cloudSync.folderId} placeholder="Leave blank to use the auto-created OpenSave folder" />
+        <label for="s-driveid">{$t('settings.cloud.driveFolderId')}</label>
+        <input id="s-driveid" bind:value={draft.cloudSync.folderId} placeholder={$t('settings.cloud.driveFolderPlaceholder')} />
         <span class="hint">
-          Only set this to store snapshots in a specific existing Drive folder (the ID is the long code in
-          the folder's URL) instead of the auto-managed one.
+          {$t('settings.cloud.driveFolderHint')}
         </span>
       </div>
       <!-- The client-ID inputs that used to sit here have moved to Cloud
@@ -367,126 +331,120 @@
            signs you out, and gives OneDrive the portal link it needs — none of
            which fitted a row of three bare boxes. -->
       <div class="field" style="margin-bottom: 0;">
-        <label for="s-oauth-moved">Your own OAuth app</label>
+        <label for="s-oauth-moved">{$t('settings.cloud.ownApp')}</label>
         <span class="hint" id="s-oauth-moved">
-          Client IDs and secrets are set per provider under <strong>Cloud Backup → Use your own
-          OAuth app</strong>. Optional for Google Drive and Dropbox, which ship with credentials;
-          required for OneDrive, which has none.
+          {$t('settings.cloud.ownAppHint')}
         </span>
       </div>
     </div>
   {:else if tab === 'storage'}
     <div class="card">
-      <h3 class="section-title">🗄️ Snapshot storage</h3>
+      <h3 class="section-title">🗄️ {$t('settings.storage.section')}</h3>
       <div class="field">
-        <label for="s-backups">Snapshots folder</label>
+        <label for="s-backups">{$t('settings.storage.backups')}</label>
         <div class="path-row">
           <input id="s-backups" bind:value={draft.backupsDir} />
-          <button class="btn" on:click={pickBackupsDir}>Browse</button>
+          <button class="btn" on:click={pickBackupsDir}>{$t('settings.browse')}</button>
         </div>
-        <span class="hint">Where version-history snapshots (ZIP archives) are stored.</span>
+        <span class="hint">{$t('settings.storage.backupsHint')}</span>
       </div>
       <div class="field">
-        <label for="s-sync-backups">Pre-sync safety backups folder</label>
+        <label for="s-sync-backups">{$t('settings.storage.safety')}</label>
         <div class="path-row">
-          <input id="s-sync-backups" bind:value={draft.syncBackupsDir} placeholder="Default: ~/.opensave/backups" />
-          <button class="btn" on:click={pickSyncBackupsDir}>Browse</button>
+          <input id="s-sync-backups" bind:value={draft.syncBackupsDir} placeholder={$t('settings.storage.safetyPlaceholder')} />
+          <button class="btn" on:click={pickSyncBackupsDir}>{$t('settings.browse')}</button>
         </div>
-        <span class="hint">A safety copy of your save is taken here before every incoming sync, so a bad sync is always reversible.</span>
+        <span class="hint">{$t('settings.storage.safetyHint')}</span>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🧹 Retention</h3>
+      <h3 class="section-title">🧹 {$t('settings.retention.section')}</h3>
       <label class="check">
         <input type="checkbox" bind:checked={draft.autoDeleteBackups} />
-        Auto-delete old pre-sync backups
+        {$t('settings.retention.autoDelete')}
       </label>
       {#if draft.autoDeleteBackups}
         <div class="field" style="margin-top: 10px;">
-          <label for="s-days">Retention period</label>
+          <label for="s-days">{$t('settings.retention.period')}</label>
           <select id="s-days" bind:value={draft.autoDeleteDays}>
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-            <option value={60}>60 days</option>
-            <option value={90}>90 days</option>
-            <option value={180}>180 days</option>
+            <option value={7}>{$t('settings.retention.days', { count: 7 })}</option>
+            <option value={14}>{$t('settings.retention.days', { count: 14 })}</option>
+            <option value={30}>{$t('settings.retention.days', { count: 30 })}</option>
+            <option value={60}>{$t('settings.retention.days', { count: 60 })}</option>
+            <option value={90}>{$t('settings.retention.days', { count: 90 })}</option>
+            <option value={180}>{$t('settings.retention.days', { count: 180 })}</option>
           </select>
         </div>
       {/if}
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">📸 Snapshot history</h3>
+      <h3 class="section-title">📸 {$t('settings.history.section')}</h3>
       <div class="field">
-        <label for="s-max-snaps">Automatic snapshots to keep per game</label>
+        <label for="s-max-snaps">{$t('settings.history.autoLimit')}</label>
         <input id="s-max-snaps" type="number" min="0" style="max-width: 120px;" bind:value={draft.defaultMaxSnapshots} />
         <span class="hint">
-          Default limit for newly tracked games (0 = keep everything). The oldest are pruned first,
-          per branch. Change a single game's limit in its Configuration tab.
+          {$t('settings.history.autoHint')}
         </span>
       </div>
       <div class="field">
-        <label for="s-max-manual-snaps">Manual snapshots to keep per game</label>
+        <label for="s-max-manual-snaps">{$t('settings.history.manualLimit')}</label>
         <input id="s-max-manual-snaps" type="number" min="0" style="max-width: 120px;" bind:value={draft.defaultMaxManualSnapshots} />
         <span class="hint">
-          Snapshots you take yourself have their own budget, so games that auto-save often
-          (Elden Ring, Dragonsword) can't push them out. <strong>0 = keep forever</strong>, which is
-          the default.
+          {$t('settings.history.manualHint')}
         </span>
       </div>
       <div class="field" style="margin-bottom: 0;">
         <div>
           <button class="btn small" disabled={pruning} on:click={cleanUpSnapshots}>
-            {pruning ? 'Cleaning up…' : '🧹 Clean up now'}
+            {pruning ? $t('settings.cleanup.cleaning') : $t('settings.cleanup.action')}
           </button>
         </div>
         <span class="hint">
-          Applies the limit to every existing game and deletes snapshots beyond it across all
-          branches — frees disk space immediately.
+          {$t('settings.cleanup.hint')}
         </span>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🔎 Game scanner</h3>
+      <h3 class="section-title">🔎 {$t('settings.scanner.section')}</h3>
       <div class="field" style="margin-bottom: 0;">
-        <label for="s-scan-paths">Extra folders to auto-scan</label>
-        <span class="hint">Auto-scan already checks Steam and common emulators — add custom libraries here.</span>
+        <label for="s-scan-paths">{$t('settings.scanner.extraFolders')}</label>
+        <span class="hint">{$t('settings.scanner.extraHint')}</span>
         {#each draft.customScanPaths ?? [] as p, i}
           <div class="rule-row">
             <span class="rule-path" title={p}>{p}</span>
             <button class="btn small danger" on:click={() => removeScanPath(i)}>✕</button>
           </div>
         {/each}
-        <button id="s-scan-paths" class="btn small" on:click={addScanPath}>+ Add folder</button>
+        <button id="s-scan-paths" class="btn small" on:click={addScanPath}>{$t('settings.scanner.addFolder')}</button>
       </div>
 
       <div class="field" style="margin: 18px 0 0;">
-        <label for="s-exclude-paths">Folders to exclude</label>
-        <span class="hint">Auto-scan skips these folders and everything inside them — handy for stale save locations (like an old GSE saves directory) you don't want offered again.</span>
+        <label for="s-exclude-paths">{$t('settings.scanner.excludeFolders')}</label>
+        <span class="hint">{$t('settings.scanner.excludeHint')}</span>
         {#each draft.excludePaths ?? [] as p, i}
           <div class="rule-row">
             <span class="rule-path" title={p}>{p}</span>
             <button class="btn small danger" on:click={() => removeExcludePath(i)}>✕</button>
           </div>
         {/each}
-        <button id="s-exclude-paths" class="btn small" on:click={addExcludePath}>+ Exclude folder</button>
+        <button id="s-exclude-paths" class="btn small" on:click={addExcludePath}>{$t('settings.scanner.excludeFolder')}</button>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🧹 Reset tracking</h3>
+      <h3 class="section-title">🧹 {$t('settings.reset.section')}</h3>
       <div class="field" style="margin-bottom: 0;">
-        <span class="hint">Untrack every game at once, then re-run Auto-scan to add them back from the correct locations — useful after moving games between launchers or drives. This only clears the tracking list; your save snapshots on disk are kept.</span>
+        <span class="hint">{$t('settings.reset.hint')}</span>
         <button
           class="btn small danger"
           style="margin-top: 12px; width: fit-content; align-self: flex-start;"
           on:click={resetTracking}
           disabled={resetting || $gameList.length === 0}
         >
-          {#if resetting}Untracking…{:else if $gameList.length === 0}No games tracked{:else}Untrack all {$gameList.length} game{$gameList.length === 1 ? '' : 's'}{/if}
+          {#if resetting}{$t('settings.reset.working')}{:else if $gameList.length === 0}{$t('settings.reset.empty')}{:else}{$t('settings.reset.action', { count: $gameList.length })}{/if}
         </button>
       </div>
     </div>
@@ -522,89 +480,34 @@
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">⚙️ Network</h3>
+      <h3 class="section-title">⚙️ {$t('settings.network.section')}</h3>
       <div class="field" style="margin-bottom: 0;">
-        <label for="s-port">Daemon port</label>
+        <label for="s-port">{$t('settings.network.port')}</label>
         <input id="s-port" type="number" bind:value={draft.port} />
-        <span class="hint">The local API + LAN peer port. Changing it requires a restart.</span>
+        <span class="hint">{$t('settings.network.portHint')}</span>
       </div>
     </div>
 
     <div class="card" style="margin-top: 14px;">
-      <h3 class="section-title">🔀 Cross-platform path translation</h3>
+      <h3 class="section-title">🔀 {$t('settings.paths.section')}</h3>
       <div class="field" style="margin-bottom: 0;">
-        <span class="hint">
-          Rewrites a peer's save paths to local conventions, e.g. "C:\Users\me\Saves" → "/home/deck/saves".
-        </span>
+        <span class="hint">{$t('settings.paths.hint')}</span>
         {#each draft.pathTranslations ?? [] as rule, i}
           <div class="rule-row">
-            <input placeholder="From pattern" bind:value={rule.fromPattern} />
+            <input placeholder={$t('settings.paths.from')} bind:value={rule.fromPattern} />
             <span class="arrow">→</span>
-            <input placeholder="To pattern" bind:value={rule.toPattern} />
+            <input placeholder={$t('settings.paths.to')} bind:value={rule.toPattern} />
             <button class="btn small danger" on:click={() => removeRule(i)}>✕</button>
           </div>
         {/each}
-        <button id="s-rules" class="btn small" on:click={addRule}>+ Add rule</button>
+        <button id="s-rules" class="btn small" on:click={addRule}>{$t('settings.paths.add')}</button>
       </div>
-    </div>
-  {:else if tab === 'support'}
-    <div class="card support-card">
-      <div class="support-hero">
-        <div class="support-badge">💜</div>
-        <div class="support-hero-text">
-          <h3 class="support-title">Support the OpenSave upstream</h3>
-          <p class="support-lede">
-            Free and open source, and it stays that way — no accounts, no ads, no telemetry,
-            and nothing locked behind a payment.
-          </p>
-        </div>
-      </div>
-
-      <div class="support-split">
-        <div class="support-left">
-          <p class="support-body">
-            It's built and maintained in spare time. If it's saved you the hassle of copying
-            save folders between machines, you're welcome to chip in.
-          </p>
-          <ul class="support-points">
-            <li><span class="pt-icon">🌐</span> Keeps the public relay online</li>
-            <li><span class="pt-icon">🎮</span> More games and emulators detected</li>
-            <li><span class="pt-icon">🛠️</span> Time for fixes and new features</li>
-          </ul>
-
-          <div class="support-actions">
-            <button class="btn primary support-cta" on:click={openDonatePage}>
-              {donateOpened ? 'Open again ↗' : 'Open donation page ↗'}
-            </button>
-            {#if donateOpened}
-              <span class="support-opened">Opened in your browser — thank you.</span>
-            {/if}
-          </div>
-          <p class="support-foot">
-            Prefer not to donate? Reporting a bug or suggesting a feature helps just as much.
-          </p>
-        </div>
-
-        <div class="support-qr">
-          <!-- Rendered locally from DONATE_URL; no network request, no external
-               image service. Kept on a light plate because phone cameras
-               struggle with inverted (light-on-dark) QR codes. -->
-          <div class="qr-plate">{@html qrSvg}</div>
-          <span class="qr-caption">Scan to pay<br />from your phone</span>
-        </div>
-      </div>
-
-      <p class="support-note">
-        Payment is handled entirely by Gumroad — GameSave Go never sees your card details.
-      </p>
     </div>
   {/if}
 
-  {#if tab !== 'support'}
-    <div class="save-bar">
-      <button class="btn primary" disabled={busy} on:click={save}>{$t('settings.saveChanges')}</button>
-    </div>
-  {/if}
+  <div class="save-bar">
+    <button class="btn primary" disabled={busy} on:click={save}>{$t('settings.saveChanges')}</button>
+  </div>
 {/if}
 
 <style>
@@ -648,173 +551,6 @@
   }
   .arrow {
     color: var(--text-faint);
-  }
-  /* Support tab: set apart from the settings tabs (it configures nothing) but
-     never shouty — no accent fill, just a softer separated pill. */
-  .support-tab {
-    margin-left: auto;
-  }
-  /* Discord's own blurple, so it is recognisable at a glance, but kept at
-     the same weight as the tabs beside it rather than shouting over them. */
-  .discord-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: #b9bbfa;
-    border-color: rgba(88, 101, 242, 0.4);
-  }
-  .discord-tab:hover {
-    color: #fff;
-    background: #5865f2;
-    border-color: #5865f2;
-  }
-  .discord-glyph {
-    display: inline-flex;
-  }
-  .ext {
-    font-size: 0.72rem;
-    opacity: 0.7;
-  }
-  /* This is the one tab that isn't a settings form, so it carries a little
-     accent identity instead of reading as another block of options. */
-  .support-hero {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 22px;
-    padding: 18px 20px;
-    border-radius: var(--radius-lg);
-    background:
-      radial-gradient(120% 160% at 0% 0%, var(--accent-soft), transparent 62%),
-      var(--bg);
-    border: 1px solid var(--border);
-  }
-  .support-badge {
-    flex: none;
-    width: 46px;
-    height: 46px;
-    display: grid;
-    place-items: center;
-    font-size: 1.45rem;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    border: 1px solid rgba(138, 99, 244, 0.35);
-  }
-  .support-hero-text {
-    min-width: 0;
-  }
-  .support-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-    margin: 0 0 5px;
-  }
-  .support-lede {
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    margin: 0;
-    line-height: 1.5;
-    max-width: 68ch;
-  }
-  .support-body {
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    margin: 0 0 16px;
-    line-height: 1.5;
-    max-width: 56ch;
-  }
-  .support-points {
-    list-style: none;
-    margin: 0 0 22px;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .support-points li {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    font-size: 0.86rem;
-    color: var(--text);
-  }
-  .pt-icon {
-    flex: none;
-    width: 28px;
-    height: 28px;
-    display: grid;
-    place-items: center;
-    font-size: 0.85rem;
-    border-radius: 8px;
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-  }
-  .support-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .support-cta {
-    padding: 9px 18px;
-  }
-  .support-foot {
-    font-size: 0.8rem;
-    color: var(--text-faint);
-    margin: 16px 0 0;
-  }
-  .support-split {
-    display: flex;
-    gap: 32px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-  .support-left {
-    flex: 1;
-    min-width: 260px;
-  }
-  .support-opened {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-  }
-  /* Framed panel so the code reads as a deliberate element rather than an
-     image floating in empty space. */
-  .support-qr {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 16px;
-    border-radius: var(--radius-lg);
-    background: var(--bg);
-    border: 1px solid var(--border);
-  }
-  /* Light plate: phone cameras are unreliable at reading inverted QR codes,
-     so the code stays dark-on-light even in the dark theme. */
-  .qr-plate {
-    background: #fff;
-    padding: 10px;
-    border-radius: 10px;
-    line-height: 0;
-  }
-  .qr-plate :global(svg) {
-    display: block;
-    width: 124px;
-    height: 124px;
-    shape-rendering: crispEdges;
-  }
-  .qr-caption {
-    font-size: 0.76rem;
-    color: var(--text-faint);
-    text-align: center;
-    line-height: 1.4;
-  }
-  .support-note {
-    font-size: 0.78rem;
-    color: var(--text-faint);
-    margin: 18px 0 0;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
   }
   .section-title {
     font-size: 0.95rem;

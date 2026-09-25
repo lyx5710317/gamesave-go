@@ -5,6 +5,4 @@
 // All of these are opened with native.openExternal — in the system browser,
 // never inside the app window.
 
-export const DISCORD_URL = 'https://discord.gg/hvBv92DZvn';
-export const DONATE_URL = 'https://opensave.gumroad.com/l/usygu';
 export { PRODUCT_REPOSITORY_URL as GITHUB_URL } from './branding.js';

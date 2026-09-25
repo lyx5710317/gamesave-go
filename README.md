@@ -12,27 +12,24 @@
 
 [![Development](https://img.shields.io/badge/status-development-8a63f4)](https://github.com/lyx5710317/gamesave-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/hvBv92DZvn)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Steam%20Deck-lightgrey)
 
 *A complete Go rewrite of the original Node.js/Electron app: one small native binary, no runtime to install, and wire-compatible with existing peers.*
 
-[Install](#install) · [Quick start](#quick-start) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [CLI](#command-line) · [Self-host the relay](#self-hosting-the-relay) · [FAQ](#faq) · [**Discord**](https://discord.gg/hvBv92DZvn)
+[Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [CLI](#command-line) · [Self-host the relay](#self-hosting-the-relay) · [FAQ](#faq)
 
 <br>
-
-<img src="docs/screenshots/home-library.png" alt="OpenSave library — tracked games with cover art, branches, and snapshot counts" width="850" />
 
 </div>
 
 ---
 
-## Why OpenSave
+## Why GameSave Go
 
 Steam Cloud only covers games bought on Steam — and only when the developer opts in. Everything else (emulators, GOG, Epic, single-player games with no cloud support) is on you: manually copying save folders between your desktop, laptop, and Steam Deck, and hoping you grabbed the newest one.
 
-OpenSave gives **every** game the Steam Cloud experience:
+GameSave Go gives **every** game the Steam Cloud experience:
 
 - **You own it.** Saves sync directly between *your* devices. No account to create, nothing stored on someone else's server.
 - **It's automatic.** Auto-detects hundreds of games, watches for changes, and syncs the moment a save is written.
@@ -48,7 +45,7 @@ OpenSave gives **every** game the Steam Cloud experience:
 - **P2P sync** — automatic over LAN (zero-config discovery) or across the internet through a relay **room code** — no port forwarding. A paired-device model means every connection is explicitly approved.
 - **Snapshot history** — every change creates a versioned snapshot. Roll back a whole save or a single file; branches keep parallel playthroughs (and conflict resolutions) safe.
 - **Smart conflict handling** — diverged saves are detected by **sync lineage**, not wall-clock timestamps. Keep yours, keep theirs, or keep both on a new branch.
-- **Cloud backup** — optional mirroring to Google Drive, Dropbox, OneDrive, WebDAV, a webhook, or a local/NAS folder. Any OAuth provider can use your own app credentials instead of the built-in ones — required for OneDrive, and the fix for Google Drive's weekly re-login.
+- **Cloud backup** — optional mirroring to Jianguoyun (the recommended mainland-China WebDAV preset), Google Drive, other WebDAV, a webhook, or a local/NAS folder. Jianguoyun currently runs in conservative backup-only mode; verified remote-vault joining and ancestry-aware multi-device cloud sync are not complete. Baidu Netdisk, OneDrive, and Dropbox remain implemented or planned in the codebase but their setup cards are temporarily hidden. Existing saved configurations are not deleted by this UI change.
 - **Cross-device game matching** — the same title tracked under different names on two machines (a Steam install here, a differently-named folder there) can be matched by Steam App ID or linked by hand. App-ID matching is opt-in, so two separate copies of a game are never merged without asking.
 - **A full command line** — `opensave` does everything the app does, for a Steam Deck in Game Mode or a headless server. See [Command line](#command-line).
 - **In-app updates** — one-click update from GitHub releases, pull a newer build straight from a paired device, or `opensave update` from the terminal.
@@ -56,28 +53,7 @@ OpenSave gives **every** game the Steam Cloud experience:
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="docs/screenshots/auto-scan.png" alt="Auto-scan results — detected saves as a cover-art grid" /><br>
-      <sub><b>Auto-scan</b> — 158 saves found on this PC, shown as cover art. Games, emulators, and repacks, one click to track.</sub>
-    </td>
-    <td align="center">
-      <img src="docs/screenshots/cloud-backup.png" alt="Cloud Backup — provider selection with Google Drive connected" /><br>
-      <sub><b>Cloud backup</b> — mirror snapshots to Drive, Dropbox, OneDrive, WebDAV, or a NAS folder. Optional; P2P needs no cloud.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="docs/screenshots/devices-pairing.png" alt="Devices — internet pairing with a relay room code" /><br>
-      <sub><b>Internet sync</b> — pair devices anywhere with a room code. No port forwarding, and the relay never stores saves.</sub>
-    </td>
-    <td align="center">
-      <img src="docs/screenshots/home-library.png" alt="Home — tracked library with snapshots per game" /><br>
-      <sub><b>Your library</b> — every tracked game with its branch and snapshot history, one Sync all button away.</sub>
-    </td>
-  </tr>
-</table>
+The inherited screenshots show the upstream interface and are intentionally not used here. Current GameSave Go screenshots will be added after the Windows UI review.
 
 ## Install
 
@@ -192,8 +168,7 @@ to do next.
 **[→ Full CLI guide](docs/CLI.md)** — the daemon model, which machine each
 command belongs on, and worked sequences for pairing, internet sync, running
 headless, snapshots, split saves and scripting. The tables below are the
-summary; that is the walkthrough. There is also one on the
-[website](https://open-save.vercel.app/cli.html).
+summary; that is the walkthrough.
 
 ### Install
 
@@ -406,7 +381,7 @@ go test ./e2e/...      # end-to-end pairing & sync tests
 
 ## Self-hosting the relay
 
-The relay is stateless — it brokers room codes and proxies OAuth, and writes no save to disk. What it forwards is encrypted in transit, but that encryption ends at the relay rather than at your other device, so a relay operator could read what passes through. Ours is `wss://relay.opensave.org`; run your own so that nobody but you is on the path:
+The relay is stateless — it brokers room codes and proxies OAuth, and writes no save to disk. What it forwards is encrypted in transit, but that encryption ends at the relay rather than at your other device, so a relay operator could read what passes through. The inherited default is `wss://relay.opensave.org`; run your own so that nobody but you is on the path:
 
 ```bash
 ./opensave-relay                     # listens on :8386

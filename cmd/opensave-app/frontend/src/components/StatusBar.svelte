@@ -4,6 +4,7 @@
   import { native } from '../lib/api.js';
   import { PRODUCT_NAME } from '../lib/branding.js';
   import AboutModal from './AboutModal.svelte';
+  import { t } from '../lib/i18n.js';
 
   // Replaced by AppInfo() as soon as it answers; see FALLBACK_INFO.
   let version = 'dev';
@@ -17,8 +18,8 @@
   $: running = Object.entries($syncActivity).filter(([, s]) => s.state === 'running');
   $: onlinePeers = Object.values($peers).filter((p) => p.status === 'online').length;
   $: statusText = running.length
-    ? `Syncing ${running.length} game${running.length > 1 ? 's' : ''}…`
-    : 'No syncs in progress';
+    ? $t('status.syncing', { count: running.length })
+    : $t('status.idle');
 </script>
 
 {#if $showAbout}
@@ -35,10 +36,10 @@
   </div>
   <div class="right">
     {#if $wanRoom?.connected}
-      <span class="wan">relay: {$wanRoom.roomCode}</span>
+      <span class="wan">{$t('status.relay', { code: $wanRoom.roomCode })}</span>
     {/if}
-    <span>{onlinePeers} peer{onlinePeers === 1 ? '' : 's'} online</span>
-    <button class="ver" on:click={() => showAbout.set(true)} title={`About ${PRODUCT_NAME}`}>{PRODUCT_NAME} v{version}</button>
+    <span>{$t('status.peersOnline', { count: onlinePeers })}</span>
+    <button class="ver" on:click={() => showAbout.set(true)} title={$t('about.ariaLabel', { app: PRODUCT_NAME })}>{PRODUCT_NAME} v{version}</button>
   </div>
 </footer>
 

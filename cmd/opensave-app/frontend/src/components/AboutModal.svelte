@@ -3,9 +3,10 @@
   import { native } from '../lib/api.js';
   import { navigate } from '../lib/stores.js';
   import { backdropClose } from '../lib/backdrop.js';
-  import { DISCORD_URL, GITHUB_URL } from '../lib/links.js';
+  import { GITHUB_URL } from '../lib/links.js';
   import { PRODUCT_NAME } from '../lib/branding.js';
   import logoUrl from '../assets/logo.png';
+  import { t } from '../lib/i18n.js';
 
   export let onClose = () => {};
 
@@ -36,33 +37,27 @@
 <svelte:window on:keydown={onKeydown} />
 
 <div class="backdrop" use:backdropClose={onClose} role="presentation">
-  <div class="modal" role="dialog" aria-modal="true" aria-label={`About ${PRODUCT_NAME}`}>
-    <button class="x" on:click={onClose} title="Close" aria-label="Close">✕</button>
+  <div class="modal" role="dialog" aria-modal="true" aria-label={$t('about.ariaLabel', { app: PRODUCT_NAME })}>
+    <button class="x" on:click={onClose} title={$t('common.close')} aria-label={$t('common.close')}>✕</button>
     <img class="logo" src={logoUrl} alt="" />
     <h2>{info?.name ?? PRODUCT_NAME}</h2>
     <div class="ver">
-      Version {info?.version ?? '—'}{#if buildLabel}<span class="build"> · built {buildLabel}</span>{/if}
+      {$t('about.version', { version: info?.version ?? '—' })}{#if buildLabel}<span class="build"> · {$t('about.built', { date: buildLabel })}</span>{/if}
     </div>
-    <p class="tagline">{info?.tagline ?? ''}</p>
+    <p class="tagline">{$t('about.tagline')}</p>
 
     <div class="meta">
-      <div><span>License</span> {info?.license ?? 'MIT'}</div>
-      <div><span>Built with</span> {info?.tech ?? 'Go + Wails'}</div>
+      <div><span>{$t('about.license')}</span> {info?.license ?? 'MIT'}</div>
+      <div><span>{$t('about.builtWith')}</span> {info?.tech ?? 'Go + Wails'}</div>
     </div>
 
     <div class="links">
-      <button class="link-btn discord" on:click={() => native.openExternal(DISCORD_URL)}>
-        <svg viewBox="0 0 24 18" width="16" height="12" fill="currentColor" aria-hidden="true">
-          <path d="M20.32 1.53A19.8 19.8 0 0 0 15.43 0c-.21.38-.46.9-.63 1.31a18.3 18.3 0 0 0-5.6 0C9.03.9 8.77.38 8.56 0A19.74 19.74 0 0 0 3.67 1.53C.57 6.19-.27 10.73.15 15.21A19.9 19.9 0 0 0 6.18 18c.49-.66.92-1.37 1.29-2.11-.71-.27-1.39-.6-2.03-.98.17-.13.34-.26.5-.4a14.2 14.2 0 0 0 12.12 0c.16.14.33.27.5.4-.64.38-1.32.71-2.03.98.37.74.8 1.45 1.29 2.11a19.87 19.87 0 0 0 6.03-2.79c.5-5.19-.84-9.69-3.53-13.68ZM8.02 12.46c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4c1.2 0 2.17 1.09 2.15 2.4 0 1.32-.95 2.4-2.15 2.4Z" />
-        </svg>
-        Upstream Discord
-      </button>
-      <button class="link-btn" on:click={() => native.openExternal(GITHUB_URL)}>GitHub</button>
-      <button class="link-btn" on:click={openChangelog}>Changelog</button>
+      <button class="link-btn" on:click={() => native.openExternal(GITHUB_URL)}>{$t('about.sourceCode')}</button>
+      <button class="link-btn" on:click={openChangelog}>{$t('nav.changelog')}</button>
     </div>
 
     <p class="copy">{info?.copyright ?? ''}</p>
-    <p class="note">Wire-compatible with the original Node.js/Electron OpenSave — Go and JS devices sync together.</p>
+    <p class="note">{$t('about.compatibility')}</p>
   </div>
 </div>
 
@@ -168,19 +163,6 @@
   .link-btn:hover {
     background: var(--bg-hover);
     color: var(--text);
-  }
-  /* Discord's blurple, so the one link people are being pointed to is the
-     one their eye lands on first. */
-  .link-btn.discord {
-    color: #fff;
-    background: #5865f2;
-    border-color: #5865f2;
-    font-weight: 600;
-  }
-  .link-btn.discord:hover {
-    background: #4752c4;
-    border-color: #4752c4;
-    color: #fff;
   }
   .copy {
     font-size: 0.78rem;

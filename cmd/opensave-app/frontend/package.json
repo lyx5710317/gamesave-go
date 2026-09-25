@@ -15,8 +15,5 @@
     "svelte": "^4.2.19",
     "vite": "^5.4.11",
     "vitest": "^2.1.9"
-  },
-  "dependencies": {
-    "qrcode-generator": "^2.0.4"
   }
 }
