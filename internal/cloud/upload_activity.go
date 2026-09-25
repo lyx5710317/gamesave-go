@@ -15,14 +15,16 @@ const maxFinishedUploads = 40
 // It deliberately contains no local path, remote URL, token, or raw provider
 // error. It is observability, not a durable retry queue.
 type UploadRecord struct {
-	ID         uint64 `json:"id"`
-	GameID     string `json:"gameId,omitempty"`
-	SnapshotID string `json:"snapshotId,omitempty"`
-	Provider   string `json:"provider"`
-	Status     string `json:"status"`            // running, succeeded, failed
-	Failure    string `json:"failure,omitempty"` // configuration, conflict, or transfer
-	StartedAt  string `json:"startedAt"`
-	FinishedAt string `json:"finishedAt,omitempty"`
+	ID          uint64 `json:"id"`
+	GameID      string `json:"gameId,omitempty"`
+	SnapshotID  string `json:"snapshotId,omitempty"`
+	Provider    string `json:"provider"`
+	Status      string `json:"status"`                // running, succeeded, failed
+	Failure     string `json:"failure,omitempty"`     // configuration, conflict, or transfer
+	SafetyCheck string `json:"safetyCheck,omitempty"` // fixed diagnostic code, never raw provider data
+	HTTPStatus  int    `json:"httpStatus,omitempty"`  // status only, never response body
+	StartedAt   string `json:"startedAt"`
+	FinishedAt  string `json:"finishedAt,omitempty"`
 }
 
 func (s *Service) beginUpload(providerName, fileName string) uint64 {
@@ -72,6 +74,11 @@ func (s *Service) finishUpload(id uint64, uploadErr error) {
 				s.uploads[i].Failure = "incomplete_inventory"
 			} else if errors.Is(uploadErr, ErrJianguoyunCondition) {
 				s.uploads[i].Failure = "unsafe_condition"
+				var safety *jianguoyunSafetyFailure
+				if errors.As(uploadErr, &safety) {
+					s.uploads[i].SafetyCheck = safety.Check
+					s.uploads[i].HTTPStatus = safety.Status
+				}
 			} else if errors.Is(uploadErr, ErrJianguoyunIntegrity) {
 				s.uploads[i].Failure = "integrity"
 			}

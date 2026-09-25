@@ -36,9 +36,43 @@ var (
 	ErrJianguoyunRateLimit  = errors.New("坚果云请求过于频繁：已达到 WebDAV 访问限制，请稍后重试")
 	ErrJianguoyunQuota      = errors.New("坚果云流量或空间不足：请检查账户配额后重试")
 	ErrJianguoyunIncomplete = errors.New("坚果云远端清单可能不完整，已停止上传判断")
-	ErrJianguoyunCondition  = errors.New("坚果云服务端未证明同名条件写入安全，已停止备份")
-	ErrJianguoyunIntegrity  = errors.New("坚果云上传后大小验证失败，请检查远端对象")
+	ErrJianguoyunCondition  = errors.New("坚果云未通过安全写入验证，已停止上传")
+	ErrJianguoyunIntegrity  = errors.New("坚果云上传后内容验证失败，请检查远端对象")
 )
+
+type jianguoyunCreateMode uint8
+
+const (
+	jianguoyunCreateUnknown jianguoyunCreateMode = iota
+	jianguoyunCreateConditional
+	jianguoyunCreateMove
+)
+
+// Only controlled method/status metadata reaches transfer activity. Never
+// expose response bodies, request URLs, account names, or credentials there.
+type jianguoyunSafetyFailure struct {
+	Check  string
+	Status int
+}
+
+func (e *jianguoyunSafetyFailure) Error() string {
+	label := map[string]string{
+		"probe_cleanup":  "测试文件清理失败",
+		"move_first":     "首次 WebDAV 移动失败",
+		"move_overwrite": "服务端未拒绝覆盖移动",
+		"move_contents":  "移动后内容验证失败",
+		"stage_name":     "临时文件名未确认空闲",
+	}[e.Check]
+	if label == "" {
+		label = "安全检查失败"
+	}
+	if e.Status > 0 {
+		return fmt.Sprintf("%s：%s（HTTP %d）", ErrJianguoyunCondition, label, e.Status)
+	}
+	return fmt.Sprintf("%s：%s", ErrJianguoyunCondition, label)
+}
+
+func (e *jianguoyunSafetyFailure) Unwrap() error { return ErrJianguoyunCondition }
 
 func jianguoyunStatusError(operation string, status int) error {
 	switch status {
@@ -182,16 +216,40 @@ func (s *Service) ensureJianguoyunFolder(cfg store.CloudConfig) error {
 	return jianguoyunStatusError("创建目录", status)
 }
 
-func (s *Service) verifyJianguoyunConditionalCreate(cfg store.CloudConfig) (result error) {
+// Probe only harmless, unpredictable objects. A WebDAV server may ignore HTTP
+// conditional PUT but honor the standard MOVE Overwrite:F precondition. The
+// latter lets backup-only uploads stage under a unique name and publish the
+// verified stage without a direct PUT to the canonical snapshot name.
+func (s *Service) verifyJianguoyunCreateOnly(cfg store.CloudConfig) (jianguoyunCreateMode, error) {
 	s.jianguoyunProbeMu.Lock()
 	defer s.jianguoyunProbeMu.Unlock()
 	key := sha256.Sum256([]byte(cfg.URL + "\x00" + cfg.Username + "\x00" + cfg.Password))
 	if s.jianguoyunProbeOK && s.jianguoyunProbeKey == key {
-		return nil
+		return s.jianguoyunProbeMode, nil
 	}
+	s.jianguoyunProbeOK = false
+	s.jianguoyunProbeMode = jianguoyunCreateUnknown
+	supported, err := s.probeJianguoyunConditionalCreate(cfg)
+	if err != nil {
+		return jianguoyunCreateUnknown, err
+	}
+	mode := jianguoyunCreateConditional
+	if !supported {
+		if err := s.probeJianguoyunMoveNoOverwrite(cfg); err != nil {
+			return jianguoyunCreateUnknown, err
+		}
+		mode = jianguoyunCreateMove
+	}
+	s.jianguoyunProbeOK = true
+	s.jianguoyunProbeKey = key
+	s.jianguoyunProbeMode = mode
+	return mode, nil
+}
+
+func (s *Service) probeJianguoyunConditionalCreate(cfg store.CloudConfig) (supported bool, result error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return errors.New("无法生成坚果云条件写入探针")
+		return false, errors.New("无法生成坚果云条件写入探针")
 	}
 	probeURL := joinURL(cfg.URL, ".gamesavego-condition-probe-"+hex.EncodeToString(nonce[:])+".zip")
 	put := func(body []byte) (int, error) {
@@ -209,53 +267,188 @@ func (s *Service) verifyJianguoyunConditionalCreate(cfg store.CloudConfig) (resu
 		defer resp.Body.Close()
 		return resp.StatusCode, nil
 	}
-	first, err := put([]byte("probe-one"))
-	if err != nil {
-		return err
-	}
-	if first != http.StatusCreated && first != http.StatusNoContent {
-		return jianguoyunStatusError("验证条件写入", first)
-	}
 	defer func() {
 		req, err := http.NewRequest(http.MethodDelete, probeURL, nil)
 		if err != nil {
-			s.jianguoyunProbeOK = false
-			result = errors.Join(result, ErrJianguoyunCondition)
+			result = errors.Join(result, &jianguoyunSafetyFailure{Check: "probe_cleanup"})
 			return
 		}
 		applyBasicAuth(req, cfg.Username, cfg.Password)
 		resp, err := s.jianguoyunDo(req, false)
 		if err != nil {
-			s.jianguoyunProbeOK = false
-			result = errors.Join(result, ErrJianguoyunCondition)
+			result = errors.Join(result, &jianguoyunSafetyFailure{Check: "probe_cleanup"})
 			return
 		}
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			s.jianguoyunProbeOK = false
-			result = errors.Join(result, ErrJianguoyunCondition)
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+			result = errors.Join(result, &jianguoyunSafetyFailure{Check: "probe_cleanup", Status: resp.StatusCode})
 		}
 	}()
+	first, err := put([]byte("probe-one"))
+	if err != nil {
+		return false, err
+	}
+	if first != http.StatusCreated && first != http.StatusNoContent {
+		return false, jianguoyunStatusError("验证条件写入", first)
+	}
 	second, err := put([]byte("probe-two"))
 	if err != nil {
-		return err
+		return false, err
 	}
 	if second != http.StatusPreconditionFailed {
-		return ErrJianguoyunCondition
+		if second == http.StatusUnauthorized || second == http.StatusForbidden || second == http.StatusTooManyRequests || second == http.StatusInsufficientStorage || second >= 500 {
+			return false, jianguoyunStatusError("验证条件写入", second)
+		}
+		return false, nil
 	}
 	get, _ := http.NewRequest(http.MethodGet, probeURL, nil)
 	applyBasicAuth(get, cfg.Username, cfg.Password)
 	resp, err := s.jianguoyunDo(get, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 32))
 	if err != nil || resp.StatusCode != http.StatusOK || !bytes.Equal(body, []byte("probe-one")) {
-		return ErrJianguoyunCondition
+		return false, nil
 	}
-	s.jianguoyunProbeOK = true
-	s.jianguoyunProbeKey = key
+	return true, nil
+}
+
+// RFC 4918 requires MOVE with Overwrite:F to refuse an occupied destination.
+// Verify the behavior on two disposable objects, including both objects'
+// contents after the refused move. This is a compatibility check, not a proof
+// of atomicity across real clients; remote-vault multi-device writes stay off.
+func (s *Service) probeJianguoyunMoveNoOverwrite(cfg store.CloudConfig) (result error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("%w：无法生成移动探针", ErrJianguoyunCondition)
+	}
+	stem := "gamesavego-move-probe-" + hex.EncodeToString(nonce[:])
+	sourceA := joinURL(cfg.URL, stem+"-a.zip")
+	sourceB := joinURL(cfg.URL, stem+"-b.zip")
+	target := joinURL(cfg.URL, stem+"-target.zip")
+	defer func() {
+		for _, objectURL := range []string{sourceA, sourceB, target} {
+			if err := s.deleteJianguoyunProbe(cfg, objectURL); err != nil {
+				result = errors.Join(result, err)
+			}
+		}
+	}()
+	for _, item := range []struct {
+		url  string
+		body []byte
+	}{
+		{sourceA, []byte("move-probe-one")},
+		{sourceB, []byte("move-probe-two")},
+	} {
+		status, err := s.putJianguoyunProbe(cfg, item.url, item.body)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusCreated && status != http.StatusNoContent {
+			return jianguoyunStatusError("验证禁止覆盖移动", status)
+		}
+	}
+	status, err := s.moveJianguoyun(cfg, sourceA, target)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusOK {
+		return &jianguoyunSafetyFailure{Check: "move_first", Status: status}
+	}
+	if ok, err := s.jianguoyunObjectMatches(cfg, sourceA, nil, http.StatusNotFound); err != nil || !ok {
+		return errors.Join(err, &jianguoyunSafetyFailure{Check: "move_contents"})
+	}
+	status, err = s.moveJianguoyun(cfg, sourceB, target)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusPreconditionFailed && status != http.StatusConflict {
+		return &jianguoyunSafetyFailure{Check: "move_overwrite", Status: status}
+	}
+	for _, item := range []struct {
+		url  string
+		body []byte
+	}{
+		{target, []byte("move-probe-one")},
+		{sourceB, []byte("move-probe-two")},
+	} {
+		ok, err := s.jianguoyunObjectMatches(cfg, item.url, item.body, http.StatusOK)
+		if err != nil || !ok {
+			return errors.Join(err, &jianguoyunSafetyFailure{Check: "move_contents"})
+		}
+	}
+	return nil
+}
+
+func (s *Service) putJianguoyunProbe(cfg store.CloudConfig, objectURL string, body []byte) (int, error) {
+	req, err := http.NewRequest(http.MethodPut, objectURL, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("If-None-Match", "*")
+	req.Header.Set("Content-Type", "application/zip")
+	applyBasicAuth(req, cfg.Username, cfg.Password)
+	resp, err := s.jianguoyunDo(req, false)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func (s *Service) moveJianguoyun(cfg store.CloudConfig, sourceURL, targetURL string) (int, error) {
+	req, err := http.NewRequest("MOVE", sourceURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Destination", targetURL)
+	req.Header.Set("Overwrite", "F")
+	applyBasicAuth(req, cfg.Username, cfg.Password)
+	resp, err := s.jianguoyunDo(req, false)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func (s *Service) jianguoyunObjectMatches(cfg store.CloudConfig, objectURL string, expected []byte, expectedStatus int) (bool, error) {
+	req, err := http.NewRequest(http.MethodGet, objectURL, nil)
+	if err != nil {
+		return false, err
+	}
+	applyBasicAuth(req, cfg.Username, cfg.Password)
+	resp, err := s.jianguoyunDo(req, true)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != expectedStatus {
+		return false, nil
+	}
+	if expectedStatus != http.StatusOK {
+		return true, nil
+	}
+	actual, err := io.ReadAll(io.LimitReader(resp.Body, int64(len(expected)+1)))
+	return err == nil && bytes.Equal(actual, expected), err
+}
+
+func (s *Service) deleteJianguoyunProbe(cfg store.CloudConfig, objectURL string) error {
+	req, err := http.NewRequest(http.MethodDelete, objectURL, nil)
+	if err != nil {
+		return &jianguoyunSafetyFailure{Check: "probe_cleanup"}
+	}
+	applyBasicAuth(req, cfg.Username, cfg.Password)
+	resp, err := s.jianguoyunDo(req, false)
+	if err != nil {
+		return &jianguoyunSafetyFailure{Check: "probe_cleanup"}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		return &jianguoyunSafetyFailure{Check: "probe_cleanup", Status: resp.StatusCode}
+	}
 	return nil
 }
 
@@ -275,11 +468,67 @@ func (s *Service) uploadJianguoyun(cfg store.CloudConfig, file *os.File, fileNam
 			return ErrRemoteSnapshotConflict
 		}
 	}
-	if err := s.verifyJianguoyunConditionalCreate(cfg); err != nil {
+	mode, err := s.verifyJianguoyunCreateOnly(cfg)
+	if err != nil {
 		return err
 	}
 	target := joinURL(cfg.URL, url.PathEscape(fileName))
-	req, err := http.NewRequest(http.MethodPut, target, file)
+	if mode == jianguoyunCreateMove {
+		if err := s.uploadJianguoyunByMove(cfg, file, target, size); err != nil {
+			return err
+		}
+	} else if mode == jianguoyunCreateConditional {
+		// Give HTTP a bounded reader that cannot close the source file; a
+		// subsequent full readback may need it for integrity verification.
+		req, err := http.NewRequest(http.MethodPut, target, io.NewSectionReader(file, 0, size))
+		if err != nil {
+			return err
+		}
+		req.ContentLength = size
+		req.Header.Set("Content-Type", "application/zip")
+		req.Header.Set("If-None-Match", "*")
+		applyBasicAuth(req, cfg.Username, cfg.Password)
+		resp, err := s.jianguoyunDo(req, false)
+		if err != nil {
+			return err // outcome unknown; never retry an uncertain PUT blindly
+		}
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status < 200 || status >= 300 {
+			return jianguoyunStatusError("上传", status)
+		}
+	} else {
+		return ErrJianguoyunCondition
+	}
+	return s.verifyJianguoyunUploadedObject(cfg, file, target, size, "最终对象")
+}
+
+func (s *Service) uploadJianguoyunByMove(cfg store.CloudConfig, file *os.File, target string, size int64) (result error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("%w：无法生成临时上传名", ErrJianguoyunCondition)
+	}
+	stage := joinURL(cfg.URL, "gamesavego-upload-stage-"+hex.EncodeToString(nonce[:])+".zip")
+	stageExists := false
+	defer func() {
+		if stageExists {
+			if err := s.deleteJianguoyunProbe(cfg, stage); err != nil {
+				result = errors.Join(result, err)
+			}
+		}
+	}()
+	check, _ := http.NewRequest(http.MethodHead, stage, nil)
+	applyBasicAuth(check, cfg.Username, cfg.Password)
+	resp, err := s.jianguoyunDo(check, true)
+	if err != nil {
+		return err
+	}
+	status := resp.StatusCode
+	resp.Body.Close()
+	if status != http.StatusNotFound {
+		return &jianguoyunSafetyFailure{Check: "stage_name", Status: status}
+	}
+	req, err := http.NewRequest(http.MethodPut, stage, io.NewSectionReader(file, 0, size))
 	if err != nil {
 		return err
 	}
@@ -287,24 +536,87 @@ func (s *Service) uploadJianguoyun(cfg store.CloudConfig, file *os.File, fileNam
 	req.Header.Set("Content-Type", "application/zip")
 	req.Header.Set("If-None-Match", "*")
 	applyBasicAuth(req, cfg.Username, cfg.Password)
-	resp, err := s.jianguoyunDo(req, false)
+	stageExists = true // an interrupted PUT may still have created it
+	resp, err = s.jianguoyunDo(req, false)
 	if err != nil {
-		return err // outcome unknown; never retry an uncertain PUT blindly
+		return err
 	}
-	status := resp.StatusCode
+	status = resp.StatusCode
 	resp.Body.Close()
 	if status < 200 || status >= 300 {
-		return jianguoyunStatusError("上传", status)
+		return jianguoyunStatusError("暂存上传", status)
 	}
-	head, _ := http.NewRequest(http.MethodHead, target, nil)
+	if err := s.verifyJianguoyunUploadedObject(cfg, file, stage, size, "暂存对象"); err != nil {
+		return err // never publish an unverified stage
+	}
+	status, err = s.moveJianguoyun(cfg, stage, target)
+	if err != nil {
+		return err // outcome unknown; never retry the MOVE blindly
+	}
+	if status == http.StatusPreconditionFailed || status == http.StatusConflict {
+		return ErrRemoteSnapshotConflict
+	}
+	if status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusOK {
+		return jianguoyunStatusError("发布暂存对象", status)
+	}
+	stageExists = false // the probe verified a successful MOVE removes its source
+	return nil
+}
+
+// Some WebDAV servers may report an absent or inconsistent HEAD length. Only
+// accept that case after streaming the entire remote body and comparing its
+// byte count and SHA-256 with the local snapshot. A failed GET is not success.
+func (s *Service) verifyJianguoyunUploadedObject(cfg store.CloudConfig, file *os.File, objectURL string, size int64, phase string) error {
+	head, err := http.NewRequest(http.MethodHead, objectURL, nil)
+	if err != nil {
+		return err
+	}
 	applyBasicAuth(head, cfg.Username, cfg.Password)
-	resp, err = s.jianguoyunDo(head, true)
+	resp, err := s.jianguoyunDo(head, true)
+	if err != nil {
+		return err
+	}
+	status, reportedSize := resp.StatusCode, resp.ContentLength
+	resp.Body.Close()
+	if status == http.StatusOK && reportedSize == size {
+		return nil
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusTooManyRequests || status == http.StatusInsufficientStorage {
+		return jianguoyunStatusError("验证上传", status)
+	}
+	get, err := http.NewRequest(http.MethodGet, objectURL, nil)
+	if err != nil {
+		return err
+	}
+	applyBasicAuth(get, cfg.Username, cfg.Password)
+	resp, err = s.jianguoyunDo(get, true)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.ContentLength < 0 || resp.ContentLength != size {
-		return fmt.Errorf("%w：期望 %d 字节，远端报告 %d 字节；不要盲目重试", ErrJianguoyunIntegrity, size, resp.ContentLength)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w：%s HEAD 返回 HTTP %d、%d 字节，GET 返回 HTTP %d；不要盲目重试", ErrJianguoyunIntegrity, phase, status, reportedSize, resp.StatusCode)
+	}
+	position, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	defer file.Seek(position, io.SeekStart)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	localHash := sha256.New()
+	localSize, err := io.Copy(localHash, io.LimitReader(file, size+1))
+	if err != nil || localSize != size {
+		return fmt.Errorf("%w：本地快照在上传期间发生变化", ErrJianguoyunIntegrity)
+	}
+	remoteHash := sha256.New()
+	remoteSize, err := io.Copy(remoteHash, io.LimitReader(resp.Body, size+1))
+	if err != nil {
+		return ErrJianguoyunNetwork
+	}
+	if remoteSize != size || !bytes.Equal(remoteHash.Sum(nil), localHash.Sum(nil)) {
+		return fmt.Errorf("%w：%s HEAD 返回 HTTP %d、%d 字节，GET 实收 %d 字节，期望 %d 字节；不要盲目重试", ErrJianguoyunIntegrity, phase, status, reportedSize, remoteSize, size)
 	}
 	return nil
 }

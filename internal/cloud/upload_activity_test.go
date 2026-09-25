@@ -3,6 +3,7 @@ package cloud
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -119,5 +120,25 @@ func TestJianguoyunUploadActivityClassifiesWithoutRawSecrets(t *testing.T) {
 		if record.Failure != tc.want || record.Provider != "jianguoyun" {
 			t.Fatalf("failure for %q = %#v", tc.want, record)
 		}
+	}
+}
+
+func TestJianguoyunUploadActivityExposesOnlySafeMethodAndStatus(t *testing.T) {
+	svc := &Service{}
+	id := svc.beginUpload("jianguoyun", "game__main__snap.zip")
+	svc.finishUpload(id, errors.Join(
+		&jianguoyunSafetyFailure{Check: "move_first", Status: http.StatusMethodNotAllowed},
+		errors.New("private-account@example.invalid Authorization: secret"),
+	))
+	record := svc.UploadActivity()[0]
+	if record.Failure != "unsafe_condition" || record.SafetyCheck != "move_first" || record.HTTPStatus != http.StatusMethodNotAllowed {
+		t.Fatalf("safe diagnostic = %#v", record)
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-account") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("activity leaked raw error: %s", raw)
 	}
 }

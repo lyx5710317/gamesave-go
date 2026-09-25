@@ -3,7 +3,7 @@
   import { api } from '../lib/api.js';
   import { gameList } from '../lib/stores.js';
   import { t } from '../lib/i18n.js';
-  import { summarizeUploadActivity } from '../lib/uploadActivity.js';
+  import { summarizeUploadActivity, uploadStatusText } from '../lib/uploadActivity.js';
 
   let uploads = [];
   let loadFailed = false;
@@ -39,14 +39,7 @@
   }
 
   function statusText(record) {
-    if (record.status === 'running') return $t('cloud.activity.running');
-    if (record.status === 'succeeded') return $t('cloud.activity.succeeded');
-    if (record.failure === 'configuration') return $t('cloud.activity.configuration');
-    if (record.failure === 'conflict') return $t('cloud.activity.conflict');
-    if (record.provider === 'jianguoyun' && ['authentication', 'permission', 'quota', 'rate_limit', 'network', 'incomplete_inventory', 'unsafe_condition', 'integrity'].includes(record.failure)) {
-      return $t(`cloud.activity.jianguoyun.${record.failure}`);
-    }
-    return $t('cloud.activity.failed');
+    return uploadStatusText(record, $t);
   }
 </script>
 
