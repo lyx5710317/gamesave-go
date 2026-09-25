@@ -4,9 +4,10 @@
   import { backdropClose } from '../lib/backdrop.js';
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
-  import { summarizeLocalPreview, summarizeRemoteInventory } from '../lib/localPreview.js';
+  import { summarizeLocalPreview, summarizeRemoteInventory, summarizeRemoteVault, summarizeJoinOverlap } from '../lib/localPreview.js';
   import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
+  import { cloudVerificationFeedback } from '../lib/cloudVerification.js';
   import { JIANGUOYUN_BASE_URL, JIANGUOYUN_REMOTE_FOLDER, recommendJianguoyunForUnset, selectCloudProvider } from '../lib/jianguoyun.js';
   import { isTemporarilyHiddenProvider, visibleCloudProviders } from '../lib/cloudProviderVisibility.js';
 
@@ -24,6 +25,8 @@
   $: localPreviewSummary = localPreview ? summarizeLocalPreview(localPreview) : null;
   let remotePreviewSummary = null;
   let remotePreviewStatus = 'idle'; // idle | ready | unavailable
+  let remoteVault = null;
+  $: joinOverlap = summarizeJoinOverlap(localPreview, remotePreviewSummary);
   let busy = false;
   let authCode = '';
   let authInProgress = false;
@@ -52,6 +55,7 @@
   let cloudTab = 'all'; // all | cloud | local
   let detailId = null; // gameId drilled into (null = tile grid)
   let uploading = false; // an upload-to-cloud is running (independent of busy
+  let verifyingName = '';
   // so Restore/Delete don't gray out while snapshots are being pushed up)
   let uploadProg = null; // live {done, total, current} from the daemon
 
@@ -107,6 +111,9 @@
     config = selectCloudProvider(config, p.id);
     cloudGames = null;
     detailId = null;
+    remotePreviewStatus = 'idle';
+    remotePreviewSummary = null;
+    remoteVault = null;
   }
 
   onMount(load);
@@ -117,12 +124,14 @@
     localPreviewError = '';
     remotePreviewSummary = null;
     remotePreviewStatus = 'idle';
+    remoteVault = null;
     try {
       // Both reads are independent. A cloud outage must not hide a completed
       // local scan, and an unreadable local save must not hide remote inventory.
-      const [local, remote] = await Promise.allSettled([
+      const [local, remote, vault] = await Promise.allSettled([
         api.get('/api/cloud/join/local-preview'),
-        api.get('/api/cloud/browse')
+        api.get('/api/cloud/browse'),
+        api.get('/api/cloud/join/remote-vault')
       ]);
       if (local.status === 'fulfilled') localPreview = local.value;
       else localPreviewError = local.reason?.message ?? String(local.reason);
@@ -131,6 +140,9 @@
         remotePreviewSummary = summarizeRemoteInventory(remote.value);
       }
       remotePreviewStatus = remotePreviewSummary ? 'ready' : 'unavailable';
+      remoteVault = vault.status === 'fulfilled'
+        ? summarizeRemoteVault(vault.value)
+        : { status: 'unavailable' };
     } finally {
       localPreviewBusy = false;
     }
@@ -138,6 +150,9 @@
 
   async function load() {
     cloudConfigLoadError = '';
+    remotePreviewStatus = 'idle';
+    remotePreviewSummary = null;
+    remoteVault = null;
     try {
       const settings = await api.get('/api/settings');
       if (settings.cloudSyncError) throw new Error($t('cloud.jianguoyun.protectedUnavailable'));
@@ -406,6 +421,24 @@
       handleCloudError(e);
     } finally {
       busy = false;
+    }
+  };
+
+  const verifyCloud = async (gameId, file) => {
+    if (!(await askConfirm($t('cloud.verify.confirm'), {
+      title: $t('cloud.verify.title'), confirmText: $t('cloud.verify.action')
+    }))) return;
+    busy = true;
+    verifyingName = file.name;
+    try {
+      const result = await api.post(`/api/cloud/verify/${gameId}`, { fileName: file.name });
+      const feedback = cloudVerificationFeedback(result);
+      toast($t(feedback.key), feedback.tone);
+    } catch {
+      toast($t('cloud.verify.failed'), 'error');
+    } finally {
+      busy = false;
+      verifyingName = '';
     }
   };
 
@@ -854,10 +887,40 @@
             {/each}
           </ul>
         {/if}
+        {#if joinOverlap}
+          <h4>{$t('cloud.joinPreview.overlapTitle')}</h4>
+          {#if joinOverlap.overlapping.length}
+            <p class="preview-warning" role="status">{$t('cloud.joinPreview.overlapWarning', { count: joinOverlap.overlapping.length })}</p>
+            <ul class="preview-list">
+              {#each joinOverlap.overlapping as game (game.gameId)}
+                <li><span>{game.name}</span><span class="quiet">{$t('cloud.joinPreview.overlapReview')}</span></li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="quiet" role="status">{$t('cloud.joinPreview.noOverlap')}</p>
+          {/if}
+        {/if}
       {:else}
         <p class="preview-warning" role="status">{$t('cloud.joinPreview.remoteUnavailable')}</p>
       {/if}
       <p class="quiet">{$t('cloud.joinPreview.remotePending')}</p>
+    {/if}
+    {#if remoteVault}
+      <h4>{$t('cloud.joinPreview.vaultTitle')}</h4>
+      {#if remoteVault.status === 'valid'}
+        <p class="preview-summary" role="status">{$t('cloud.joinPreview.vaultValid', { revision: remoteVault.revision, devices: remoteVault.deviceCount })}</p>
+      {:else if remoteVault.status === 'missing'}
+        <p class="preview-warning" role="status">{$t('cloud.joinPreview.vaultMissing')}</p>
+      {:else if remoteVault.status === 'invalid'}
+        <p class="preview-warning" role="status">{$t('cloud.joinPreview.vaultInvalid')}</p>
+      {:else if remoteVault.status === 'upgrade-required'}
+        <p class="preview-warning" role="status">{$t('cloud.joinPreview.vaultUpgrade')}</p>
+      {:else if remoteVault.status === 'unsupported'}
+        <p class="quiet" role="status">{$t('cloud.joinPreview.vaultUnsupported')}</p>
+      {:else}
+        <p class="preview-warning" role="status">{$t('cloud.joinPreview.vaultUnavailable')}</p>
+      {/if}
+      <p class="quiet">{$t('cloud.joinPreview.vaultPending')}</p>
     {/if}
   </div>
 
@@ -1136,6 +1199,14 @@
                   <div class="cloud-name">{f.snapshotId} <span class="badge offline">{f.branch}</span></div>
                   <div class="cloud-meta">{fmtSize(f.sizeBytes)} · {new Date(f.createdTime).toLocaleString()}</div>
                 </div>
+                <button
+                  class="btn small"
+                  disabled={busy}
+                  title={$t('cloud.verify.hint')}
+                  on:click={() => verifyCloud(detailTile.id, f)}
+                >
+                  {verifyingName === f.name ? $t('cloud.verify.running') : $t('cloud.verify.action')}
+                </button>
                 <button
                   class="btn small primary"
                   disabled={busy || !detailTile.tracked}

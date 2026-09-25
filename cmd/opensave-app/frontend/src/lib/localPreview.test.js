@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeLocalPreview, summarizeRemoteInventory } from './localPreview.js';
+import { summarizeLocalPreview, summarizeRemoteInventory, summarizeRemoteVault, summarizeJoinOverlap } from './localPreview.js';
 
 describe('local cloud join preview', () => {
   it('keeps unmeasured discoveries visible as incomplete', () => {
@@ -42,5 +42,65 @@ describe('read-only remote snapshot inventory', () => {
         { gameId: 'two', name: 'two', snapshotCount: 1 }
       ]
     });
+  });
+
+  it('rejects duplicate game groups, duplicate snapshot names, and malformed entries', () => {
+    expect(summarizeRemoteInventory([
+      { gameId: 'one', snapshots: [{ name: 'a.zip' }] },
+      { gameId: 'one', snapshots: [{ name: 'b.zip' }] }
+    ])).toBeNull();
+    expect(summarizeRemoteInventory([
+      { gameId: 'one', snapshots: [{ name: 'a.zip' }] },
+      { gameId: 'two', snapshots: [{ name: 'a.zip' }] }
+    ])).toBeNull();
+    expect(summarizeRemoteInventory([{ gameId: 'one', snapshots: [{}] }])).toBeNull();
+  });
+});
+
+describe('display-only first-join overlap warning', () => {
+  const remote = summarizeRemoteInventory([
+    { gameId: 'shared', snapshots: [{ name: 'shared.zip' }] },
+    { gameId: 'remote', snapshots: [{ name: 'remote.zip' }] }
+  ]);
+
+  it('flags shared game IDs without inferring equality or a sync direction', () => {
+    expect(summarizeJoinOverlap({
+      complete: true,
+      library: { games: [
+        { gameId: 'shared', name: 'Local title', latestAt: '2099-01-01' },
+        { gameId: 'local', name: 'Remote title' }
+      ] }
+    }, remote)).toEqual({ overlapping: [{ gameId: 'shared', name: 'Local title' }] });
+  });
+
+  it('does not match names across different IDs or treat a missing inventory as empty', () => {
+    expect(summarizeJoinOverlap({ complete: true, library: { games: [
+      { gameId: 'different', name: 'shared' }
+    ] } }, remote)).toEqual({ overlapping: [] });
+    expect(summarizeJoinOverlap({ complete: true, library: { games: [] } }, null)).toBeNull();
+  });
+
+  it('stops the overlap summary for incomplete or duplicated local scans', () => {
+    expect(summarizeJoinOverlap({ complete: false, library: { games: [] } }, remote)).toBeNull();
+    expect(summarizeJoinOverlap({ complete: true, library: { games: [
+      { gameId: 'same' }, { gameId: 'same' }
+    ] } }, remote)).toBeNull();
+  });
+});
+
+describe('read-only remote vault discovery', () => {
+  it('accepts only a bounded validated summary, never a write capability', () => {
+    expect(summarizeRemoteVault({ status: 'valid', revision: 2, deviceCount: 1, vaultId: 'private' }))
+      .toEqual({ status: 'valid', revision: 2, deviceCount: 1 });
+    expect(summarizeRemoteVault({ status: 'valid', revision: 0, deviceCount: 1 }))
+      .toEqual({ status: 'unavailable' });
+  });
+
+  it('keeps missing, invalid, unsupported, and failed checks distinct', () => {
+    for (const status of ['missing', 'invalid', 'upgrade-required', 'unsupported']) {
+      expect(summarizeRemoteVault({ status })).toEqual({ status });
+    }
+    expect(summarizeRemoteVault(null)).toEqual({ status: 'unavailable' });
+    expect(summarizeRemoteVault({ status: 'joined' })).toEqual({ status: 'unavailable' });
   });
 });

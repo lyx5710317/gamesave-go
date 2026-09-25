@@ -17,6 +17,72 @@ import (
 // snapshot name as a different local archive. Neither copy is overwritten.
 var ErrLocalSnapshotConflict = errors.New("local snapshot differs from remote; refusing to overwrite either copy")
 
+// RemoteVerification describes a read-only archive check. A ZIP with valid
+// CRCs is readable, but without a trusted manifest or an identical local
+// archive it is not proof of vault identity or snapshot ancestry.
+type RemoteVerification struct {
+	SizeBytes       int64  `json:"sizeBytes"`
+	LocalComparison string `json:"localComparison"` // identical, different, unavailable
+}
+
+// VerifyRemoteSnapshot downloads one remote archive to an OS temporary file,
+// checks ZIP structure and CRCs, and optionally compares its bytes with the
+// local archive. It never publishes or restores the downloaded data.
+func (s *Service) VerifyRemoteSnapshot(file CloudFile, localArchivePath string) (RemoteVerification, error) {
+	if !safeSnapshotFileName(file.Name) || file.SizeBytes < 0 {
+		return RemoteVerification{}, errors.New("invalid remote snapshot metadata")
+	}
+	tmp, err := os.CreateTemp("", ".opensave-cloud-verify-*.zip")
+	if err != nil {
+		return RemoteVerification{}, err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return RemoteVerification{}, err
+	}
+	defer os.Remove(tmpPath)
+	if err := s.Download(file.Name, tmpPath); err != nil {
+		return RemoteVerification{}, fmt.Errorf("download snapshot: %w", err)
+	}
+	actualSize, remoteHash, err := inspectSnapshotArchive(tmpPath)
+	if err != nil {
+		return RemoteVerification{}, fmt.Errorf("verify downloaded snapshot: %w", err)
+	}
+	if file.SizeBytes > 0 && actualSize != file.SizeBytes {
+		return RemoteVerification{}, fmt.Errorf("downloaded snapshot size mismatch: got %d bytes, expected %d", actualSize, file.SizeBytes)
+	}
+	result := RemoteVerification{SizeBytes: actualSize, LocalComparison: "unavailable"}
+	if localArchivePath == "" {
+		return result, nil
+	}
+	info, err := os.Lstat(localArchivePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
+		return RemoteVerification{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return RemoteVerification{}, errors.New("local snapshot archive is not a regular file")
+	}
+	local, err := os.Open(localArchivePath)
+	if err != nil {
+		return RemoteVerification{}, err
+	}
+	defer local.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, local); err != nil {
+		return RemoteVerification{}, err
+	}
+	if hex.EncodeToString(h.Sum(nil)) == remoteHash {
+		result.LocalComparison = "identical"
+	} else {
+		result.LocalComparison = "different"
+	}
+	return result, nil
+}
+
 // DownloadVerified stages a remote snapshot next to its destination, verifies
 // it, then publishes it without replacing a different local archive. A
 // trusted SHA-256 may be supplied by a future vault manifest; existing cloud

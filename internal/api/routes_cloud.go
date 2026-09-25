@@ -30,7 +30,9 @@ func (s *Server) cloudRoutes(r chi.Router) {
 	r.Get("/api/cloud/browse", s.handleCloudBrowse)
 	r.Get("/api/cloud/uploads", s.handleCloudUploads)
 	r.Get("/api/cloud/join/local-preview", s.handleCloudJoinLocalPreview)
+	r.Get("/api/cloud/join/remote-vault", s.handleCloudJoinRemoteVault)
 	r.Get("/api/cloud/snapshots/{gameId}", s.handleCloudSnapshots)
+	r.Post("/api/cloud/verify/{gameId}", s.handleCloudVerify)
 	r.Post("/api/cloud/restore/{gameId}", s.handleCloudRestore)
 	r.Post("/api/cloud/delete/{gameId}", s.handleCloudDelete)
 	r.Post("/api/cloud/delete-game/{gameId}", s.handleCloudDeleteGame)
@@ -68,6 +70,30 @@ func (s *Server) handleCloudJoinLocalPreview(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, scan)
 }
 
+// handleCloudJoinRemoteVault performs only a bounded, read-only inspection.
+// An absent document is not proof of an empty remote snapshot directory.
+func (s *Server) handleCloudJoinRemoteVault(w http.ResponseWriter, r *http.Request) {
+	metadata, err := s.Daemon.Cloud.InspectRemoteVault(r.Context())
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "valid", "revision": metadata.Revision, "deviceCount": len(metadata.Devices),
+		})
+	case errors.Is(err, cloud.ErrVaultMetadataNotFound):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "missing"})
+	case errors.Is(err, cloud.ErrVaultMetadataReadUnsupported):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "unsupported"})
+	case errors.Is(err, vaultmeta.ErrUnsupportedSchema):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "upgrade-required"})
+	case errors.Is(err, vaultmeta.ErrInvalidMetadata), errors.Is(err, cloud.ErrVaultMetadataInvalidSize):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "invalid"})
+	default:
+		// Do not expose request URLs, account identifiers, credentials, or
+		// malformed response contents in this optional discovery response.
+		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "unavailable"})
+	}
+}
+
 // handleCloudBrowse lists every cloud snapshot the provider holds, grouped
 // by game, so the UI can present a browsable explorer rather than a flat
 // per-game list. Games with no cloud snapshots are omitted.
@@ -75,6 +101,10 @@ func (s *Server) handleCloudBrowse(w http.ResponseWriter, r *http.Request) {
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := validateRecognizableCloudInventory(files); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -197,6 +227,10 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	if err := validateRecognizableCloudInventory(files); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	type remoteSnap struct {
 		cloud.CloudFile
@@ -212,6 +246,78 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 		matches = append(matches, remoteSnap{CloudFile: f, Branch: branch, SnapshotID: snapID})
 	}
 	writeJSON(w, http.StatusOK, matches)
+}
+
+// A name-only browser cannot safely distinguish two provider objects with
+// the same recognizable snapshot name. Never present that inventory as an
+// ordinary, actionable list. Restore and verification have their own exact
+// object checks; this guard also protects the pre-join summary.
+func validateRecognizableCloudInventory(files []cloud.CloudFile) error {
+	seen := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if _, _, _, ok := snapshot.ParseExportEntryName(file.Name); !ok {
+			continue
+		}
+		if file.SizeBytes < 0 {
+			return errors.New("remote snapshot inventory has an invalid size; refusing to browse")
+		}
+		if _, duplicate := seen[file.Name]; duplicate {
+			return errors.New("remote snapshot inventory has duplicate names; refusing to browse")
+		}
+		seen[file.Name] = struct{}{}
+	}
+	return nil
+}
+
+// handleCloudVerify reads one remote ZIP without restoring or publishing it.
+// A valid ZIP and a same-byte local copy are useful checks, not vault identity
+// or ancestry proof. The listing must identify exactly one remote object.
+func (s *Server) handleCloudVerify(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "gameId")
+	var body struct {
+		FileName string `json:"fileName"`
+	}
+	if err := readJSON(r, &body); err != nil || body.FileName == "" {
+		writeError(w, http.StatusBadRequest, "fileName is required")
+		return
+	}
+	g, branch, snapID, ok := snapshot.ParseExportEntryName(body.FileName)
+	if !ok || g != gameID || !safeCloudRestorePart(g) || !safeCloudRestorePart(branch) || !safeCloudRestorePart(snapID) {
+		writeError(w, http.StatusBadRequest, "fileName does not belong to this game")
+		return
+	}
+	files, err := s.Daemon.Cloud.List()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "cloud inventory unavailable; verification did not run")
+		return
+	}
+	var remote *cloud.CloudFile
+	for i := range files {
+		if files[i].Name != body.FileName {
+			continue
+		}
+		if remote != nil {
+			writeError(w, http.StatusConflict, "multiple remote snapshots have this name; verification is ambiguous")
+			return
+		}
+		remote = &files[i]
+	}
+	if remote == nil {
+		writeError(w, http.StatusNotFound, "remote snapshot not found")
+		return
+	}
+	settings, err := s.Daemon.Store.GetSettings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "local settings unavailable")
+		return
+	}
+	localPath := filepath.Join(settings.BackupsDir, gameID, branch, snapID+".zip")
+	result, err := s.Daemon.Cloud.VerifyRemoteSnapshot(*remote, localPath)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "cloud snapshot could not be verified; no saves were changed")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleCloudRestore downloads a remote snapshot zip, registers it, and

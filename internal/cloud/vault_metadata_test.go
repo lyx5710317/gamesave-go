@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -334,5 +336,73 @@ func TestVaultMetadataReadCannotAuthorizeWriteToAnotherProvider(t *testing.T) {
 	}
 	if first.writes != 0 || second.writes != 0 {
 		t.Fatalf("cross-provider write reached an adapter: first=%d, second=%d", first.writes, second.writes)
+	}
+}
+
+func TestInspectRemoteVaultReadsLocalMetadataWithoutWriteCapability(t *testing.T) {
+	svc, db := newTestService(t)
+	dir := t.TempDir()
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.URL = true, "local", dir
+	})
+	if _, err := svc.InspectRemoteVault(context.Background()); !errors.Is(err, ErrVaultMetadataNotFound) {
+		t.Fatalf("missing local vault = %v", err)
+	}
+	metadata := testVaultMetadata(t)
+	raw, err := vaultmeta.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "vault.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.InspectRemoteVault(context.Background())
+	if err != nil || got.VaultID != metadata.VaultID || got.Revision != metadata.Revision {
+		t.Fatalf("read-only discovery = %+v, %v", got, err)
+	}
+	if _, err := svc.ReadVaultMetadata(context.Background()); !errors.Is(err, ErrVaultMetadataUnsupported) {
+		t.Fatalf("read-only destination gained write capability: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.InspectRemoteVault(context.Background()); !errors.Is(err, vaultmeta.ErrInvalidMetadata) {
+		t.Fatalf("malformed vault = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxVaultMetadataBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.InspectRemoteVault(context.Background()); !errors.Is(err, ErrVaultMetadataInvalidSize) {
+		t.Fatalf("oversized vault = %v", err)
+	}
+}
+
+func TestInspectJianguoyunVaultNeverCreatesOrWrites(t *testing.T) {
+	metadata := testVaultMetadata(t)
+	raw, err := vaultmeta.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &jianguoyunDAVFixture{folder: true, objects: map[string][]byte{"vault.json": raw}}
+	svc := newJianguoyunService(t, fixture)
+	got, err := svc.InspectRemoteVault(context.Background())
+	if err != nil || got.VaultID != metadata.VaultID {
+		t.Fatalf("Jianguoyun vault discovery = %+v, %v", got, err)
+	}
+	if _, err := svc.ReadVaultMetadata(context.Background()); !errors.Is(err, ErrVaultMetadataUnsupported) {
+		t.Fatalf("Jianguoyun unexpectedly gained CAS: %v", err)
+	}
+	fixture.Lock()
+	delete(fixture.objects, "vault.json")
+	fixture.folder = false
+	fixture.Unlock()
+	if _, err := svc.InspectRemoteVault(context.Background()); !errors.Is(err, ErrVaultMetadataNotFound) {
+		t.Fatalf("missing Jianguoyun vault = %v", err)
+	}
+	fixture.Lock()
+	defer fixture.Unlock()
+	if fixture.folder || fixture.realPuts != 0 || fixture.stagePuts != 0 || fixture.probePuts != 0 || fixture.moves != 0 {
+		t.Fatalf("read-only discovery changed remote fixture: %+v", fixture)
 	}
 }

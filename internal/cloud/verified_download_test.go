@@ -171,3 +171,71 @@ func TestDownloadVerifiedPreservesDifferentLocalArchive(t *testing.T) {
 	}
 	assertNoPartFiles(t, dir)
 }
+
+func TestVerifyRemoteSnapshotIsReadOnlyAndDistinguishesLocalBytes(t *testing.T) {
+	scratch := t.TempDir()
+	t.Setenv("TMP", scratch)
+	t.Setenv("TEMP", scratch)
+	t.Setenv("TMPDIR", scratch)
+	remote := testZIP(t, "slot.sav", "remote progress")
+	provider := &downloadTestProvider{data: remote}
+	svc := newDownloadTestService(t, provider)
+	localPath := filepath.Join(t.TempDir(), "snap.zip")
+	file := CloudFile{Name: "game__main__snap.zip", SizeBytes: int64(len(remote))}
+
+	result, err := svc.VerifyRemoteSnapshot(file, localPath)
+	if err != nil || result.LocalComparison != "unavailable" || result.SizeBytes != int64(len(remote)) {
+		t.Fatalf("absent local archive result = %#v, %v", result, err)
+	}
+	if err := os.WriteFile(localPath, remote, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = svc.VerifyRemoteSnapshot(file, localPath)
+	if err != nil || result.LocalComparison != "identical" {
+		t.Fatalf("matching local archive result = %#v, %v", result, err)
+	}
+	local := testZIP(t, "slot.sav", "different local progress")
+	if err := os.WriteFile(localPath, local, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = svc.VerifyRemoteSnapshot(file, localPath)
+	if err != nil || result.LocalComparison != "different" {
+		t.Fatalf("different local archive result = %#v, %v", result, err)
+	}
+	if got, err := os.ReadFile(localPath); err != nil || !bytes.Equal(got, local) {
+		t.Fatalf("read-only verification changed local archive: %v", err)
+	}
+	if provider.calls != 3 {
+		t.Fatalf("remote downloads = %d, want 3", provider.calls)
+	}
+	if leftovers, err := filepath.Glob(filepath.Join(scratch, ".opensave-cloud-verify-*.zip")); err != nil || len(leftovers) != 0 {
+		t.Fatalf("verification staging files remain: %v, %v", leftovers, err)
+	}
+}
+
+func TestVerifyRemoteSnapshotRejectsDamagedRemoteWithoutPublishing(t *testing.T) {
+	valid := testZIP(t, "slot.sav", "progress")
+	for _, tc := range []struct {
+		name, fileName string
+		data           []byte
+		size           int64
+		downloadErr    error
+	}{
+		{"truncated", "game__main__snap.zip", valid[:len(valid)/2], int64(len(valid)), nil},
+		{"wrong-size", "game__main__snap.zip", valid, int64(len(valid) + 1), nil},
+		{"interrupted", "game__main__snap.zip", valid[:len(valid)/2], int64(len(valid)), errors.New("connection lost")},
+		{"unsafe-name", "../snap.zip", valid, int64(len(valid)), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &downloadTestProvider{data: tc.data, err: tc.downloadErr}
+			svc := newDownloadTestService(t, provider)
+			localPath := filepath.Join(t.TempDir(), "snap.zip")
+			if _, err := svc.VerifyRemoteSnapshot(CloudFile{Name: tc.fileName, SizeBytes: tc.size}, localPath); err == nil {
+				t.Fatal("unverified remote archive was accepted")
+			}
+			if _, err := os.Stat(localPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("verification published an archive: %v", err)
+			}
+		})
+	}
+}

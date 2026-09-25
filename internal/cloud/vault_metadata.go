@@ -16,6 +16,10 @@ var (
 	ErrVaultMetadataUnsupported = errors.New("provider does not support conditional vault metadata writes")
 	// ErrVaultMetadataNotFound means no vault.json exists at the provider path.
 	ErrVaultMetadataNotFound = errors.New("remote vault metadata not found")
+	// ErrVaultMetadataReadUnsupported means the selected transport cannot
+	// inspect vault.json. This does not imply that the remote vault is absent.
+	ErrVaultMetadataReadUnsupported = errors.New("provider does not support read-only vault discovery")
+	ErrVaultMetadataInvalidSize     = errors.New("remote vault metadata is empty or too large")
 	// ErrVaultRevisionConflict means another writer won the compare-and-swap.
 	// Callers must reread and merge; they must never retry the stale body.
 	ErrVaultRevisionConflict  = errors.New("remote vault metadata changed concurrently")
@@ -24,14 +28,44 @@ var (
 
 const maxVaultMetadataBytes = 1 << 20
 
+// VaultMetadataReader is an optional read-only capability. A successful read
+// does not establish provider CAS, device membership, or safe join semantics.
+type VaultMetadataReader interface {
+	ReadVaultMetadata(ctx context.Context) (data []byte, versionToken string, err error)
+}
+
 // VaultMetadataProvider is an optional capability of a snapshot Provider.
 // versionToken is an opaque provider revision/ETag for the exact account and
 // vault.json object, not vault.json's numeric revision. A token from another
 // account or object must never match. ReplaceVaultMetadata must compare it
 // atomically and return ErrVaultRevisionConflict without writing if stale.
 type VaultMetadataProvider interface {
-	ReadVaultMetadata(ctx context.Context) (data []byte, versionToken string, err error)
+	VaultMetadataReader
 	ReplaceVaultMetadata(ctx context.Context, expectedVersion string, data []byte) (newVersion string, err error)
+}
+
+// InspectRemoteVault validates only the remote vault document. It intentionally
+// ignores a version token: a readable vault cannot authorize a write or join.
+func (s *Service) InspectRemoteVault(ctx context.Context) (vaultmeta.Metadata, error) {
+	if err := ctx.Err(); err != nil {
+		return vaultmeta.Metadata{}, err
+	}
+	provider, err := s.selectedProvider()
+	if err != nil {
+		return vaultmeta.Metadata{}, err
+	}
+	reader, ok := provider.(VaultMetadataReader)
+	if !ok {
+		return vaultmeta.Metadata{}, ErrVaultMetadataReadUnsupported
+	}
+	data, _, err := reader.ReadVaultMetadata(ctx)
+	if err != nil {
+		return vaultmeta.Metadata{}, err
+	}
+	if len(data) == 0 || len(data) > maxVaultMetadataBytes {
+		return vaultmeta.Metadata{}, ErrVaultMetadataInvalidSize
+	}
+	return vaultmeta.Parse(data)
 }
 
 // VaultState is one validated remote read and its provider precondition.
