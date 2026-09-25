@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,7 @@ func TestCompareVersions(t *testing.T) {
 
 func TestSelectUpdateAssetFor(t *testing.T) {
 	assets := []releaseAsset{
+		{Name: "opensave-linux-arm64.tar.gz", BrowserDownloadURL: "u/arm-cli-only"},
 		{Name: "OpenSave.Setup.exe", BrowserDownloadURL: "u/setup"},
 		{Name: "OpenSave.exe", BrowserDownloadURL: "u/portable"},
 		{Name: "GameSaveGo.exe", BrowserDownloadURL: "u/branded"},
@@ -134,8 +136,60 @@ func TestSelectUpdateAssetFor(t *testing.T) {
 	if got := selectUpdateAssetFor(nil, "linux"); got != "" {
 		t.Errorf("no assets should yield empty, got %q", got)
 	}
+	if got := selectUpdateAssetForArch(assets, "linux", "arm64"); got != "" {
+		t.Errorf("arm64 CLI-only archive must not be offered as a desktop app: %q", got)
+	}
 	if got := selectUpdateAssetFor([]releaseAsset{{Name: "OpenSave.exe", BrowserDownloadURL: "u/legacy"}}, "windows"); got != "u/legacy" {
 		t.Errorf("legacy Windows asset = %q, want u/legacy", got)
+	}
+}
+
+func desktopReleaseAsset(name string) releaseAsset {
+	return releaseAsset{
+		Name: name, Size: 42,
+		BrowserDownloadURL: "https://github.com/" + updateRepo + "/releases/download/v1.1.1/" + name,
+	}
+}
+
+func TestReleaseUpdateAssetsRequireSameReleaseAndChecksum(t *testing.T) {
+	portable := desktopReleaseAsset("GameSaveGo.exe")
+	manifest := desktopReleaseAsset("SHA256SUMS")
+	installer := desktopReleaseAsset("GameSaveGo.Setup.exe")
+	rel := selfupdate.Release{TagName: "v1.1.1", Assets: []releaseAsset{portable, manifest, installer}}
+	got, sums, err := releaseUpdateAssets(rel, portable.BrowserDownloadURL, "windows")
+	if err != nil || got != portable || sums != manifest {
+		t.Fatalf("valid update plan = %+v, %+v, %v", got, sums, err)
+	}
+	if _, err := selectInstallerAsset(rel); err != nil {
+		t.Fatalf("matching installer rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, url string
+		rel       selfupdate.Release
+	}{
+		{"other website", "https://example.com/evil.exe", rel},
+		{"installer in place of portable", installer.BrowserDownloadURL, rel},
+		{"missing manifest", portable.BrowserDownloadURL, selfupdate.Release{TagName: rel.TagName, Assets: []releaseAsset{portable}}},
+		{"duplicate manifest", portable.BrowserDownloadURL, selfupdate.Release{TagName: rel.TagName, Assets: []releaseAsset{portable, manifest, manifest}}},
+		{"different release tag", portable.BrowserDownloadURL, selfupdate.Release{TagName: "v1.1.2", Assets: rel.Assets}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := releaseUpdateAssets(tc.rel, tc.url, "windows"); err == nil {
+				t.Fatal("untrusted update was accepted")
+			}
+		})
+	}
+}
+
+func TestInstallerCommandDoesNotInterpolatePath(t *testing.T) {
+	path := `C:\Users\O'Brien\AppData\Local\Temp\GameSaveGo.Setup.exe`
+	cmd := installerCommand(path)
+	if strings.Contains(strings.Join(cmd.Args, " "), path) {
+		t.Fatal("installer path was interpolated into PowerShell source")
+	}
+	want := "GAMESAVE_UPDATE_INSTALLER=" + path
+	if !slices.Contains(cmd.Env, want) {
+		t.Fatalf("installer path is not passed as an environment value")
 	}
 }
 

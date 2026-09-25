@@ -44,8 +44,12 @@ Before enabling publication, verify on an isolated clean Windows VM:
    install the candidate over a previous build. Confirm games, snapshots,
    protected cloud credentials, and paired devices survive.
 3. Exercise update detection and a release-asset download. Test both portable
-   replacement and protected-directory installer/UAC path. Verify signatures
-   and published checksums before considering automatic installation safe.
+   replacement and protected-directory installer/UAC path. The desktop code
+   now restricts the selected asset and checksum file to this repository and
+   release, then checks the downloaded size and SHA-256 before use. Synthetic
+   tests cover failures; real GitHub redirects, Authenticode signer validation,
+   and installed-binary behavior remain unverified. A checksum published
+   alongside an asset is not an independent signature.
    An older `1.1` development binary should see `v1.1.1` as newer, while a
    source-built `1.1.1` copy should see the same-version release through the
    absent release marker. Verify both paths on installed builds; unit tests
@@ -68,8 +72,8 @@ Stable is the only planned public channel for this workflow. Beta selection
 exists in the app, but a GameSave Go beta release is not enabled until desktop
 pre-release versioning, metadata, and upgrade ordering are tested. Do not
 present candidate workflow artifacts as supported downloads. Keep a previous
-signed installer and checksum available for recovery; never roll back live saves or
-SQLite data merely to roll back a binary. A failed upgrade should leave the
+signed installer and checksum available for recovery; never roll back live
+saves or SQLite data merely to roll back a binary. A failed upgrade should leave the
 old executable and user data recoverable.
 
 ## Evidence record

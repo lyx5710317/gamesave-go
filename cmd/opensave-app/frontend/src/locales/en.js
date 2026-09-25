@@ -9,6 +9,7 @@ export default {
   'app.updateRestarting': 'Restarting with the new version…',
   'app.updateRestartHint': 'The app restarts automatically when done. Your games keep syncing.',
   'app.updateAvailable': '{app} {latest} is available. You are on {current}.',
+  'app.updateFailed': 'Update failed — {error}. Nothing was changed; you are still on the current version.',
   'app.hideNotes': 'Hide notes',
   'app.whatsNew': 'What’s new',
   'app.installRestart': 'Install and restart',

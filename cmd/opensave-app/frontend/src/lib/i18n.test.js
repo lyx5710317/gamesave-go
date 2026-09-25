@@ -36,6 +36,7 @@ describe('translations', () => {
     expect(translate('zh-CN', 'cloud.activity.conflict')).toContain('已保留原有备份');
     expect(translate('en', 'activity.empty.title')).toBe('Nothing yet');
     expect(translate('zh-CN', 'activity.empty.title')).toBe('暂无活动');
+    expect(translate('zh-CN', 'app.updateFailed', { error: '校验失败' })).toContain('校验失败');
   });
 
   it('keeps both shipped catalogs on the same set of keys', () => {

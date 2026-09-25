@@ -30,6 +30,7 @@
   let update = null; // {available, latest, url, assetUrl?, notes?} when a newer release exists
   let showNotes = false;
   let installStarted = false;
+  $: if ($appUpdate?.state === 'error') installStarted = false;
 
   async function installRelease() {
     if (!update?.assetUrl || installStarted) return;

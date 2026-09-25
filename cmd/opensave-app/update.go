@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 
@@ -54,7 +55,9 @@ func (a *App) CheckForUpdate() map[string]any {
 	// empty so the banner opens the release page, where the .flatpak lives.
 	assetURL := ""
 	if !runningInFlatpak() {
-		assetURL = selectUpdateAsset(rel.Assets)
+		if asset, _, err := releaseUpdateAssets(rel, selectUpdateAsset(rel.Assets), runtime.GOOS); err == nil {
+			assetURL = asset.BrowserDownloadURL
+		}
 	}
 
 	notes := rel.Body
@@ -71,6 +74,31 @@ func (a *App) CheckForUpdate() map[string]any {
 		"flatpak":    runningInFlatpak(),
 		"prerelease": rel.Prerelease,
 	}
+}
+
+// releaseUpdateAssets binds a renderer-provided URL to the selected
+// platform binary and SHA256SUMS in the same GitHub release. No other HTTPS
+// URL (including another asset in the release) is an install target.
+func releaseUpdateAssets(rel selfupdate.Release, requestedURL, goos string) (selfupdate.Asset, selfupdate.Asset, error) {
+	wantURL := selectUpdateAssetFor(rel.Assets, goos)
+	if requestedURL == "" || requestedURL != wantURL {
+		return selfupdate.Asset{}, selfupdate.Asset{}, fmt.Errorf("update asset is not the selected release download")
+	}
+	var name string
+	for _, asset := range rel.Assets {
+		if asset.BrowserDownloadURL == requestedURL {
+			if name != "" {
+				return selfupdate.Asset{}, selfupdate.Asset{}, fmt.Errorf("update asset URL is ambiguous")
+			}
+			name = asset.Name
+		}
+	}
+	asset, err := selfupdate.FindReleaseAsset(rel, updateRepo, name)
+	if err != nil {
+		return selfupdate.Asset{}, selfupdate.Asset{}, err
+	}
+	sums, err := selfupdate.FindReleaseAsset(rel, updateRepo, "SHA256SUMS")
+	return asset, sums, err
 }
 
 // shouldOfferDesktopRelease keeps product updates separate from peer protocol
@@ -102,6 +130,10 @@ func selectUpdateAsset(assets []releaseAsset) string {
 }
 
 func selectUpdateAssetFor(assets []releaseAsset, goos string) string {
+	return selectUpdateAssetForArch(assets, goos, runtime.GOARCH)
+}
+
+func selectUpdateAssetForArch(assets []releaseAsset, goos, goarch string) string {
 	if goos == "windows" {
 		// Prefer the fork's branded portable binary. The legacy name stays as
 		// a fallback so users can cross the rename boundary without reinstalling.
@@ -115,14 +147,15 @@ func selectUpdateAssetFor(assets []releaseAsset, goos string) string {
 		return ""
 	}
 
+	// The arm64 Linux tarball currently contains only CLI and relay binaries,
+	// not a desktop app. Never extract it as an app update.
+	if goos != "linux" || goarch != "amd64" {
+		return ""
+	}
 	for _, a := range assets {
 		name := strings.ToLower(a.Name)
-		switch goos {
-		case "linux":
-			if strings.HasPrefix(name, "opensave-linux") &&
-				(strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".tgz")) {
-				return a.BrowserDownloadURL
-			}
+		if name == "opensave-linux-amd64.tar.gz" || name == "opensave-linux-amd64.tgz" {
+			return a.BrowserDownloadURL
 		}
 	}
 	return ""

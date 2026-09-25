@@ -1,5 +1,6 @@
 // Central app state, fed by the daemon's init dump + live WS updates.
 import { writable, derived, get } from 'svelte/store';
+import { t } from './i18n.js';
 
 export const view = writable({ name: 'home', params: {} });
 export const settings = writable(null);
@@ -210,7 +211,7 @@ export function applyMessage(msg) {
     case 'app-update':
       appUpdate.set(data ?? null);
       if (data?.state === 'error') {
-        toast(`Update failed — ${data.error}. Nothing was changed; you're still on the current version.`, 'error');
+        toast(get(t)('app.updateFailed', { error: data.error ?? '' }), 'error');
         setTimeout(() => appUpdate.set(null), 500);
       }
       break;

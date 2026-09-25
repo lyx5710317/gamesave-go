@@ -101,13 +101,28 @@ func (a *App) InstallUpdateFromPeer(peerID string) string {
 // by an unelevated rename — for those, the NSIS installer is downloaded
 // and launched instead; it requests UAC elevation itself.
 func (a *App) InstallUpdateFromURL(url string) string {
-	if !strings.HasPrefix(url, "https://") {
-		return "update URL must be https"
+	if !strings.HasPrefix(url, "https://github.com/"+updateRepo+"/releases/download/") {
+		return "update URL must belong to a GameSave Go release"
 	}
 	if runningInFlatpak() {
 		return flatpakUpdateMsg
 	}
 	go func() {
+		rel, err := selfupdate.LatestRelease(updateRepo, "GameSaveGo/"+AppVersion, a.wantsPreReleases())
+		if err != nil || !shouldOfferDesktopRelease(rel, AppVersion, DesktopReleaseTag) {
+			a.updateEvent("error", 0, "could not verify the offered release; refresh the update check")
+			return
+		}
+		asset, sums, err := releaseUpdateAssets(rel, url, runtime.GOOS)
+		if err != nil {
+			a.updateEvent("error", 0, "update asset is not verified for this release")
+			return
+		}
+		expected, err := selfupdate.FetchReleaseChecksum(sums.BrowserDownloadURL, asset.Name)
+		if err != nil {
+			a.updateEvent("error", 0, "could not verify release checksum: "+err.Error())
+			return
+		}
 		exe, err := os.Executable()
 		if err != nil {
 			a.updateEvent("error", 0, err.Error())
@@ -116,7 +131,7 @@ func (a *App) InstallUpdateFromURL(url string) string {
 		// Windows Program Files installs can't be swapped unelevated — run
 		// the NSIS installer (with its UAC prompt) instead.
 		if runtime.GOOS == "windows" && !selfupdate.CanStageUpdate(exe) {
-			a.installViaInstaller()
+			a.installViaInstaller(rel, sums)
 			return
 		}
 
@@ -130,7 +145,7 @@ func (a *App) InstallUpdateFromURL(url string) string {
 		newBinary := exe + ".new"
 		defer os.Remove(newBinary)
 
-		if strings.HasSuffix(strings.ToLower(url), ".tar.gz") || strings.HasSuffix(strings.ToLower(url), ".tgz") {
+		if strings.HasSuffix(strings.ToLower(asset.Name), ".tar.gz") || strings.HasSuffix(strings.ToLower(asset.Name), ".tgz") {
 			// Linux ships a tarball: download it, extract the app binary.
 			archive, err := os.CreateTemp("", "opensave-update-*.tar.gz")
 			if err != nil {
@@ -141,7 +156,7 @@ func (a *App) InstallUpdateFromURL(url string) string {
 			archive.Close()
 			defer os.Remove(archivePath)
 
-			if err := selfupdate.Download(url, archivePath, progress); err != nil {
+			if err := selfupdate.DownloadVerified(asset.BrowserDownloadURL, archivePath, asset.Size, expected, progress); err != nil {
 				a.updateEvent("error", 0, "download failed: "+err.Error())
 				return
 			}
@@ -151,7 +166,7 @@ func (a *App) InstallUpdateFromURL(url string) string {
 			}
 		} else {
 			// Windows portable exe: download straight to the swap file.
-			if err := selfupdate.Download(url, newBinary, progress); err != nil {
+			if err := selfupdate.DownloadVerified(asset.BrowserDownloadURL, newBinary, asset.Size, expected, progress); err != nil {
 				// The probe above said this directory was writable and it
 				// wasn't. Controlled Folder Access, an antivirus rule, or an
 				// ACL that allows creating a randomly-named temp file but not
@@ -159,7 +174,7 @@ func (a *App) InstallUpdateFromURL(url string) string {
 				// not care, so take that route rather than handing the user a
 				// raw "Access is denied" they can do nothing with.
 				if runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission) {
-					a.installViaInstaller()
+					a.installViaInstaller(rel, sums)
 					return
 				}
 				a.updateEvent("error", 0, "download failed: "+err.Error())
@@ -175,12 +190,17 @@ func (a *App) InstallUpdateFromURL(url string) string {
 // temp dir and launches it, then quits so the installer can replace the
 // app's files. Launching goes through ShellExecute (Start-Process) so the
 // installer's elevation request produces a UAC prompt instead of failing.
-func (a *App) installViaInstaller() {
+func (a *App) installViaInstaller(rel selfupdate.Release, sums selfupdate.Asset) {
 	a.updateEvent("downloading", 0, "")
 
-	instURL, err := a.fetchInstallerURL()
+	inst, err := selectInstallerAsset(rel)
 	if err != nil {
-		a.updateEvent("error", 0, "couldn't locate the installer in the latest release: "+err.Error())
+		a.updateEvent("error", 0, "couldn't locate a verified installer in this release: "+err.Error())
+		return
+	}
+	expected, err := selfupdate.FetchReleaseChecksum(sums.BrowserDownloadURL, inst.Name)
+	if err != nil {
+		a.updateEvent("error", 0, "could not verify installer checksum: "+err.Error())
 		return
 	}
 
@@ -192,7 +212,7 @@ func (a *App) installViaInstaller() {
 	dest := tmp.Name()
 	tmp.Close()
 
-	if err := selfupdate.Download(instURL, dest, func(done, total int64) {
+	if err := selfupdate.DownloadVerified(inst.BrowserDownloadURL, dest, inst.Size, expected, func(done, total int64) {
 		if total > 0 {
 			a.updateEvent("downloading", int(done*100/total), "")
 		}
@@ -208,8 +228,7 @@ func (a *App) installViaInstaller() {
 	}
 
 	a.updateEvent("installing", 100, "")
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		"Start-Process -FilePath '"+dest+"'")
+	cmd := installerCommand(dest)
 	if err := cmd.Start(); err != nil {
 		os.Remove(dest)
 		a.updateEvent("error", 0, "launch installer: "+err.Error())
@@ -224,21 +243,26 @@ func (a *App) installViaInstaller() {
 	wailsruntime.Quit(a.ctx)
 }
 
-// fetchInstallerURL returns the download URL of the NSIS installer asset
-// on the latest GitHub release.
-func (a *App) fetchInstallerURL() (string, error) {
-	rel, err := selfupdate.LatestRelease(updateRepo, "GameSaveGo/"+AppVersion, a.wantsPreReleases())
-	if err != nil {
-		return "", err
-	}
-	for _, asset := range rel.Assets {
-		name := strings.ToLower(asset.Name)
-		if strings.HasSuffix(name, ".exe") &&
-			(strings.Contains(name, "setup") || strings.Contains(name, "installer")) {
-			return asset.BrowserDownloadURL, nil
+// installerCommand passes the verified temporary path through the process
+// environment, not through interpolated PowerShell source. A username or
+// temp path containing an apostrophe cannot change the command to execute.
+func installerCommand(path string) *exec.Cmd {
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		"Start-Process -FilePath $env:GAMESAVE_UPDATE_INSTALLER")
+	cmd.Env = append(os.Environ(), "GAMESAVE_UPDATE_INSTALLER="+path)
+	return cmd
+}
+
+// selectInstallerAsset keeps the elevated path on the same verified release
+// as the portable update. Legacy naming is allowed only for an asset listed
+// by this fork's release with a matching SHA256SUMS entry.
+func selectInstallerAsset(rel selfupdate.Release) (selfupdate.Asset, error) {
+	for _, name := range []string{"GameSaveGo.Setup.exe", "OpenSave.Setup.exe"} {
+		if asset, err := selfupdate.FindReleaseAsset(rel, updateRepo, name); err == nil {
+			return asset, nil
 		}
 	}
-	return "", fmt.Errorf("no installer asset on release %s", rel.TagName)
+	return selfupdate.Asset{}, fmt.Errorf("no verified installer asset on release %s", rel.TagName)
 }
 
 // finishInstall validates and applies a downloaded build, then restarts.

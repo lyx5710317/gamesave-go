@@ -9,6 +9,7 @@ export default {
   'app.updateRestarting': '正在重启并切换到新版本…',
   'app.updateRestartHint': '完成后程序会自动重启，游戏同步会继续运行。',
   'app.updateAvailable': '{app} 有新版本 {latest}，当前版本为 {current}。',
+  'app.updateFailed': '更新失败：{error}。当前版本未更改。',
   'app.hideNotes': '隐藏说明',
   'app.whatsNew': '更新内容',
   'app.installRestart': '安装并重启',
