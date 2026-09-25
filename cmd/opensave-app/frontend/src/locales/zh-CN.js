@@ -606,6 +606,7 @@ export default {
   'cloud.common.cancel': '取消',
   'cloud.common.close': '关闭',
   'cloud.providers.googleDrive': 'Google Drive',
+  'cloud.googleDrive.backupOnly': '当前仅适合谨慎备份：Google Drive 不保证同名快照的原子创建，两台设备并发上传可能留下重名对象。程序会核对上传结果；若提示不确定，请先人工检查远端，勿盲目重试。这不是安全的云端双向同步。',
   'cloud.providers.oneDrive': 'OneDrive',
   'cloud.providers.dropbox': 'Dropbox',
   'cloud.providers.local': '本地文件夹',

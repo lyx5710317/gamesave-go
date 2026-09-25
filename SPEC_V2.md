@@ -46,6 +46,12 @@ Provider priority is:
 4. Deferred mainland-China candidate: Quark Netdisk. At the owner's request, do not spend the current phase on evaluation, experiments, or implementation. Revisit only if the owner reopens the work and official third-party native-client access is confirmed; it is not a release gate.
 5. International: Google Drive, with existing Dropbox, OneDrive, local-folder, and webhook support retained.
 
+Google Drive remains a conservative backup destination, not a proven atomic
+multi-device snapshot store. It permits duplicate names; a complete preflight
+and post-upload identity/size checks can detect some races but cannot make
+name creation atomic. Show this limitation in the Cloud Backup UI and stop on
+ambiguous results rather than claiming a completed upload or safe vault join.
+
 For the current desktop release, show Jianguoyun, Google Drive, local folder, other WebDAV, and webhook as selectable setup entries. Temporarily hide Baidu, OneDrive, and Dropbox from new setup without deleting their providers, saved configurations, credentials, or roadmap. An existing hidden-provider selection must remain intact and be reported honestly rather than silently converted to another provider.
 
 Each provider must be isolated behind a stable internal boundary, use bounded retries and rate-limit handling, and expose failures without weakening snapshot safety. No provider may require game-save bytes to transit a GameSave Cloud service.

@@ -606,6 +606,7 @@ export default {
   'cloud.common.cancel': 'Cancel',
   'cloud.common.close': 'Close',
   'cloud.providers.googleDrive': 'Google Drive',
+  'cloud.googleDrive.backupOnly': 'Conservative backup only: Google Drive does not guarantee atomic creation by snapshot name, so concurrent devices may leave duplicates. The app checks the upload result; if it is uncertain, inspect the remote folder before retrying. This is not safe two-way cloud sync.',
   'cloud.providers.oneDrive': 'OneDrive',
   'cloud.providers.dropbox': 'Dropbox',
   'cloud.providers.local': 'Local Folder',

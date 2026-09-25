@@ -78,7 +78,6 @@ type Service struct {
 	uploads             []UploadRecord
 	nextUploadID        uint64
 	driveFolderMu       sync.Mutex
-	driveFolderID       string // cached id of the auto-managed "OpenSave" Drive folder
 	jianguoyunMu        sync.Mutex
 	jianguoyunNext      time.Time
 	jianguoyunProbeMu   sync.Mutex
@@ -148,33 +147,23 @@ func (s *Service) config() (store.CloudConfig, error) {
 
 // driveFolder returns the Drive folder snapshots live in: the user's
 // configured folder ID if set, otherwise a folder named "OpenSave" in the
-// Drive root — found or created on first use and cached for the process
-// lifetime. Keeps snapshots out of the user's Drive root.
+// Drive root. A name is not a unique identity in Drive, so never choose the
+// first match or keep a process-lifetime cache that hides a later duplicate.
 func (s *Service) driveFolder(cfg store.CloudConfig, token string) (string, error) {
 	if cfg.FolderID != "" {
 		return cfg.FolderID, nil
 	}
 	s.driveFolderMu.Lock()
 	defer s.driveFolderMu.Unlock()
-	if s.driveFolderID != "" {
-		return s.driveFolderID, nil
+	ids, err := s.listAutoDriveFolderIDs(token)
+	if err != nil {
+		return "", err
 	}
-
-	query := "name = 'OpenSave' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents"
-	listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id)")
-	req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	var out struct {
-		Files []struct {
-			ID string `json:"id"`
-		} `json:"files"`
+	if len(ids) == 1 {
+		return ids[0], nil
 	}
-	if err := s.doJSON(req, &out); err != nil {
-		return "", googleDriveErr(err)
-	}
-	if len(out.Files) > 0 {
-		s.driveFolderID = out.Files[0].ID
-		return s.driveFolderID, nil
+	if len(ids) > 1 {
+		return "", fmt.Errorf("Google Drive has multiple OpenSave folders; configure an explicit folder ID before backup")
 	}
 
 	meta, _ := json.Marshal(map[string]any{
@@ -190,9 +179,65 @@ func (s *Service) driveFolder(cfg store.CloudConfig, token string) (string, erro
 	if err := s.doJSON(creq, &created); err != nil {
 		return "", googleDriveErr(err)
 	}
+	if created.ID == "" {
+		return "", fmt.Errorf("Google Drive created a folder without an ID; verify the destination before retrying")
+	}
+	ids, err = s.listAutoDriveFolderIDs(token)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) != 1 || ids[0] != created.ID {
+		return "", fmt.Errorf("Google Drive folder creation is ambiguous; configure an explicit folder ID before backup")
+	}
 	s.Log("info", `cloud: created "OpenSave" folder in Google Drive`)
-	s.driveFolderID = created.ID
 	return created.ID, nil
+}
+
+func (s *Service) listAutoDriveFolderIDs(token string) ([]string, error) {
+	query := "name = 'OpenSave' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents"
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", "nextPageToken,incompleteSearch,files(id)")
+	params.Set("pageSize", "1000")
+	ids := []string{}
+	seenIDs := map[string]bool{}
+	seenTokens := map[string]bool{}
+	for page := 0; page < 1000; page++ {
+		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		var out struct {
+			NextPageToken    string `json:"nextPageToken"`
+			IncompleteSearch bool   `json:"incompleteSearch"`
+			Files            []struct {
+				ID string `json:"id"`
+			} `json:"files"`
+		}
+		if err := s.doJSON(req, &out); err != nil {
+			return nil, googleDriveErr(err)
+		}
+		if out.IncompleteSearch {
+			return nil, fmt.Errorf("Google Drive folder listing was incomplete; configure an explicit folder ID")
+		}
+		for _, f := range out.Files {
+			if f.ID == "" || seenIDs[f.ID] {
+				return nil, fmt.Errorf("Google Drive folder listing is ambiguous; configure an explicit folder ID")
+			}
+			seenIDs[f.ID] = true
+			ids = append(ids, f.ID)
+			if len(ids) > 1 {
+				return ids, nil
+			}
+		}
+		if out.NextPageToken == "" {
+			return ids, nil
+		}
+		if seenTokens[out.NextPageToken] {
+			return nil, fmt.Errorf("Google Drive folder listing repeated a page token")
+		}
+		seenTokens[out.NextPageToken] = true
+		params.Set("pageToken", out.NextPageToken)
+	}
+	return nil, fmt.Errorf("Google Drive folder listing exceeded 1000 pages")
 }
 
 // ── large-file transfer plumbing ─────────────────────────────────────────
@@ -413,8 +458,29 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 		if err != nil {
 			return err
 		}
-		if err := s.uploadDriveResumable(token, folderID, fileName, f, size); err != nil {
+		fileID, err := s.uploadDriveResumable(token, folderID, fileName, f, size)
+		if err != nil {
 			return googleDriveErr(err)
+		}
+		// Drive permits duplicate names. This readback detects an ambiguous
+		// result; it is not an atomic create-only guarantee across devices.
+		files, err := s.listGoogleDriveFiles(token, folderID)
+		if err != nil {
+			return err
+		}
+		var match *CloudFile
+		for _, remote := range files {
+			if remote.Name != fileName {
+				continue
+			}
+			if match != nil {
+				return fmt.Errorf("Google Drive upload has duplicate snapshot names; inspect the destination before retrying: %w", ErrRemoteSnapshotAmbiguous)
+			}
+			copy := remote
+			match = &copy
+		}
+		if match == nil || match.ID != fileID || match.SizeBytes != size {
+			return fmt.Errorf("Google Drive upload identity or size is unverified; inspect the remote snapshot before retrying")
 		}
 
 	case "dropbox":
@@ -456,14 +522,17 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 // uploadDriveResumable uses Drive's resumable protocol for every size:
 // one code path, streaming chunks, and no request carries more than
 // driveChunkSize bytes (multipart uploads are capped at 5 MB by the API).
-func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) error {
+func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) (string, error) {
+	if size <= 0 || driveChunkSize <= 0 {
+		return "", fmt.Errorf("Google Drive snapshot has no uploadable content")
+	}
 	meta, _ := json.Marshal(map[string]any{
 		"name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
 	})
 	initReq, err := http.NewRequest(http.MethodPost,
-		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable", bytes.NewReader(meta))
+		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,parents", bytes.NewReader(meta))
 	if err != nil {
-		return err
+		return "", err
 	}
 	initReq.Header.Set("Authorization", "Bearer "+token)
 	initReq.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -472,19 +541,20 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 
 	resp, err := s.doTransfer(initReq)
 	if err != nil {
-		return err
+		return "", err
 	}
 	session := resp.Header.Get("Location")
 	err = transferOK(resp)
 	resp.Body.Close()
 	if err != nil {
-		return fmt.Errorf("start resumable upload: %w", err)
+		return "", fmt.Errorf("start resumable upload: %w", err)
 	}
 	if session == "" {
-		return fmt.Errorf("resumable upload: no session URL returned")
+		return "", fmt.Errorf("resumable upload: no session URL returned")
 	}
 
-	for offset := int64(0); offset < size || size == 0; {
+	uncertain := 0
+	for offset := int64(0); offset < size; {
 		n := driveChunkSize
 		if remaining := size - offset; remaining < n {
 			n = remaining
@@ -504,24 +574,99 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 			if resp != nil {
 				resp.Body.Close()
 			}
-			// One retry per chunk — resumable sessions exist for this.
-			if resp, err = putChunk(); err != nil {
-				return err
+			// An interrupted PUT may already have committed bytes. Ask the
+			// session for its offset instead of blindly replaying the chunk.
+			uncertain++
+			if uncertain > 3 {
+				return "", fmt.Errorf("Google Drive upload remains uncertain after three status checks; inspect the remote snapshot")
 			}
+			next, fileID, statusErr := s.driveUploadStatus(session, size, fileName, folderID)
+			if statusErr != nil {
+				return "", statusErr
+			}
+			if fileID != "" {
+				return fileID, nil
+			}
+			if next < offset {
+				return "", fmt.Errorf("Google Drive upload session moved backwards; inspect the remote snapshot")
+			}
+			offset = next
+			continue
 		}
 		status := resp.StatusCode
-		if status != http.StatusOK && status != http.StatusCreated && status != 308 {
-			err := transferOK(resp)
+		if status == http.StatusOK || status == http.StatusCreated {
+			fileID, resultErr := driveUploadResult(resp.Body, fileName, folderID, size)
 			resp.Body.Close()
-			return fmt.Errorf("upload chunk at %d: %w", offset, err)
+			return fileID, resultErr
 		}
+		if status != 308 {
+			resp.Body.Close()
+			return "", fmt.Errorf("Google Drive upload chunk returned HTTP %d; inspect the remote snapshot before retrying", status)
+		}
+		next, rangeErr := driveUploadedOffset(resp.Header.Get("Range"), size)
 		resp.Body.Close()
-		offset += n
-		if size == 0 {
-			break
+		if rangeErr != nil || next <= offset || next > offset+n {
+			return "", fmt.Errorf("Google Drive upload session reported invalid progress; inspect the remote snapshot")
 		}
+		offset = next
+		uncertain = 0
 	}
-	return nil
+	return "", fmt.Errorf("Google Drive upload ended without a completion response; inspect the remote snapshot")
+}
+
+func (s *Service) driveUploadStatus(session string, size int64, fileName, folderID string) (int64, string, error) {
+	req, err := http.NewRequest(http.MethodPut, session, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+	resp, err := s.doTransfer(req)
+	if err != nil {
+		return 0, "", fmt.Errorf("Google Drive upload status is unavailable; inspect the remote snapshot")
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		fileID, err := driveUploadResult(resp.Body, fileName, folderID, size)
+		return size, fileID, err
+	case 308:
+		next, err := driveUploadedOffset(resp.Header.Get("Range"), size)
+		return next, "", err
+	default:
+		return 0, "", fmt.Errorf("Google Drive upload status returned HTTP %d; inspect the remote snapshot", resp.StatusCode)
+	}
+}
+
+func driveUploadedOffset(header string, size int64) (int64, error) {
+	if header == "" {
+		return 0, nil
+	}
+	if !strings.HasPrefix(header, "bytes=0-") {
+		return 0, fmt.Errorf("invalid Google Drive upload range")
+	}
+	last, err := strconv.ParseInt(strings.TrimPrefix(header, "bytes=0-"), 10, 64)
+	if err != nil || last < 0 || last >= size {
+		return 0, fmt.Errorf("invalid Google Drive upload range")
+	}
+	return last + 1, nil
+}
+
+func driveUploadResult(body io.Reader, fileName, folderID string, size int64) (string, error) {
+	var result struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Size    string   `json:"size"`
+		Parents []string `json:"parents"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 4096)).Decode(&result); err != nil {
+		return "", fmt.Errorf("Google Drive did not return verifiable upload metadata")
+	}
+	gotSize, err := strconv.ParseInt(result.Size, 10, 64)
+	if err != nil || result.ID == "" || result.Name != fileName || gotSize != size ||
+		len(result.Parents) != 1 || result.Parents[0] != folderID {
+		return "", fmt.Errorf("Google Drive returned an unverified uploaded object; inspect the destination before retrying")
+	}
+	return result.ID, nil
 }
 
 // uploadDropboxSimple streams one request (≤150 MB per Dropbox's API).

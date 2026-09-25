@@ -24,10 +24,13 @@ describe('temporary cloud provider visibility', () => {
     expect(page).toContain('{#each visibleCloudProviders(providers) as p}');
     expect(page).toContain('{#if isTemporarilyHiddenProvider(config.provider)}');
     expect(page).toContain('{#if !isTemporarilyHiddenProvider(config.provider)}');
+    expect(page).toContain("{#if config.provider === 'google_drive'}");
+    expect(page).toContain("$t('cloud.googleDrive.backupOnly')");
     for (const language of ['en', 'zh-CN']) {
       expect(translate(language, 'cloud.hiddenExistingProvider')).not.toBe('cloud.hiddenExistingProvider');
       expect(translate(language, 'cloud.hiddenExistingConnection')).not.toBe('cloud.hiddenExistingConnection');
       expect(translate(language, 'settings.cloud.ownAppHint')).not.toMatch(/OneDrive|Dropbox|百度网盘|Baidu/);
+      expect(translate(language, 'cloud.googleDrive.backupOnly')).toMatch(/backup|备份/i);
     }
   });
 });

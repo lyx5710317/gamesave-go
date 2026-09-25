@@ -628,6 +628,10 @@
       {/each}
     </div>
 
+    {#if config.provider === 'google_drive'}
+      <p class="preview-warning" role="status">{$t('cloud.googleDrive.backupOnly')}</p>
+    {/if}
+
     {#if isTemporarilyHiddenProvider(config.provider)}
       <p class="quiet" role="status">{$t('cloud.hiddenExistingProvider')}</p>
     {:else if config.provider === 'local'}

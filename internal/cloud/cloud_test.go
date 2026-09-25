@@ -230,7 +230,7 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 		if r.URL.Path == "/resumable-session" {
 			_, _ = io.Copy(uploaded, r.Body)
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"id":"file123"}`)
+			fmt.Fprintf(w, `{"id":"file123","name":"game__main__snap_5.zip","size":"%d","parents":["f1"]}`, uploaded.Len())
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer at-fresh" {
@@ -245,10 +245,10 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 		case r.URL.Path == "/drive/v3/files":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"files": []map[string]any{
-					{"id": "f1", "name": "game__main__snap_5.zip", "size": "2048", "createdTime": "2026-07-01T00:00:00Z"},
+					{"id": "file123", "name": "game__main__snap_5.zip", "size": "10", "createdTime": "2026-07-01T00:00:00Z"},
 				},
 			})
-		case strings.HasPrefix(r.URL.Path, "/drive/v3/files/f1"):
+		case strings.HasPrefix(r.URL.Path, "/drive/v3/files/file123"):
 			fmt.Fprint(w, "drive bytes")
 		}
 	}))
@@ -265,6 +265,7 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 	setCloudConfig(t, s, func(c *store.CloudConfig) {
 		c.Enabled = true
 		c.Provider = "google_drive"
+		c.FolderID = "f1"
 		c.AccessToken = "at-expired"
 		c.RefreshToken = "rt-old"
 		c.ExpiryTimeMs = time.Now().UnixMilli() - 1000 // already expired -> must refresh
@@ -284,7 +285,7 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(files) != 1 || files[0].SizeBytes != 2048 {
+	if len(files) != 1 || files[0].SizeBytes != int64(uploaded.Len()) {
 		t.Errorf("List = %+v", files)
 	}
 	if refreshCalls != 1 {
@@ -298,6 +299,251 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 	got, _ := os.ReadFile(dl)
 	if string(got) != "drive bytes" {
 		t.Errorf("downloaded = %q", got)
+	}
+}
+
+func TestGoogleDriveDefaultFolderRequiresUniqueCompleteListing(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		first  string
+		second string
+	}{
+		{"two on first page", `{"files":[{"id":"one"},{"id":"two"}]}`, ""},
+		{"second match on later page", `{"nextPageToken":"second","files":[{"id":"one"}]}`, `{"files":[{"id":"two"}]}`},
+		{"incomplete listing", `{"incompleteSearch":true,"files":[{"id":"one"}]}`, ""},
+		{"missing folder ID", `{"files":[{}]}`, ""},
+		{"repeated folder ID", `{"nextPageToken":"second","files":[{"id":"one"}]}`, `{"files":[{"id":"one"}]}`},
+		{"cycling page token", `{"nextPageToken":"second","files":[{"id":"one"}]}`, `{"nextPageToken":"second","files":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			created := 0
+			drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/drive/v3/files" {
+					created++
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if !strings.Contains(r.URL.Query().Get("fields"), "nextPageToken") || r.URL.Query().Get("pageSize") != "1000" {
+					t.Errorf("folder listing is not paged: %s", r.URL.RawQuery)
+				}
+				if r.URL.Query().Get("pageToken") == "" {
+					fmt.Fprint(w, tc.first)
+				} else {
+					fmt.Fprint(w, tc.second)
+				}
+			}))
+			defer drive.Close()
+			svc, _ := newTestService(t)
+			svc.Endpoints.GoogleAPI = drive.URL
+			if _, err := svc.driveFolder(store.CloudConfig{}, "token"); err == nil {
+				t.Fatal("ambiguous default folder was selected")
+			}
+			if created != 0 {
+				t.Fatalf("ambiguous listing created %d folders", created)
+			}
+		})
+	}
+}
+
+func TestGoogleDriveDefaultFolderCreationRechecksConcurrentFolder(t *testing.T) {
+	listCalls, createCalls := 0, 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			listCalls++
+			if listCalls == 1 {
+				fmt.Fprint(w, `{"files":[]}`)
+			} else {
+				fmt.Fprint(w, `{"files":[{"id":"ours"},{"id":"concurrent"}]}`)
+			}
+		case http.MethodPost:
+			createCalls++
+			fmt.Fprint(w, `{"id":"ours"}`)
+		}
+	}))
+	defer drive.Close()
+	svc, _ := newTestService(t)
+	svc.Endpoints.GoogleAPI = drive.URL
+	if _, err := svc.driveFolder(store.CloudConfig{}, "token"); err == nil {
+		t.Fatal("concurrent duplicate folder was accepted")
+	}
+	if listCalls != 2 || createCalls != 1 {
+		t.Fatalf("list calls=%d create calls=%d", listCalls, createCalls)
+	}
+}
+
+func TestGoogleDriveDefaultFolderCreationAndLaterDuplicate(t *testing.T) {
+	listCalls, createCalls := 0, 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			listCalls++
+			switch listCalls {
+			case 1:
+				fmt.Fprint(w, `{"files":[]}`)
+			case 2:
+				fmt.Fprint(w, `{"files":[{"id":"ours"}]}`)
+			default:
+				fmt.Fprint(w, `{"files":[{"id":"ours"},{"id":"later"}]}`)
+			}
+		case http.MethodPost:
+			createCalls++
+			fmt.Fprint(w, `{"id":"ours"}`)
+		}
+	}))
+	defer drive.Close()
+	svc, _ := newTestService(t)
+	svc.Endpoints.GoogleAPI = drive.URL
+	id, err := svc.driveFolder(store.CloudConfig{}, "token")
+	if err != nil || id != "ours" {
+		t.Fatalf("new folder = %q, %v", id, err)
+	}
+	if _, err := svc.driveFolder(store.CloudConfig{}, "token"); err == nil {
+		t.Fatal("process cached a folder ID and missed a later duplicate")
+	}
+	if listCalls != 3 || createCalls != 1 {
+		t.Fatalf("list calls=%d create calls=%d", listCalls, createCalls)
+	}
+}
+
+func TestGoogleDriveInterruptedUploadQueriesSessionBeforeResuming(t *testing.T) {
+	oldChunk := driveChunkSize
+	driveChunkSize = 4
+	defer func() { driveChunkSize = oldChunk }()
+	const name = "game__main__snap.zip"
+	var driveURL string
+	var ranges []string
+	statusChecks := 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/upload/drive/v3/files":
+			w.Header().Set("Location", driveURL+"/session")
+		case "/session":
+			if r.Header.Get("Content-Range") == "bytes */8" {
+				statusChecks++
+				w.Header().Set("Range", "bytes=0-3")
+				w.WriteHeader(308)
+				return
+			}
+			ranges = append(ranges, r.Header.Get("Content-Range"))
+			if len(ranges) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable) // first chunk was accepted before the error
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"id":"created","name":%q,"size":"8","parents":["folder"]}`, name)
+		case "/drive/v3/files":
+			fmt.Fprintf(w, `{"files":[{"id":"created","name":%q,"size":"8"}]}`, name)
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer drive.Close()
+	driveURL = drive.URL
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI, svc.Endpoints.GoogleUpload = drive.URL, drive.URL
+	if err := svc.Upload(writeTempZip(t, "abcdefgh"), name); err != nil {
+		t.Fatal(err)
+	}
+	if statusChecks != 1 || len(ranges) != 2 || ranges[0] != "bytes 0-3/8" || ranges[1] != "bytes 4-7/8" {
+		t.Fatalf("status checks=%d chunk ranges=%v", statusChecks, ranges)
+	}
+}
+
+func TestGoogleDriveCompletedUploadStatusIsNotReplayed(t *testing.T) {
+	const name = "game__main__snap.zip"
+	var driveURL string
+	chunks, statusChecks := 0, 0
+	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/upload/drive/v3/files":
+			w.Header().Set("Location", driveURL+"/session")
+		case "/session":
+			if r.Header.Get("Content-Range") == "bytes */4" {
+				statusChecks++
+				fmt.Fprintf(w, `{"id":"created","name":%q,"size":"4","parents":["folder"]}`, name)
+				return
+			}
+			chunks++
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/drive/v3/files":
+			fmt.Fprintf(w, `{"files":[{"id":"created","name":%q,"size":"4"}]}`, name)
+		}
+	}))
+	defer drive.Close()
+	driveURL = drive.URL
+	svc, db := newTestService(t)
+	setCloudConfig(t, db, func(c *store.CloudConfig) {
+		c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+		c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+	})
+	svc.Endpoints.GoogleAPI, svc.Endpoints.GoogleUpload = drive.URL, drive.URL
+	if err := svc.Upload(writeTempZip(t, "data"), name); err != nil {
+		t.Fatal(err)
+	}
+	if chunks != 1 || statusChecks != 1 {
+		t.Fatalf("chunks=%d status checks=%d, wanted one of each", chunks, statusChecks)
+	}
+}
+
+func TestGoogleDrivePostUploadRejectsDuplicateOrChangedObject(t *testing.T) {
+	const name = "game__main__snap.zip"
+	for _, tc := range []struct {
+		name, listing string
+	}{
+		{"duplicate name", `{"files":[{"id":"created","name":"game__main__snap.zip","size":"4"},{"id":"other","name":"game__main__snap.zip","size":"4"}]}`},
+		{"changed identity", `{"files":[{"id":"other","name":"game__main__snap.zip","size":"4"}]}`},
+		{"changed size", `{"files":[{"id":"created","name":"game__main__snap.zip","size":"3"}]}`},
+		{"not visible", `{"files":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var driveURL string
+			drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/upload/drive/v3/files":
+					w.Header().Set("Location", driveURL+"/session")
+				case "/session":
+					fmt.Fprintf(w, `{"id":"created","name":%q,"size":"4","parents":["folder"]}`, name)
+				case "/drive/v3/files":
+					fmt.Fprint(w, tc.listing)
+				}
+			}))
+			defer drive.Close()
+			driveURL = drive.URL
+			svc, db := newTestService(t)
+			setCloudConfig(t, db, func(c *store.CloudConfig) {
+				c.Enabled, c.Provider, c.FolderID = true, "google_drive", "folder"
+				c.AccessToken, c.ExpiryTimeMs = "token", time.Now().Add(time.Hour).UnixMilli()
+			})
+			svc.Endpoints.GoogleAPI, svc.Endpoints.GoogleUpload = drive.URL, drive.URL
+			if err := svc.Upload(writeTempZip(t, "data"), name); err == nil {
+				t.Fatal("unverified Drive upload was marked successful")
+			}
+		})
+	}
+}
+
+func TestGoogleDriveUploadMetadataAndProgressFailClosed(t *testing.T) {
+	for _, body := range []string{
+		`{}`,
+		`{"id":"file","name":"wrong.zip","size":"4","parents":["folder"]}`,
+		`{"id":"file","name":"snap.zip","size":"3","parents":["folder"]}`,
+		`{"id":"file","name":"snap.zip","size":"4","parents":["other"]}`,
+		`not-json`,
+	} {
+		if _, err := driveUploadResult(strings.NewReader(body), "snap.zip", "folder", 4); err == nil {
+			t.Fatalf("unverifiable final metadata accepted: %s", body)
+		}
+	}
+	for _, header := range []string{"bytes=3-4", "bytes=0-4", "bytes=0-nope", "garbage"} {
+		if _, err := driveUploadedOffset(header, 4); err == nil {
+			t.Fatalf("invalid session range accepted: %s", header)
+		}
 	}
 }
 
@@ -1290,9 +1536,15 @@ func TestChunkedUploads(t *testing.T) {
 				if strings.HasSuffix(r.Header.Get("Content-Range"), fmt.Sprintf("/%d", len(payload))) &&
 					len(got.Bytes()) == len(payload) {
 					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{"id":"file123","name":"big__main__snap_1.zip","size":"%d","parents":["folder1"]}`, got.Len())
 				} else {
+					w.Header().Set("Range", fmt.Sprintf("bytes=0-%d", got.Len()-1))
 					w.WriteHeader(308)
 				}
+				return
+			}
+			if r.URL.Path == "/drive/v3/files" {
+				fmt.Fprintf(w, `{"files":[{"id":"file123","name":"big__main__snap_1.zip","size":"%d"}]}`, len(payload))
 				return
 			}
 			w.Header().Set("Location", driveURL+"/session")
