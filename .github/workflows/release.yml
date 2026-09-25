@@ -3,18 +3,45 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
-  contents: write # needed to publish a GitHub Release
+  contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check desktop release tag against package metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ['GITHUB_REF_NAME']
+          product = json.loads(Path('cmd/opensave-app/wails.json').read_text(encoding='utf-8'))['info']['productVersion']
+          windows = json.loads(Path('cmd/opensave-app/build/windows/info.json').read_text(encoding='utf-8'))
+          frontend = json.loads(Path('cmd/opensave-app/frontend/package.json').read_text(encoding='utf-8'))['version']
+          app_source = Path('cmd/opensave-app/app.go').read_text(encoding='utf-8')
+          app_version = re.search(r'^var AppVersion = "([^"]+)"$', app_source, re.MULTILINE)
+          if (tag != 'v' + product or frontend != product or
+                  windows['fixed']['file_version'] != product + '.0' or
+                  windows['info']['0000']['ProductVersion'] != product.removesuffix('.0') or
+                  app_version is None or app_version.group(1) != product.removesuffix('.0')):
+              raise SystemExit(f'Release metadata mismatch: tag={tag}, desktop={product}, frontend={frontend}, Windows={windows["fixed"]["file_version"]}')
+          print(f'Desktop release {tag}; inherited core/peer version is kept separate')
+          PY
+
   windows:
+    needs: [preflight]
     runs-on: windows-latest
     # Expose whether a signing cert secret is configured (secrets can't be
     # read directly in step `if:`, so map it to job-level env here).
     env:
-      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -50,25 +77,15 @@ jobs:
         working-directory: cmd/opensave-app
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          wails build -nsis -ldflags "-X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
-      # Stamped with the same version and build time as the app.
-      #
-      # These were built with "-s -w" alone, so they carried whatever was
-      # hardcoded in internal/version and no build time at all. On a final
-      # release that value matches the tag, which is why it went unnoticed;
-      # on v2.3.0-beta.1 the published CLI reported itself as 2.3.0. A CLI
-      # that does not know it is a pre-release is not offered later betas,
-      # and is never offered the final either, since the version it claims
-      # is the one being released.
-      #
-      # The missing BuildTime matters separately: two peers on the SAME
-      # version decide whose binary is newer by comparing it.
+          wails build -nsis -ldflags "-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+      # The tag is the GameSave Go desktop release, not the inherited
+      # core/peer protocol version. Keep the latter at internal/version.Version
+      # until its cross-device migration is designed. BuildTime still lets
+      # peers distinguish same-core-version builds.
       - name: Build CLI + relay
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          LD="-s -w -X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          LD="-s -w -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
           go build -ldflags="$LD" -o dist/opensave-cli.exe ./cmd/opensave-cli
           go build -ldflags="$LD" -o dist/opensave-relay.exe ./cmd/opensave-relay
 
@@ -89,7 +106,7 @@ jobs:
             echo "::error::installer is only $size bytes — payload missing"
             exit 1
           fi
-          mv "${inst[0]}" cmd/opensave-app/build/bin/OpenSave.Setup.exe
+          mv "${inst[0]}" cmd/opensave-app/build/bin/GameSaveGo.Setup.exe
 
       # Wails 2.12 doesn't reliably embed Windows versioninfo, so stamp it
       # onto the built binaries with rcedit (what electron-builder uses).
@@ -109,10 +126,10 @@ jobs:
             # holding the compressed payload, leaving a 50 KB stub
             case "$exe" in *Setup*|*installer*) continue ;; esac
             "$RUNNER_TEMP/rcedit.exe" "$exe" \
-              --set-version-string "ProductName" "OpenSave" \
-              --set-version-string "CompanyName" "OpenSave" \
-              --set-version-string "FileDescription" "OpenSave — peer-to-peer game save sync" \
-              --set-version-string "LegalCopyright" "Copyright (c) 2026 Siva Prakash & OpenSave contributors" \
+              --set-version-string "ProductName" "GameSave Go" \
+              --set-version-string "CompanyName" "GameSave Go" \
+              --set-version-string "FileDescription" "GameSave Go — local-first game save backup and sync" \
+              --set-version-string "LegalCopyright" "Copyright (c) 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors" \
               --set-file-version "$FV" \
               --set-product-version "$V" \
               --set-icon "cmd/opensave-app/build/windows/icon.ico"
@@ -130,9 +147,13 @@ jobs:
           $pfx = "$env:RUNNER_TEMP\cert.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT_B64))
           $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1).FullName
-          Get-ChildItem cmd/opensave-app/build/bin/*.exe | ForEach-Object {
+          Get-ChildItem cmd/opensave-app/build/bin/*.exe, dist/*.exe | ForEach-Object {
             & $signtool sign /f $pfx /p $env:WIN_CERT_PW /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($_.Name)" }
+            & $signtool verify /pa $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $($_.Name)" }
           }
+          Remove-Item -LiteralPath $pfx -Force
 
       - uses: actions/upload-artifact@v4
         with:
@@ -142,6 +163,7 @@ jobs:
             dist/*
 
   linux:
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,17 +181,16 @@ jobs:
       - name: Build Linux app
         working-directory: cmd/opensave-app
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
       - name: Build CLI + relay, assemble tar.gz
         run: |
           # Same stamping as the app; see the Windows job for why.
           V="${GITHUB_REF_NAME#v}"
-          LD="-s -w -X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          LD="-s -w -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
           go build -ldflags="$LD" -o dist/opensave-cli ./cmd/opensave-cli
           go build -ldflags="$LD" -o dist/opensave-relay ./cmd/opensave-relay
           mkdir -p opensave-linux
-          cp cmd/opensave-app/build/bin/OpenSave opensave-linux/opensave
+          cp cmd/opensave-app/build/bin/GameSaveGo opensave-linux/opensave
           cp dist/opensave-cli dist/opensave-relay opensave-linux/
           # Desktop integration: launcher entry, icon, and a one-line installer.
           cp cmd/opensave-app/build/linux/opensave.desktop opensave-linux/
@@ -204,7 +225,7 @@ jobs:
 
           V="${GITHUB_REF_NAME#v}"
           mkdir -p dist/completions
-          cp cmd/opensave-app/build/bin/OpenSave dist/opensave
+          cp cmd/opensave-app/build/bin/GameSaveGo dist/opensave
           ./dist/opensave-cli completion bash > dist/completions/opensave.bash
           ./dist/opensave-cli completion zsh  > dist/completions/_opensave
           ./dist/opensave-cli completion fish > dist/completions/opensave.fish
@@ -309,9 +330,21 @@ jobs:
   # Publish a real GitHub Release with all downloadable assets on tag push.
   release:
     needs: [windows, linux, flatpak]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Off by default. Publishing requires an explicit repository-level gate,
+    # completed release checklist, and a configured signing identity.
+    if: startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
     steps:
+      - name: Require signing before public release
+        run: |
+          if [ "$HAS_SIGNING" != "true" ]; then
+            echo "::error::Windows signing certificate/password are required for public release"
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           name: windows
@@ -339,27 +372,13 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: OpenSave ${{ github.ref_name }}
-          # Hyphenated tags (v2.1.0-beta.1) publish as pre-releases, so
-          # /releases/latest ignores them. Only devices on the beta channel
-          # are offered these: either the user ticked Settings -> Updates, or
-          # they are already running a pre-release (see selfupdate).
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: GameSave Go ${{ github.ref_name }}
+          # Pre-release channels are not wired to the separate desktop version
+          # yet. The preflight accepts only the exact stable metadata tag.
+          prerelease: false
           # Note: re-publishing the same tag appends another generated-notes
           # block; if a tag is ever re-cut, tidy the release body by hand.
           generate_release_notes: true
-          # `body` is placed above the generated notes, so the invitation is
-          # the first thing in every release rather than buried under a
-          # commit list.
-          body: |
-            ### 💬 Questions, bug reports, or just want to say hello?
-
-            **[Join the OpenSave Discord →](https://discord.gg/hvBv92DZvn)**
-
-            It is the fastest way to get help, and where new builds get
-            discussed before they ship.
-
-            ---
           fail_on_unmatched_files: false
           files: |
             windows/**/*.exe

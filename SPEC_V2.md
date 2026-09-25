@@ -19,7 +19,7 @@ The MVP preserves and extends OpenSave rather than replacing it:
 - design, verify, and then add mainland-China cloud providers as isolated integrations;
 - retain upstream-compatible internal names such as `OpenSave`, `.opensave`, database names, and protocol identifiers until a separate migration is designed.
 
-Not in the current phase: Baidu or Quark implementation, a new snapshot engine, a new account system, global rebranding, installer/release work, or broad UI restructuring.
+Not in the current phase: Baidu or Quark implementation, a new snapshot engine, a new account system, global rebranding, or broad UI restructuring. Phase 6 now permits release **preparation** (version separation, workflow safety, packaging checks), but not a public installer or release until the safety and compatibility gates in `TASKS.md` and `docs/RELEASE_V1_1.md` are verified.
 
 ## Architecture boundaries
 

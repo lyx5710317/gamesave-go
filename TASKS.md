@@ -39,6 +39,8 @@
   - [x] Add a same-style "+ Add device" shortcut immediately before "+ Track folder" on the Games home screen.
   - [x] Set the GameSave Go desktop display and Windows file version to 1.1 while preserving the inherited core/peer build version until a compatible migration is designed.
   - [ ] Before publishing a v1.1 release, separate the GitHub release tag from the inherited core/peer version injected by the release workflow; verify installed builds and peer-update compatibility.
+    - [x] Stop stamping the desktop tag onto the inherited core/peer version in Windows and Linux build jobs; retain build timestamps and add a tag/metadata preflight. This is static and local-build coverage, not a GitHub-runner or installed-build result.
+    - [ ] Verify the tagged workflow and installed candidate against an older peer on two Windows devices.
   - [ ] Replace or explicitly retire the separate upstream `docs/*.html` marketing site before publishing it as GameSave Go; it still contains old product copy and upstream download/community links. Do not treat it as a localized product site.
 - [x] Apply the GameSave Go user-facing brand and supplied icon while preserving compatibility identifiers.
 - [x] Point the in-app repository and release checks at the `gamesave-go` fork, with legacy update-asset fallback.
@@ -121,6 +123,12 @@ Current priority (2026-09-25): Jianguoyun official-WebDAV backup safety after th
 ## Phase 6 — Windows Packaging / Release
 
 - [ ] Define versioning, signed artifacts, installer, upgrade, rollback, and release channels.
+  - [x] Record the separate desktop/core version identities, stable-only candidate policy, publish gate, and Windows validation checklist in `docs/RELEASE_V1_1.md`.
+  - [x] Gate the GitHub Release job behind an explicit repository variable and signing credentials; use GameSave Go Windows installer/metadata branding without renaming compatibility paths.
+  - [ ] Execute the tagged workflow on GitHub runners, inspect and verify every artifact/signature, and decide the tested production signing/channel policy.
+  - [ ] Verify update asset origin and integrity before the in-app updater installs a downloaded binary; the current HTTPS-only URL check is not a release-quality trust decision.
+  - [ ] Decide and test how existing 1.1 development builds reach `v1.1.0`: current version comparison treats `1.1` and `1.1.0` as equal, so the in-app banner will not offer the stable build without a version/channel or build-identity migration.
+  - [ ] Test installer upgrade and binary rollback without reverting user data or credentials.
 - [ ] Run clean-machine Windows installation and upgrade tests.
 - [ ] Complete licenses/notices, security review, and credential-leak scanning.
 - [ ] Publish only after end-to-end backup, conflict, and restore recovery tests pass.

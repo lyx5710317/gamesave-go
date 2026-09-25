@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opensave/opensave/internal/selfupdate"
+	"gopkg.in/yaml.v3"
 )
 
 func TestDesktopProductVersion(t *testing.T) {
@@ -22,6 +24,7 @@ func TestDesktopProductVersion(t *testing.T) {
 	for _, tc := range []struct {
 		path, section, field, want string
 	}{
+		{"frontend/package.json", "", "version", "1.1.0"},
 		{"wails.json", "info", "productVersion", "1.1.0"},
 		{"build/windows/info.json", "fixed", "file_version", "1.1.0.0"},
 		{"build/windows/info.json", "0000", "ProductVersion", "1.1"},
@@ -34,9 +37,11 @@ func TestDesktopProductVersion(t *testing.T) {
 		if err := json.Unmarshal(data, &metadata); err != nil {
 			t.Fatal(err)
 		}
-		section := metadata[tc.section]
+		var section any = metadata
 		if tc.section == "0000" {
 			section = metadata["info"].(map[string]any)["0000"]
+		} else if tc.section != "" {
+			section = metadata[tc.section]
 		}
 		value := section.(map[string]any)[tc.field]
 		if value != tc.want {
@@ -106,6 +111,59 @@ func TestSelectUpdateAssetFor(t *testing.T) {
 func TestUpdateRepositoryUsesGameSaveGoFork(t *testing.T) {
 	if updateRepo != "lyx5710317/gamesave-go" {
 		t.Fatalf("update repository = %q, want the GameSave Go fork", updateRepo)
+	}
+}
+
+func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			If          string            `yaml:"if"`
+			Permissions map[string]string `yaml:"permissions"`
+			Steps       []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	for _, jobName := range []string{"windows", "linux"} {
+		job, ok := workflow.Jobs[jobName]
+		if !ok {
+			t.Fatalf("missing %s release build", jobName)
+		}
+		var buildScripts strings.Builder
+		for _, step := range job.Steps {
+			buildScripts.WriteString(step.Run)
+		}
+		build := buildScripts.String()
+		if strings.Contains(build, "internal/version.Version=") {
+			t.Errorf("%s release build stamps desktop tag onto inherited peer version", jobName)
+		}
+		if !strings.Contains(build, "internal/version.BuildTime=") {
+			t.Errorf("%s release build omits peer build timestamp", jobName)
+		}
+	}
+	release, ok := workflow.Jobs["release"]
+	if !ok {
+		t.Fatal("missing release job")
+	}
+	if !strings.Contains(release.If, "GAMESAVE_GO_PUBLIC_RELEASE_READY") || release.Permissions["contents"] != "write" {
+		t.Fatal("public release is not behind its explicit write-permission gate")
+	}
+	var releaseScripts strings.Builder
+	for _, step := range release.Steps {
+		releaseScripts.WriteString(step.Run)
+	}
+	if !strings.Contains(releaseScripts.String(), "HAS_SIGNING") {
+		t.Fatal("public release does not require Windows signing credentials")
+	}
+	if !strings.Contains(string(raw), "GameSaveGo.Setup.exe") || strings.Contains(string(raw), "discord.gg") {
+		t.Fatal("release still uses the upstream installer name or community invitation")
 	}
 }
 
