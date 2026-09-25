@@ -57,13 +57,20 @@ The inherited screenshots show the upstream interface and are intentionally not 
 
 ## Install
 
+> **GameSave Go 1.1 is still a development build.** This fork has no verified
+> public installer or signed release yet. To try the current code, use
+> [Build from source](#build-from-source). The package names and Steam Deck
+> instructions below describe inherited **upstream OpenSave** distributions;
+> they are not GameSave Go 1.1 downloads.
+
 | Platform | Download | Run |
 |---|---|---|
 | **Windows** | `OpenSave.Setup.exe` (installer) or portable `OpenSave.exe` | Double-click |
 | **Linux** | `opensave-linux-amd64.tar.gz` | extract, then `./opensave` |
 | **Steam Deck / SteamOS** | `OpenSave.flatpak` | see [Steam Deck install](#steam-deck-install) |
 
-Grab the latest from the [**Releases**](https://github.com/Liquid-co/OpenSave/releases) page.
+The [upstream OpenSave releases](https://github.com/Liquid-co/OpenSave/releases)
+are provided here only as a compatibility reference, not as GameSave Go releases.
 
 ### Steam Deck install
 
@@ -78,7 +85,7 @@ Flatpak bundles everything and survives updates.
 
 1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
 2. Download `OpenSave.flatpak` from the [Releases](https://github.com/Liquid-co/OpenSave/releases) page.
-3. Double-click it to install via Discover, or run
+3. For an upstream OpenSave Flatpak, double-click it to install via Discover, or run
    `flatpak install --user OpenSave.flatpak` in Konsole.
 4. Launch OpenSave from the application menu. Optional: add it to Steam
    (right-click → *Add to Steam*) to open it from Game Mode.

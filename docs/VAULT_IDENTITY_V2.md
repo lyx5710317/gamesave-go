@@ -157,6 +157,28 @@ be reviewed if the provider is unavailable. This inventory has no trusted
 content hash, ancestry, `vault.json`, or wrapped-key proof, so matching game
 labels/counts must not authorize an upload, restore, or second-device join.
 
+The screen now also performs a separate bounded, read-only `vault.json`
+inspection for Jianguoyun and local-folder destinations. It distinguishes a
+valid document, missing document, malformed or newer schema, unsupported
+provider, and unavailable destination. The API returns only status, revision,
+and registered-device count; it does not expose device names, keys, VaultId,
+raw responses, or provider credentials. A missing document does not mean an
+empty snapshot directory. Jianguoyun inspection uses GET without creating the
+folder or enabling metadata writes; it deliberately discards any ETag. The
+existing CAS-only `ReadVaultMetadata` / `ReplaceVaultMetadata` capability is
+still unavailable for the legacy transports, so this read cannot authorize
+joining, publishing, or automatic reconciliation.
+
+When both the local scan and recognizable remote ZIP inventory are readable,
+the screen now flags game IDs occurring on both sides for manual review. The
+match uses only IDs, not names, timestamps, archive sizes, or guessed
+ancestry; local display names are shown for review. Different IDs can still
+refer to the same game on separate devices;
+zero listed overlaps is not a safe-join result. An incomplete local scan or an
+unavailable/malformed remote inventory suppresses this comparison. Duplicate
+recognizable snapshot names and invalid sizes stop ordinary cloud browse and
+per-game listing rather than appearing as unambiguous restorable entries.
+
 The comparison produces only these relationships:
 
 | Relationship | Proof |

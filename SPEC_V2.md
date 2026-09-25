@@ -43,7 +43,7 @@ Provider priority is:
 1. Near-term mainland-China recommendation: Jianguoyun through its officially documented WebDAV endpoint and a dedicated `GameSaveGo/` directory. This is a hardened WebDAV preset, not a separate snapshot or sync engine. Its current scope is conservative backup, not verified multi-device cloud sync; see [`docs/JIANGUOYUN_PROVIDER.md`](docs/JIANGUOYUN_PROVIDER.md).
 2. Later mainland-China large-capacity strategy: Baidu Netdisk, gated on public-app approval, approved API scope, and security review. Its design and provider seam remain intact.
 3. Advanced: other user-supplied WebDAV destinations.
-4. Mainland-China candidate: Quark Netdisk, only after official third-party native-client access is confirmed.
+4. Deferred mainland-China candidate: Quark Netdisk. At the owner's request, do not spend the current phase on evaluation, experiments, or implementation. Revisit only if the owner reopens the work and official third-party native-client access is confirmed; it is not a release gate.
 5. International: Google Drive, with existing Dropbox, OneDrive, local-folder, and webhook support retained.
 
 For the current desktop release, show Jianguoyun, Google Drive, local folder, other WebDAV, and webhook as selectable setup entries. Temporarily hide Baidu, OneDrive, and Dropbox from new setup without deleting their providers, saved configurations, credentials, or roadmap. An existing hidden-provider selection must remain intact and be reported honestly rather than silently converted to another provider.
