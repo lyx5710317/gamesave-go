@@ -91,6 +91,8 @@ SQLite remains the backend store, with versioned migrations required for every s
 
 The desktop UI should present its settings, game-management, cloud-backup, device, and conflict-decision text in the selected language. GameSave Go is the user-facing product name; technical paths, protocol names, legacy command names, and required upstream copyright attribution remain unchanged. The separate inherited `docs/*.html` marketing site is not a localized GameSave Go release site until its content and links receive a dedicated review.
 
+Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The next proposed stable tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for the remaining publication gates.
+
 ## Security and data ownership
 
 - User save data belongs to the user and stays local or in the user's chosen provider.

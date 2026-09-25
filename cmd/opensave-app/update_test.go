@@ -15,8 +15,8 @@ import (
 )
 
 func TestDesktopProductVersion(t *testing.T) {
-	if AppVersion != "1.1" {
-		t.Fatalf("desktop version = %q, want 1.1", AppVersion)
+	if AppVersion != "1.1.1" {
+		t.Fatalf("desktop version = %q, want 1.1.1", AppVersion)
 	}
 	if got := NewApp().AppInfo()["version"]; got != AppVersion {
 		t.Fatalf("About version = %q, want %q", got, AppVersion)
@@ -24,10 +24,11 @@ func TestDesktopProductVersion(t *testing.T) {
 	for _, tc := range []struct {
 		path, section, field, want string
 	}{
-		{"frontend/package.json", "", "version", "1.1.0"},
-		{"wails.json", "info", "productVersion", "1.1.0"},
-		{"build/windows/info.json", "fixed", "file_version", "1.1.0.0"},
-		{"build/windows/info.json", "0000", "ProductVersion", "1.1"},
+		{"frontend/package.json", "", "version", "1.1.1"},
+		{"frontend/package-lock.json", "", "version", "1.1.1"},
+		{"wails.json", "info", "productVersion", "1.1.1"},
+		{"build/windows/info.json", "fixed", "file_version", "1.1.1.0"},
+		{"build/windows/info.json", "0000", "ProductVersion", "1.1.1"},
 	} {
 		data, err := os.ReadFile(tc.path)
 		if err != nil {
@@ -47,6 +48,35 @@ func TestDesktopProductVersion(t *testing.T) {
 		if value != tc.want {
 			t.Errorf("%s %s = %v, want %s", tc.path, tc.field, value, tc.want)
 		}
+	}
+}
+
+func TestDesktopReleaseTagLinkerStamp(t *testing.T) {
+	if want := os.Getenv("EXPECTED_DESKTOP_RELEASE_TAG"); want != "" && DesktopReleaseTag != want {
+		t.Fatalf("release tag stamp = %q, want %q", DesktopReleaseTag, want)
+	}
+}
+
+func TestShouldOfferDesktopRelease(t *testing.T) {
+	tests := []struct {
+		name, releaseTag, currentVersion, installedTag string
+		want                                           bool
+	}{
+		{"legacy 1.1 development build", "v1.1.1", "1.1", "", true},
+		{"current development build", "v1.1.1", "1.1.1", "", true},
+		{"matching installed release", "v1.1.1", "1.1.1", "v1.1.1", false},
+		{"newer release", "v1.1.2", "1.1.1", "v1.1.1", true},
+		{"older release", "v1.1.0", "1.1.1", "", false},
+		{"unexpected equal-version tag", "v1.1.1+other", "1.1.1", "", false},
+		{"empty release", "", "1.1.1", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldOfferDesktopRelease(selfupdate.Release{TagName: tc.releaseTag}, tc.currentVersion, tc.installedTag)
+			if got != tc.want {
+				t.Errorf("shouldOfferDesktopRelease(%q, %q, %q) = %t, want %t", tc.releaseTag, tc.currentVersion, tc.installedTag, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -77,6 +107,7 @@ func TestCompareVersions(t *testing.T) {
 		{"2.0", "2.0.0", 0},
 		{"10.0.0", "9.9.9", 1},
 		{"1.0.0", "2.0.0", -1},
+		{"1.1.1", "1.1", 1},
 	}
 	for _, c := range cases {
 		if got := compareVersions(c.a, c.b); got != c.want {
@@ -146,6 +177,9 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		}
 		if !strings.Contains(build, "internal/version.BuildTime=") {
 			t.Errorf("%s release build omits peer build timestamp", jobName)
+		}
+		if !strings.Contains(build, "-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME}") {
+			t.Errorf("%s release build omits desktop release identity", jobName)
 		}
 	}
 	release, ok := workflow.Jobs["release"]

@@ -25,12 +25,16 @@ jobs:
           product = json.loads(Path('cmd/opensave-app/wails.json').read_text(encoding='utf-8'))['info']['productVersion']
           windows = json.loads(Path('cmd/opensave-app/build/windows/info.json').read_text(encoding='utf-8'))
           frontend = json.loads(Path('cmd/opensave-app/frontend/package.json').read_text(encoding='utf-8'))['version']
+          frontend_lock = json.loads(Path('cmd/opensave-app/frontend/package-lock.json').read_text(encoding='utf-8'))
           app_source = Path('cmd/opensave-app/app.go').read_text(encoding='utf-8')
           app_version = re.search(r'^var AppVersion = "([^"]+)"$', app_source, re.MULTILINE)
+          dev_marker = re.search(r'^var DesktopReleaseTag = ""$', app_source, re.MULTILINE)
           if (tag != 'v' + product or frontend != product or
+                  frontend_lock['version'] != product or frontend_lock['packages']['']['version'] != product or
                   windows['fixed']['file_version'] != product + '.0' or
-                  windows['info']['0000']['ProductVersion'] != product.removesuffix('.0') or
-                  app_version is None or app_version.group(1) != product.removesuffix('.0')):
+                  windows['info']['0000']['ProductVersion'] != product or
+                  app_version is None or app_version.group(1) != product or
+                  dev_marker is None):
               raise SystemExit(f'Release metadata mismatch: tag={tag}, desktop={product}, frontend={frontend}, Windows={windows["fixed"]["file_version"]}')
           print(f'Desktop release {tag}; inherited core/peer version is kept separate')
           PY
@@ -77,7 +81,7 @@ jobs:
         working-directory: cmd/opensave-app
         shell: bash
         run: |
-          wails build -nsis -ldflags "-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          wails build -nsis -ldflags "-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
       # The tag is the GameSave Go desktop release, not the inherited
       # core/peer protocol version. Keep the latter at internal/version.Version
       # until its cross-device migration is designed. BuildTime still lets
@@ -181,7 +185,7 @@ jobs:
       - name: Build Linux app
         working-directory: cmd/opensave-app
         run: |
-          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
       - name: Build CLI + relay, assemble tar.gz
         run: |
           # Same stamping as the app; see the Windows job for why.

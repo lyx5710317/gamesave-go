@@ -57,11 +57,11 @@ The inherited screenshots show the upstream interface and are intentionally not 
 
 ## Install
 
-> **GameSave Go 1.1 is still a development build.** This fork has no verified
+> **GameSave Go 1.1.1 is still a development build.** This fork has no verified
 > public installer or signed release yet. To try the current code, use
 > [Build from source](#build-from-source). The package names and Steam Deck
 > instructions below describe inherited **upstream OpenSave** distributions;
-> they are not GameSave Go 1.1 downloads. The [1.1 release checklist](docs/RELEASE_V1_1.md)
+> they are not GameSave Go 1.1.1 downloads. The [1.1 release checklist](docs/RELEASE_V1_1.md)
 > tracks the remaining packaging and upgrade checks.
 
 | Platform | Download | Run |

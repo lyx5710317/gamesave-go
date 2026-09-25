@@ -37,7 +37,7 @@ func (a *App) CheckForUpdate() map[string]any {
 	}
 
 	latest := rel.Version()
-	if compareVersions(latest, AppVersion) <= 0 {
+	if !shouldOfferDesktopRelease(rel, AppVersion, DesktopReleaseTag) {
 		return none
 	}
 	url := rel.HTMLURL
@@ -70,6 +70,23 @@ func (a *App) CheckForUpdate() map[string]any {
 		"notes":      notes,
 		"flatpak":    runningInFlatpak(),
 		"prerelease": rel.Prerelease,
+	}
+}
+
+// shouldOfferDesktopRelease keeps product updates separate from peer protocol
+// versions. A source-built copy at the same version may move to the matching
+// official release once; a tagged build never offers itself again.
+func shouldOfferDesktopRelease(rel selfupdate.Release, currentVersion, installedTag string) bool {
+	if rel.TagName == "" {
+		return false
+	}
+	switch compareVersions(rel.Version(), currentVersion) {
+	case 1:
+		return true
+	case -1:
+		return false
+	default:
+		return installedTag == "" && rel.TagName == "v"+currentVersion
 	}
 }
 

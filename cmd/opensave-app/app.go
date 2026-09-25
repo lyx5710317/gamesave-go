@@ -21,11 +21,14 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// AppVersion is the GameSave Go desktop release shown in the UI and used for
-// releases from this fork. The inherited core/peer build version remains in
-// internal/version until its cross-device update compatibility is migrated.
-// Keep the Wails and Windows executable metadata in sync with this value.
-var AppVersion = "1.1"
+// AppVersion is the GameSave Go desktop version shown in the UI. It is kept
+// separate from the inherited core/peer version in internal/version.
+var AppVersion = "1.1.1"
+
+// DesktopReleaseTag is empty in source-built/development binaries. Tagged
+// release builds stamp it with -ldflags, allowing an equal-version official
+// release to be offered once to a development build but not to itself.
+var DesktopReleaseTag = ""
 
 // productName is the user-facing name of this fork. Compatibility-sensitive
 // identifiers (package paths, .opensave data, protocol names, and the

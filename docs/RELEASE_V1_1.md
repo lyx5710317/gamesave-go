@@ -5,10 +5,16 @@ clean-machine upgrade is claimed by this document.
 
 ## Version identities
 
-- `v1.1.0` is the proposed **desktop product/release tag**. The UI currently
-  displays `1.1`; `wails.json`, the frontend package, and Windows file metadata
-  carry the matching numeric forms. The release workflow checks these before
-  building a tagged revision.
+- `v1.1.1` is the proposed **desktop product/release tag**. Existing manually
+  distributed development builds display `1.1`; the next development build
+  displays `1.1.1`. The patch increment is deliberate: old `1.1` binaries
+  compare `1.1.1` as newer, whereas they consider `1.1.0` equal.
+  `wails.json`, the frontend package, and Windows file metadata carry the
+  matching numeric forms. The release workflow checks these before building.
+- `DesktopReleaseTag` is empty in a source-built/development desktop app and
+  is stamped as `v1.1.1` in the tagged app binary. A development copy at
+  `1.1.1` may be offered that official release once; the official build does
+  not offer itself. This marker is not a peer protocol version.
 - `internal/version.Version` is the inherited **core/peer build identity**
   (`2.3.1` today). LAN/WAN peer advertisements, peer-update comparisons, and
   CLI output use it. A GameSave Go release tag must not be injected into this
@@ -40,9 +46,10 @@ Before enabling publication, verify on an isolated clean Windows VM:
 3. Exercise update detection and a release-asset download. Test both portable
    replacement and protected-directory installer/UAC path. Verify signatures
    and published checksums before considering automatic installation safe.
-   The current comparator considers desktop `1.1` and tag `v1.1.0` equal; an
-   existing development build will not be offered that release automatically.
-   Resolve this before relying on the in-app upgrade path.
+   An older `1.1` development binary should see `v1.1.1` as newer, while a
+   source-built `1.1.1` copy should see the same-version release through the
+   absent release marker. Verify both paths on installed builds; unit tests
+   do not substitute for that upgrade test.
 4. Exercise rollback to the previous build **without** rolling back or
    deleting user data. If a schema migration makes rollback unsafe, document
    the exact compatibility boundary and provide a tested recovery procedure.

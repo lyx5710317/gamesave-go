@@ -127,7 +127,7 @@ Current priority (2026-09-25): Jianguoyun official-WebDAV backup safety after th
   - [x] Gate the GitHub Release job behind an explicit repository variable and signing credentials; use GameSave Go Windows installer/metadata branding without renaming compatibility paths.
   - [ ] Execute the tagged workflow on GitHub runners, inspect and verify every artifact/signature, and decide the tested production signing/channel policy.
   - [ ] Verify update asset origin and integrity before the in-app updater installs a downloaded binary; the current HTTPS-only URL check is not a release-quality trust decision.
-  - [ ] Decide and test how existing 1.1 development builds reach `v1.1.0`: current version comparison treats `1.1` and `1.1.0` as equal, so the in-app banner will not offer the stable build without a version/channel or build-identity migration.
+  - [x] Choose `v1.1.1` rather than `v1.1.0` so already distributed 1.1 development binaries see the patch as newer; add a separate linker-stamped desktop release tag so same-version source builds can see the official release without an official build offering itself. Unit and linker-stamp tests cover the decision logic; installed-build upgrade checks remain open.
   - [ ] Test installer upgrade and binary rollback without reverting user data or credentials.
 - [ ] Run clean-machine Windows installation and upgrade tests.
 - [ ] Complete licenses/notices, security review, and credential-leak scanning.
