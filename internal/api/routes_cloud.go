@@ -100,11 +100,11 @@ func (s *Server) handleCloudJoinRemoteVault(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCloudBrowse(w http.ResponseWriter, r *http.Request) {
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeCloudReadError(w, http.StatusBadGateway, err)
 		return
 	}
 	if err := validateRecognizableCloudInventory(files); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeCloudReadError(w, http.StatusConflict, err)
 		return
 	}
 
@@ -224,11 +224,11 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeCloudReadError(w, http.StatusBadGateway, err)
 		return
 	}
 	if err := validateRecognizableCloudInventory(files); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeCloudReadError(w, http.StatusConflict, err)
 		return
 	}
 
@@ -252,6 +252,8 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 // the same recognizable snapshot name. Never present that inventory as an
 // ordinary, actionable list. Restore and verification have their own exact
 // object checks; this guard also protects the pre-join summary.
+var errCloudInventoryInvalid = errors.New("remote snapshot inventory is ambiguous or malformed")
+
 func validateRecognizableCloudInventory(files []cloud.CloudFile) error {
 	seen := make(map[string]struct{}, len(files))
 	for _, file := range files {
@@ -259,10 +261,10 @@ func validateRecognizableCloudInventory(files []cloud.CloudFile) error {
 			continue
 		}
 		if file.SizeBytes < 0 {
-			return errors.New("remote snapshot inventory has an invalid size; refusing to browse")
+			return errCloudInventoryInvalid
 		}
 		if _, duplicate := seen[file.Name]; duplicate {
-			return errors.New("remote snapshot inventory has duplicate names; refusing to browse")
+			return errCloudInventoryInvalid
 		}
 		seen[file.Name] = struct{}{}
 	}
@@ -288,7 +290,7 @@ func (s *Server) handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "cloud inventory unavailable; verification did not run")
+		writeCloudVerificationError(w, http.StatusBadGateway, err)
 		return
 	}
 	var remote *cloud.CloudFile
@@ -297,27 +299,79 @@ func (s *Server) handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if remote != nil {
-			writeError(w, http.StatusConflict, "multiple remote snapshots have this name; verification is ambiguous")
+			writeCloudVerificationError(w, http.StatusConflict, cloud.ErrRemoteSnapshotAmbiguous)
 			return
 		}
 		remote = &files[i]
 	}
 	if remote == nil {
-		writeError(w, http.StatusNotFound, "remote snapshot not found")
+		writeCloudVerificationError(w, http.StatusNotFound, cloud.ErrJianguoyunMissing)
 		return
 	}
 	settings, err := s.Daemon.Store.GetSettings()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "local settings unavailable")
+		writeCloudVerificationError(w, http.StatusInternalServerError, err)
 		return
 	}
 	localPath := filepath.Join(settings.BackupsDir, gameID, branch, snapID+".zip")
 	result, err := s.Daemon.Cloud.VerifyRemoteSnapshot(*remote, localPath)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "cloud snapshot could not be verified; no saves were changed")
+		writeCloudVerificationError(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// A fixed code makes VM failures actionable without returning remote bodies,
+// URLs, application passwords, account names, local paths or ZIP entry names.
+func writeCloudVerificationError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{
+		"error": "cloud snapshot could not be verified; no saves were changed",
+		"code":  "cloud_verify_" + cloudFailureCategory(err),
+	})
+}
+
+func writeCloudReadError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{
+		"error": "cloud inventory unavailable; no saves were changed",
+		"code":  "cloud_read_" + cloudFailureCategory(err),
+	})
+}
+
+func cloudFailureCategory(err error) string {
+	code := "failed"
+	var localPathErr *os.PathError
+	switch {
+	case errors.Is(err, cloud.ErrCloudDisabled):
+		code = "disabled"
+	case cloud.IsNotConfigured(err):
+		code = "configuration"
+	case errors.Is(err, cloud.ErrJianguoyunAuth):
+		code = "authentication"
+	case errors.Is(err, cloud.ErrJianguoyunPermission):
+		code = "permission"
+	case errors.Is(err, cloud.ErrJianguoyunQuota):
+		code = "quota"
+	case errors.Is(err, cloud.ErrJianguoyunRateLimit):
+		code = "rate_limit"
+	case errors.Is(err, cloud.ErrJianguoyunNetwork):
+		code = "network"
+	case errors.Is(err, cloud.ErrJianguoyunMissing):
+		code = "missing"
+	case errors.Is(err, cloud.ErrJianguoyunIncomplete), errors.Is(err, errCloudInventoryInvalid):
+		code = "incomplete_inventory"
+	case errors.Is(err, cloud.ErrRemoteSnapshotAmbiguous):
+		code = "ambiguous"
+	case errors.Is(err, cloud.ErrUnsafeSnapshotArchive):
+		code = "unsafe_archive"
+	case errors.Is(err, cloud.ErrSnapshotSizeMismatch):
+		code = "size_mismatch"
+	case errors.Is(err, cloud.ErrSnapshotArchiveIntegrity), errors.Is(err, cloud.ErrJianguoyunIntegrity):
+		code = "integrity"
+	case errors.As(err, &localPathErr):
+		code = "local_io"
+	}
+	return code
 }
 
 // handleCloudRestore downloads a remote snapshot zip, registers it, and
@@ -382,6 +436,10 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, cloud.ErrLocalSnapshotConflict) {
 			status = http.StatusConflict
 		}
+		if errors.Is(err, cloud.ErrUnsafeSnapshotArchive) {
+			writeError(w, status, cloud.ErrUnsafeSnapshotArchive.Error())
+			return
+		}
 		writeError(w, status, err.Error())
 		return
 	}
@@ -396,6 +454,9 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.Daemon.Snapshots.Restore(gameID, snapID); err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("downloaded but restore failed: %v", err))
 		return
 	}

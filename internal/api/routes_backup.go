@@ -2,14 +2,15 @@ package api
 
 import (
 	"archive/zip"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,28 @@ import (
 	"github.com/opensave/opensave/internal/snapshot"
 	"github.com/opensave/opensave/internal/store"
 )
+
+func writeRestorePreflightError(w http.ResponseWriter, err error) bool {
+	code := restorePreflightCode(err)
+	if code == "" {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]string{"code": code, "error": "restore preflight failed; keep the current save and snapshots"})
+	return true
+}
+
+func restorePreflightCode(err error) string {
+	switch {
+	case errors.Is(err, snapshot.ErrRestoreArchive):
+		return "restore_archive"
+	case errors.Is(err, snapshot.ErrRestoreLocation):
+		return "restore_location"
+	case errors.Is(err, snapshot.ErrRestoreSafety):
+		return "restore_safety"
+	default:
+		return ""
+	}
+}
 
 // handleSnapshotFiles lists the entries inside a snapshot ZIP (for the
 // granular-restore browser in the UI).
@@ -92,9 +115,8 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		path, ok := paths[rootName]
-		if !ok {
-			writeError(w, http.StatusBadRequest,
-				"That file belongs to the "+strconv.Quote(rootName)+" save location, which this device has no folder for.")
+		if !ok || strings.TrimSpace(path) == "" {
+			writeFileRestoreError(w, "location")
 			return
 		}
 		target = path
@@ -104,13 +126,62 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	safetyComment := fmt.Sprintf("Safety snapshot before restoring file %q from %s", body.RelPath, snapshotID)
-	if _, err := s.Daemon.Snapshots.Create(gameID, safetyComment, true); err != nil {
-		s.Daemon.Log.Log("warn", "safety snapshot before file restore failed: "+err.Error())
+	dest, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath))
+	if err != nil {
+		writeFileRestoreError(w, "target")
+		return
 	}
-
-	if err := extractSingleFile(snap.ZipPath, body.RelPath, snapshot.ArchiveEntryRelPath(body.RelPath), target); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	// Stage before creating the safety snapshot: retention can delete the
+	// selected archive, and a CRC failure must never truncate the live file.
+	staged, err := stageSnapshotFile(snap.ZipPath, body.RelPath)
+	if err != nil {
+		writeFileRestoreError(w, "archive")
+		return
+	}
+	defer os.Remove(staged)
+	before, existed, err := restoreFileDigest(dest)
+	if err != nil {
+		writeFileRestoreError(w, "target")
+		return
+	}
+	safetyComment := fmt.Sprintf("Safety snapshot before single-file restore from %s", snapshotID)
+	safety, err := s.Daemon.Snapshots.Create(gameID, safetyComment, true)
+	if err != nil {
+		writeFileRestoreError(w, "safety")
+		return
+	}
+	if existed {
+		safetyEntry := body.RelPath
+		if info, statErr := os.Lstat(target); statErr == nil && info.Mode().IsRegular() {
+			safetyEntry = filepath.Base(target)
+			if root, extra := snapshot.RootOfArchiveEntry(body.RelPath); extra {
+				safetyEntry = snapshot.RootPrefix + root + "/" + safetyEntry
+			}
+		}
+		protected, verifyErr := stageSnapshotFile(safety.ZipPath, safetyEntry)
+		if verifyErr != nil {
+			writeFileRestoreError(w, "safety")
+			return
+		}
+		digest, present, verifyErr := restoreFileDigest(protected)
+		os.Remove(protected)
+		if verifyErr != nil || !present || digest != before {
+			writeFileRestoreError(w, "safety")
+			return
+		}
+	}
+	// A safety snapshot of a different state does not authorize replacement.
+	after, present, err := restoreFileDigest(dest)
+	if err != nil || present != existed || after != before {
+		writeFileRestoreError(w, "changed")
+		return
+	}
+	if checked, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath)); err != nil || checked != dest {
+		writeFileRestoreError(w, "target")
+		return
+	}
+	if err := publishRestoredFile(staged, dest); err != nil {
+		writeFileRestoreError(w, "publish")
 		return
 	}
 	s.BroadcastGamesUpdate()
@@ -125,40 +196,162 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 // location: the archive stores it under a prefix, and it must land in that
 // location's folder without the prefix coming along.
 func extractSingleFile(zipPath, entryName, destRel, savePath string) error {
+	dest, err := singleFileRestoreTarget(savePath, destRel)
+	if err != nil {
+		return err
+	}
+	staged, err := stageSnapshotFile(zipPath, entryName)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staged)
+	return publishRestoredFile(staged, dest)
+}
+
+func writeFileRestoreError(w http.ResponseWriter, category string) {
+	writeJSON(w, http.StatusConflict, map[string]string{
+		"error": "single-file restore could not complete; keep the original and safety snapshots",
+		"code":  "file_restore_" + category,
+	})
+}
+
+// Resolve from the mapped relative path, never from the archive's root prefix.
+// A missing configured save path remains a directory, matching delta's rule.
+func singleFileRestoreTarget(savePath, rel string) (string, error) {
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "/") || filepath.IsAbs(filepath.FromSlash(rel)) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))) != rel || strings.HasSuffix(rel, "/") || !delta.IsSafePath(savePath, rel) || (runtime.GOOS == "windows" && strings.ContainsAny(rel, ":<>\"|?*")) {
+		return "", errors.New("invalid restore target")
+	}
+	dest := filepath.Join(savePath, filepath.FromSlash(rel))
+	if info, err := os.Lstat(savePath); err == nil && !info.IsDir() {
+		if !info.Mode().IsRegular() || strings.Contains(rel, "/") {
+			return "", errors.New("invalid single-file target")
+		}
+		dest = savePath
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	// Do not follow a symlink/junction into another save location.
+	for p := dest; ; p = filepath.Dir(p) {
+		info, err := os.Lstat(p)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("linked restore target")
+		}
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	return dest, nil
+}
+
+func stageSnapshotFile(zipPath, entryName string) (string, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return fmt.Errorf("open snapshot zip: %w", err)
+		return "", errors.New("snapshot could not be opened")
 	}
 	defer zr.Close()
 
 	want := strings.ReplaceAll(entryName, "\\", "/")
+	var selected *zip.File
+	matches := 0
 	for _, f := range zr.File {
-		if strings.ReplaceAll(f.Name, "\\", "/") != want {
-			continue
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+		if name == want || (runtime.GOOS == "windows" && strings.EqualFold(name, want)) {
+			matches++
 		}
-		src, err := f.Open()
-		if err != nil {
-			return err
+		if name == want {
+			selected = f
 		}
-		defer src.Close()
+	}
+	if selected == nil || matches != 1 || !selected.Mode().IsRegular() {
+		return "", errors.New("snapshot entry missing, ambiguous or not a regular file")
+	}
+	src, err := selected.Open()
+	if err != nil {
+		return "", errors.New("snapshot entry could not be opened")
+	}
+	defer src.Close()
+	tmp, err := os.CreateTemp("", ".opensave-restore-file-*.part")
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	ok := false
+	defer func() {
+		tmp.Close()
+		if !ok {
+			os.Remove(name)
+		}
+	}()
+	n, err := io.Copy(tmp, src)
+	if err != nil || uint64(n) != selected.UncompressedSize64 {
+		return "", errors.New("snapshot entry integrity check failed")
+	}
+	if err := tmp.Sync(); err != nil {
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return name, nil
+}
 
-		destPath := filepath.Join(savePath, filepath.FromSlash(want))
-		if info, statErr := os.Stat(savePath); statErr == nil && !info.IsDir() {
-			destPath = savePath // single-file save mode
-		}
-		if err := os.MkdirAll(filepath.Dir(destPath), 0o777); err != nil {
-			return err
-		}
-		_ = os.Chmod(destPath, 0o666)
-		dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o666)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-		_, err = io.Copy(dst, src)
+func restoreFileDigest(path string) ([sha256.Size]byte, bool, error) {
+	var result [sha256.Size]byte
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return result, false, nil
+	}
+	if err != nil {
+		return result, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return result, false, errors.New("restore target is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return result, false, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return result, false, err
+	}
+	copy(result[:], h.Sum(nil))
+	return result, true, nil
+}
+
+func publishRestoredFile(staged, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o777); err != nil {
 		return err
 	}
-	return fmt.Errorf("file %q not found in snapshot", entryName)
+	// Use the destination filesystem for final publication, including when
+	// OS temporary storage lives on a different volume. Never truncate dest.
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".opensave-restore-publish-*.part")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	src, err := os.Open(staged)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	if _, err := io.Copy(tmp, src); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), dest)
 }
 
 // ── .sscb format v2 ──────────────────────────────────────────────────
@@ -568,6 +761,7 @@ type importResult struct {
 	Action  string `json:"action"` // restored | snapshot | skipped
 	Path    string `json:"path,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode string) []importResult {
@@ -667,6 +861,7 @@ func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode s
 			}
 			if err != nil {
 				res.Action, res.Error = "skipped", err.Error()
+				res.Code = restorePreflightCode(err)
 			}
 			os.Remove(tmpPath)
 			results = append(results, s.logImportResult(res))

@@ -444,14 +444,14 @@ func TestJianguoyunIgnoredConditionAndInterruptedPutFail(t *testing.T) {
 func TestJianguoyunHeadLengthMismatchRequiresFullReadback(t *testing.T) {
 	for _, scenario := range []struct {
 		name    string
-		fixture jianguoyunDAVFixture
+		fixture *jianguoyunDAVFixture
 	}{
-		{"conditional-wrong-head", jianguoyunDAVFixture{wrongHead: true}},
-		{"conditional-missing-head", jianguoyunDAVFixture{missingHeadLength: true}},
-		{"move-wrong-stage-and-final-head", jianguoyunDAVFixture{ignoreCondition: true, wrongHead: true, wrongStageHead: true}},
+		{"conditional-wrong-head", &jianguoyunDAVFixture{wrongHead: true}},
+		{"conditional-missing-head", &jianguoyunDAVFixture{missingHeadLength: true}},
+		{"move-wrong-stage-and-final-head", &jianguoyunDAVFixture{ignoreCondition: true, wrongHead: true, wrongStageHead: true}},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			fixture := &scenario.fixture
+			fixture := scenario.fixture
 			svc := newJianguoyunService(t, fixture)
 			name := "game__main__snap.zip"
 			if err := svc.UploadIfAbsent(writeTempZip(t, "verified contents"), name); err != nil {
@@ -469,15 +469,15 @@ func TestJianguoyunHeadLengthMismatchRequiresFullReadback(t *testing.T) {
 func TestJianguoyunReadbackRejectsDamagedOrInterruptedObject(t *testing.T) {
 	for _, scenario := range []struct {
 		name    string
-		fixture jianguoyunDAVFixture
+		fixture *jianguoyunDAVFixture
 		want    error
 	}{
-		{"conditional-truncated", jianguoyunDAVFixture{wrongHead: true, truncateRealPut: true}, ErrJianguoyunIntegrity},
-		{"stage-truncated", jianguoyunDAVFixture{ignoreCondition: true, wrongStageHead: true, truncateStagePut: true}, ErrJianguoyunIntegrity},
-		{"stage-read-interrupted", jianguoyunDAVFixture{ignoreCondition: true, wrongStageHead: true, interruptReadback: true}, ErrJianguoyunNetwork},
+		{"conditional-truncated", &jianguoyunDAVFixture{wrongHead: true, truncateRealPut: true}, ErrJianguoyunIntegrity},
+		{"stage-truncated", &jianguoyunDAVFixture{ignoreCondition: true, wrongStageHead: true, truncateStagePut: true}, ErrJianguoyunIntegrity},
+		{"stage-read-interrupted", &jianguoyunDAVFixture{ignoreCondition: true, wrongStageHead: true, interruptReadback: true}, ErrJianguoyunNetwork},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			fixture := &scenario.fixture
+			fixture := scenario.fixture
 			svc := newJianguoyunService(t, fixture)
 			name := "game__main__snap.zip"
 			err := svc.UploadIfAbsent(writeTempZip(t, "verified contents"), name)
@@ -639,6 +639,18 @@ func TestJianguoyunRetryIsBounded(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 429 || requests != 3 {
 		t.Fatalf("retry count=%d status=%d", requests, resp.StatusCode)
+	}
+}
+
+func TestJianguoyunReadOnlyDownloadDoesNotCreateMissingDirectory(t *testing.T) {
+	fixture := &jianguoyunDAVFixture{}
+	svc := newJianguoyunService(t, fixture)
+	err := svc.Download("game__main__missing.zip", filepath.Join(t.TempDir(), "missing.zip"))
+	if !errors.Is(err, ErrJianguoyunMissing) {
+		t.Fatalf("missing download = %v", err)
+	}
+	if fixture.folder {
+		t.Fatal("read-only download created the remote directory")
 	}
 }
 

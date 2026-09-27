@@ -47,7 +47,11 @@ async function request(method, path, body) {
   const res = await fetch(baseURL + path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+    const error = new Error(data.error || `${method} ${path} failed (${res.status})`);
+    if (typeof data.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(data.code)) {
+      error.code = data.code;
+    }
+    throw error;
   }
   return data;
 }

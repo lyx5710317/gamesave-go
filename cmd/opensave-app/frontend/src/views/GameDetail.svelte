@@ -1,4 +1,5 @@
 <script>
+  import { fileRestoreFailureKey, restorePreflightFailureKey, snapshotComment as displaySnapshotComment } from '../lib/snapshotRestore.js';
   import { games, navigate, toast, syncActivity, askConfirm } from '../lib/stores.js';
   import { api, native, coverURL, gameCover } from '../lib/api.js';
   import { addExclusion, addNegation, removeDirectExclusion } from '../lib/ignorerules.js';
@@ -148,7 +149,8 @@
       await fn();
       if (label) toast(label, 'success');
     } catch (e) {
-      toast($locale === 'zh-CN' && !/\p{Script=Han}/u.test(e.message) ? $t('game.operationFailed') : e.message, 'error');
+      const safetyKey = fileRestoreFailureKey(e) || restorePreflightFailureKey(e);
+      toast(safetyKey ? $t(safetyKey) : ($locale === 'zh-CN' && !/\p{Script=Han}/u.test(e.message) ? $t('game.operationFailed') : e.message), 'error');
     } finally {
       busy = false;
     }
@@ -522,6 +524,7 @@
   </div>
 
   {#if tab === 'snapshots'}
+    <p class="hint">{$t('game.localSnapshotsHint')}</p>
     <div class="card snap-new">
       <input placeholder={$t('game.snapshotComment')} bind:value={snapshotComment} />
       <button class="btn primary" disabled={busy} on:click={takeSnapshot}>📸 {$t('game.snapshotNow')}</button>
@@ -555,7 +558,7 @@
                 <span class="badge offline">{snap.branch}</span>
                 {#if snap.isSystemAuto}<span class="badge offline">{$t('game.auto')}</span>{/if}
               </div>
-              <div class="snap-comment">{snap.comment}</div>
+              <div class="snap-comment">{displaySnapshotComment(snap, $t)}</div>
               <div class="snap-meta">{fmtTime(snap.timestamp, $locale)} · {fmtSize(snap.sizeBytes)}</div>
             </div>
             <div class="snap-actions">

@@ -7,7 +7,8 @@
   import { summarizeLocalPreview, summarizeRemoteInventory, summarizeRemoteVault, summarizeJoinOverlap } from '../lib/localPreview.js';
   import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
-  import { cloudVerificationFeedback } from '../lib/cloudVerification.js';
+  import { restorePreflightFailureKey } from '../lib/snapshotRestore.js';
+  import { cloudVerificationFeedback, cloudArchiveFailureKey, cloudVerificationFailureKey, cloudReadFailureKey } from '../lib/cloudVerification.js';
   import { JIANGUOYUN_BASE_URL, JIANGUOYUN_REMOTE_FOLDER, recommendJianguoyunForUnset, selectCloudProvider } from '../lib/jianguoyun.js';
   import { isTemporarilyHiddenProvider, visibleCloudProviders } from '../lib/cloudProviderVisibility.js';
 
@@ -49,6 +50,7 @@
   });
   onDestroy(unsubAuth);
   let cloudGames = null; // grouped explorer data (null = not loaded yet)
+  let cloudBrowseFailure = null; // fixed translation key, never provider text
   let browsing = false;
   let cloudOpen = false; // cloud snapshot browser modal
   let cloudFilter = '';
@@ -97,6 +99,7 @@
   function providerStatus(id, connected, cfg) {
     if (!cfg) return '';
     if (id === 'baidu') return $t('cloud.status.baiduPending');
+    if (id === cfg.provider && !cfg.enabled) return $t('cloud.status.disabled');
     if (id === connected) {
       const email = cfg.tokens?.userEmail;
       return isEmail(email) ? email : $t('cloud.status.connected');
@@ -110,6 +113,7 @@
     if (p.unavailable) return;
     config = selectCloudProvider(config, p.id);
     cloudGames = null;
+    cloudBrowseFailure = null;
     detailId = null;
     remotePreviewStatus = 'idle';
     remotePreviewSummary = null;
@@ -150,6 +154,8 @@
 
   async function load() {
     cloudConfigLoadError = '';
+    cloudGames = null;
+    cloudBrowseFailure = null;
     remotePreviewStatus = 'idle';
     remotePreviewSummary = null;
     remoteVault = null;
@@ -329,18 +335,26 @@
   // just wiped the dead tokens — reload so the "connected" badge flips to
   // "sign in" instead of lying about a working connection.
   function handleCloudError(e) {
-    toast(e.message, 'error');
+    const restoreKey = restorePreflightFailureKey(e);
+    if (restoreKey) { toast($t(restoreKey), 'error'); return; }
+    const archiveFailure = cloudArchiveFailureKey(e);
+    toast(archiveFailure ? $t(archiveFailure) : e.message, 'error');
     if (/expired|reconnect|not authenticated|re-auth/i.test(e.message)) load();
   }
 
   async function browseCloud() {
+    if (browsing) return;
     browsing = true;
+    cloudBrowseFailure = null;
     // keep the current listing visible while refreshing so the detail view
     // doesn't flash back to the loading spinner mid-upload
     try {
       cloudGames = await api.get('/api/cloud/browse');
     } catch (e) {
-      handleCloudError(e);
+      cloudBrowseFailure = cloudReadFailureKey(e);
+      cloudGames = null; // Do not present a stale inventory as actionable.
+      detailId = null;
+      toast($t(cloudBrowseFailure), 'error');
     } finally {
       browsing = false;
     }
@@ -434,8 +448,8 @@
       const result = await api.post(`/api/cloud/verify/${gameId}`, { fileName: file.name });
       const feedback = cloudVerificationFeedback(result);
       toast($t(feedback.key), feedback.tone);
-    } catch {
-      toast($t('cloud.verify.failed'), 'error');
+    } catch (error) {
+      toast($t(cloudVerificationFailureKey(error)), 'error');
     } finally {
       busy = false;
       verifyingName = '';
@@ -579,6 +593,9 @@
         if (res.snapshots) bits.push($t('cloud.import.snapshotsAdded', { count: res.snapshots }));
         if (res.skipped) bits.push($t('cloud.import.skipped', { count: res.skipped }));
         toast($t('cloud.import.finished', { result: bits.join($t('cloud.import.separator')) || $t('cloud.import.nothing') }), res.skipped ? 'info' : 'success');
+        for (const key of new Set((res.results || []).map(restorePreflightFailureKey).filter(Boolean))) {
+          toast($t(key), 'error');
+        }
       }
       importOpen = false;
     } catch (e) {
@@ -627,6 +644,14 @@
         </button>
       {/each}
     </div>
+
+    {#if !isTemporarilyHiddenProvider(config.provider)}
+      <label class="check cloud-enable">
+        <input type="checkbox" bind:checked={config.enabled} />
+        {$t('cloud.enabled.label')}
+      </label>
+      <p class="quiet">{$t('cloud.enabled.hint')}</p>
+    {/if}
 
     {#if config.provider === 'google_drive'}
       <p class="preview-warning" role="status">{$t('cloud.googleDrive.backupOnly')}</p>
@@ -1156,6 +1181,11 @@
 
       {#if browsing && !cloudGames}
         <div class="cloud-loading"><span class="cspin"></span> {$t('cloud.browser.listing')}</div>
+      {:else if cloudBrowseFailure}
+        <div class="cloud-read-error" role="alert">
+          <h3>{$t('cloud.browser.readFailed')}</h3>
+          <p>{$t(cloudBrowseFailure)}</p>
+        </div>
       {:else if cloudGames && detailTile}
         <!-- drill-in: one game's cloud snapshots -->
         <div class="detail-head">
@@ -1306,6 +1336,9 @@
 {/if}
 
 <style>
+  .cloud-enable { margin-top: 18px; }
+  .cloud-read-error { padding: 28px; }
+  .cloud-read-error p { color: var(--text-dim); line-height: 1.7; }
   .preview-card { padding: 18px 20px; }
   .preview-card .export-row { padding: 0; }
   .preview-card h4 { margin: 16px 0 6px; }

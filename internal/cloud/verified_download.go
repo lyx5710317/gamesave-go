@@ -10,12 +10,19 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // ErrLocalSnapshotConflict means a remote object has the same logical
 // snapshot name as a different local archive. Neither copy is overwritten.
 var ErrLocalSnapshotConflict = errors.New("local snapshot differs from remote; refusing to overwrite either copy")
+
+// Never include untrusted entry names or archive contents in this error.
+var ErrUnsafeSnapshotArchive = errors.New("cloud snapshot archive contains unsafe or conflicting paths; no saves were changed")
+
+var ErrSnapshotSizeMismatch = errors.New("downloaded snapshot size mismatch")
+var ErrSnapshotArchiveIntegrity = errors.New("cloud snapshot archive integrity check failed")
 
 // RemoteVerification describes a read-only archive check. A ZIP with valid
 // CRCs is readable, but without a trusted manifest or an identical local
@@ -45,12 +52,9 @@ func (s *Service) VerifyRemoteSnapshot(file CloudFile, localArchivePath string) 
 	if err := s.Download(file.Name, tmpPath); err != nil {
 		return RemoteVerification{}, fmt.Errorf("download snapshot: %w", err)
 	}
-	actualSize, remoteHash, err := inspectSnapshotArchive(tmpPath)
+	actualSize, remoteHash, err := inspectSnapshotArchive(tmpPath, file.SizeBytes)
 	if err != nil {
 		return RemoteVerification{}, fmt.Errorf("verify downloaded snapshot: %w", err)
-	}
-	if file.SizeBytes > 0 && actualSize != file.SizeBytes {
-		return RemoteVerification{}, fmt.Errorf("downloaded snapshot size mismatch: got %d bytes, expected %d", actualSize, file.SizeBytes)
 	}
 	result := RemoteVerification{SizeBytes: actualSize, LocalComparison: "unavailable"}
 	if localArchivePath == "" {
@@ -117,12 +121,9 @@ func (s *Service) DownloadVerified(file CloudFile, destPath, expectedSHA256 stri
 	if err := s.Download(file.Name, tmpPath); err != nil {
 		return fmt.Errorf("download snapshot: %w", err)
 	}
-	actualSize, actualHash, err := inspectSnapshotArchive(tmpPath)
+	_, actualHash, err := inspectSnapshotArchive(tmpPath, file.SizeBytes)
 	if err != nil {
 		return fmt.Errorf("verify downloaded snapshot: %w", err)
-	}
-	if file.SizeBytes > 0 && actualSize != file.SizeBytes {
-		return fmt.Errorf("downloaded snapshot size mismatch: got %d bytes, expected %d", actualSize, file.SizeBytes)
 	}
 	if expectedSHA256 != "" && !strings.EqualFold(actualHash, expectedSHA256) {
 		return errors.New("downloaded snapshot SHA-256 mismatch")
@@ -138,7 +139,7 @@ func safeSnapshotFileName(name string) bool {
 		filepath.Base(name) == name
 }
 
-func inspectSnapshotArchive(zipPath string) (int64, string, error) {
+func inspectSnapshotArchive(zipPath string, expectedSize int64) (int64, string, error) {
 	f, err := os.Open(zipPath)
 	if err != nil {
 		return 0, "", err
@@ -149,32 +150,36 @@ func inspectSnapshotArchive(zipPath string) (int64, string, error) {
 		return 0, "", err
 	}
 	if info.Size() == 0 {
-		return 0, "", errors.New("snapshot archive is empty")
+		return 0, "", ErrSnapshotArchiveIntegrity
+	}
+	// Refuse inconsistent download metadata before hashing or decompressing.
+	if expectedSize > 0 && info.Size() != expectedSize {
+		return 0, "", fmt.Errorf("%w: got %d bytes, expected %d", ErrSnapshotSizeMismatch, info.Size(), expectedSize)
+	}
+	// Inspect and hash the same opened file, not a second path lookup.
+	r, err := zip.NewReader(f, info.Size())
+	if err != nil {
+		return 0, "", ErrSnapshotArchiveIntegrity
+	}
+	if len(r.File) == 0 {
+		return 0, "", ErrSnapshotArchiveIntegrity
+	}
+	if err := validateSnapshotArchivePaths(r.File, runtime.GOOS == "windows"); err != nil {
+		return 0, "", err
 	}
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return 0, "", err
 	}
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return 0, "", err
-	}
-	defer r.Close()
-	if len(r.File) == 0 {
-		return 0, "", errors.New("snapshot archive has no entries")
-	}
 	for _, entry := range r.File {
-		if !safeZipEntryName(entry.Name) || entry.Mode()&os.ModeSymlink != 0 {
-			return 0, "", fmt.Errorf("unsafe snapshot archive entry %q", entry.Name)
-		}
 		reader, err := entry.Open()
 		if err != nil {
-			return 0, "", err
+			return 0, "", ErrSnapshotArchiveIntegrity
 		}
 		_, copyErr := io.Copy(io.Discard, reader)
 		closeErr := reader.Close()
 		if copyErr != nil {
-			return 0, "", fmt.Errorf("snapshot archive entry %q: %w", entry.Name, copyErr)
+			return 0, "", ErrSnapshotArchiveIntegrity
 		}
 		if closeErr != nil {
 			return 0, "", closeErr
@@ -188,8 +193,69 @@ func safeZipEntryName(name string) bool {
 		strings.ContainsRune(name, 0) || strings.HasPrefix(name, "/") {
 		return false
 	}
-	clean := path.Clean(name)
-	return clean != ".." && !strings.HasPrefix(clean, "../")
+	trimmed := strings.TrimSuffix(name, "/")
+	return trimmed != "" && trimmed != "." && trimmed != ".." &&
+		path.Clean(trimmed) == trimmed && !strings.HasPrefix(trimmed, "../")
+}
+
+// Validate the whole tree before reading any entry. ZIP CRCs alone do not
+// protect against duplicate extraction targets or a file used as a directory.
+// Keep Linux case-sensitive behavior; Windows additionally rejects Win32
+// device names, aliases and characters that cannot be restored safely.
+func validateSnapshotArchivePaths(entries []*zip.File, windows bool) error {
+	explicit := make(map[string]bool, len(entries))
+	directories := make(map[string]bool)
+	for _, entry := range entries {
+		isDir := entry.FileInfo().IsDir()
+		if !safeZipEntryName(entry.Name) || (entry.Mode().Type() != 0 && entry.Mode().Type() != os.ModeDir) ||
+			isDir != strings.HasSuffix(entry.Name, "/") || (isDir && entry.UncompressedSize64 != 0) {
+			return ErrUnsafeSnapshotArchive
+		}
+		key := strings.TrimSuffix(entry.Name, "/")
+		if windows {
+			for _, component := range strings.Split(key, "/") {
+				if !safeWindowsArchiveComponent(component) {
+					return ErrUnsafeSnapshotArchive
+				}
+			}
+			key = strings.ToUpper(key)
+		}
+		if _, exists := explicit[key]; exists || (!isDir && directories[key]) {
+			return ErrUnsafeSnapshotArchive
+		}
+		explicit[key] = isDir
+		for parent := path.Dir(key); parent != "."; parent = path.Dir(parent) {
+			if parentIsDir, exists := explicit[parent]; exists && !parentIsDir {
+				return ErrUnsafeSnapshotArchive
+			}
+			directories[parent] = true
+		}
+	}
+	return nil
+}
+
+func safeWindowsArchiveComponent(name string) bool {
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") || strings.ContainsAny(name, `<>"|?*`) {
+		return false
+	}
+	for _, c := range name {
+		if c < 32 {
+			return false
+		}
+	}
+	stem, _, _ := strings.Cut(name, ".")
+	stem = strings.ToUpper(strings.TrimRight(stem, " "))
+	switch stem {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return false
+	}
+	if strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT") {
+		suffix := stem[3:]
+		if strings.Contains("123456789¹²³", suffix) && suffix != "" && len([]rune(suffix)) == 1 {
+			return false
+		}
+	}
+	return true
 }
 
 func publishVerifiedArchive(tmpPath, destPath, actualHash string) error {

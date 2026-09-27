@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,56 @@ func TestVerifyRemoteSnapshotRejectsDamagedRemoteWithoutPublishing(t *testing.T)
 			}
 			if _, err := os.Stat(localPath); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("verification published an archive: %v", err)
+			}
+		})
+	}
+}
+
+func TestDownloadVerifiedConcurrentPublicationNeverOverwrites(t *testing.T) {
+	first := testZIP(t, "slot.sav", "synthetic first progress")
+	for _, sameBytes := range []bool{false, true} {
+		t.Run(fmt.Sprintf("identical=%v", sameBytes), func(t *testing.T) {
+			second := first
+			if !sameBytes {
+				second = testZIP(t, "slot.sav", "synthetic second progress")
+			}
+			svcA := newDownloadTestService(t, &downloadTestProvider{data: first})
+			svcB := newDownloadTestService(t, &downloadTestProvider{data: second})
+			for attempt := 0; attempt < 10; attempt++ {
+				dir := t.TempDir()
+				dest := filepath.Join(dir, "same.zip")
+				start := make(chan struct{})
+				results := make(chan error, 2)
+				for _, item := range []struct {
+					svc  *Service
+					data []byte
+				}{{svcA, first}, {svcB, second}} {
+					go func() {
+						<-start
+						results <- item.svc.DownloadVerified(CloudFile{Name: "game__main__same.zip", SizeBytes: int64(len(item.data))}, dest, "")
+					}()
+				}
+				close(start)
+				succeeded, conflicted := 0, 0
+				for i := 0; i < 2; i++ {
+					err := <-results
+					switch {
+					case err == nil:
+						succeeded++
+					case errors.Is(err, ErrLocalSnapshotConflict):
+						conflicted++
+					default:
+						t.Fatalf("publication failed unexpectedly: %v", err)
+					}
+				}
+				if (sameBytes && (succeeded != 2 || conflicted != 0)) || (!sameBytes && (succeeded != 1 || conflicted != 1)) {
+					t.Fatalf("succeeded=%d conflicted=%d identical=%v", succeeded, conflicted, sameBytes)
+				}
+				got, err := os.ReadFile(dest)
+				if err != nil || (!bytes.Equal(got, first) && !bytes.Equal(got, second)) {
+					t.Fatalf("published partial/overwritten archive: %v", err)
+				}
+				assertNoPartFiles(t, dir)
 			}
 		})
 	}

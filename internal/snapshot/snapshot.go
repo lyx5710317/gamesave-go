@@ -484,28 +484,50 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 		return store.Snapshot{}, fmt.Errorf("inspect current save before restore: %w", err)
 	}
 
-	restoreZip := snap.ZipPath
+	// Always use a private copy: validate the exact bytes we will extract,
+	// including when the current directory is empty. Retention may prune the
+	// original while creating the safety snapshot.
+	restoreZip, err := copyToTempZip(snap.ZipPath)
+	if err != nil {
+		return store.Snapshot{}, ErrRestoreArchive
+	}
+	defer os.Remove(restoreZip)
+	restoreRoots, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
+		return store.Snapshot{}, err
+	}
 	if hasContent {
-		// The safety snapshot can trigger retention pruning. Preserve the target
-		// before taking it, or restoring the oldest retained snapshot could
-		// delete the archive it is about to read.
-		tmp, err := copyToTempZip(snap.ZipPath)
-		if err != nil {
-			return store.Snapshot{}, fmt.Errorf("preserve target snapshot before restore: %w", err)
-		}
-		restoreZip = tmp
-		defer os.Remove(tmp)
 
 		safetyComment := fmt.Sprintf("Pre-rollback safety restore point (before restoring %s)", snapshotID)
-		if _, err := m.Create(gameID, safetyComment, true); err != nil {
-			return store.Snapshot{}, fmt.Errorf(
-				"could not back up the current save before restoring, so nothing was changed: %w", err)
+		safety, err := m.Create(gameID, safetyComment, true)
+		if err != nil {
+			return store.Snapshot{}, ErrRestoreSafety
+		}
+		if err := verifyRestorePayload(safety.ZipPath); err != nil {
+			return store.Snapshot{}, ErrRestoreSafety
 		}
 	}
 
-	restoreRoots, rootsErr := m.Store.GameRootPaths(gameID)
-	if rootsErr != nil {
-		restoreRoots = nil
+	// Recheck mappings/kinds after the safety hook, before any clearing. This
+	// is not a filesystem lock against external concurrent writers.
+	currentRoots, err := m.Store.GameRootPaths(gameID)
+	if err != nil || len(currentRoots) != len(restoreRoots) {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	currentGame, err := m.Store.GetGame(gameID)
+	if err != nil || currentGame.SavePath != game.SavePath {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	for name, path := range restoreRoots {
+		if currentRoots[name] != path {
+			return store.Snapshot{}, ErrRestoreLocation
+		}
+	}
+	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
+		return store.Snapshot{}, err
 	}
 	unplaced, err := UnzipRoots(restoreZip, game.SavePath, restoreRoots)
 	for _, name := range unplaced {

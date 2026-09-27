@@ -69,10 +69,12 @@ export const confirmRequest = writable(null); // {title, message, confirmText, c
 export function askConfirm(message, opts = {}) {
   return new Promise((resolve) => {
     confirmRequest.set({
-      title: opts.title ?? 'Are you sure?',
+      // Resolve omitted labels in the dialog's active language, including
+      // language changes while it is open. Keep explicit caller labels.
+      title: opts.title ?? null,
       message,
-      confirmText: opts.confirmText ?? 'Confirm',
-      cancelText: opts.cancelText ?? 'Cancel',
+      confirmText: opts.confirmText ?? null,
+      cancelText: opts.cancelText ?? null,
       danger: opts.danger ?? false,
       resolve
     });

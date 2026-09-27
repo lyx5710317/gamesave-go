@@ -46,6 +46,8 @@ GameSave Go gives **every** game the Steam Cloud experience:
 - **Snapshot history** — every change creates a versioned snapshot. Roll back a whole save or a single file; branches keep parallel playthroughs (and conflict resolutions) safe.
 - **Smart conflict handling** — diverged saves are detected by **sync lineage**, not wall-clock timestamps. Keep yours, keep theirs, or keep both on a new branch.
 - **Cloud backup** — optional mirroring to Jianguoyun (the recommended mainland-China WebDAV preset), Google Drive, other WebDAV, a webhook, or a local/NAS folder. Jianguoyun and Google Drive currently run in conservative backup-only mode; verified remote-vault joining and ancestry-aware multi-device cloud sync are not complete. Google Drive can hold duplicate names, so a concurrent upload may require manual review. Baidu Netdisk, OneDrive, and Dropbox remain implemented or planned in the codebase but their setup cards are temporarily hidden. Existing saved configurations are not deleted by this UI change.
+- **Cloud restore checks** — downloads are staged and checked for ZIP integrity, listed size, unsafe paths and duplicate extraction targets before import. Windows also rejects case collisions and reserved device names. Invalid archives never replace current saves; verified restores still require a safety snapshot. These checks are not proof of cloud-vault ancestry. See [cloud archive safety](docs/CLOUD_ARCHIVE_SAFETY.md).
+- **Whole-restore preflight** — read the selected ZIP and safety ZIP for integrity before clearing saves; stop when archived locations are unmapped, overlapping or incompatible. Missing paths restore as folders rather than guessing file mode from a single ZIP entry. Multi-location disk-failure rollback, complete current-tree capture verification and legacy archive alias checks remain open.
 - **Cross-device game matching** — the same title tracked under different names on two machines (a Steam install here, a differently-named folder there) can be matched by Steam App ID or linked by hand. App-ID matching is opt-in, so two separate copies of a game are never merged without asking.
 - **A full command line** — `opensave` does everything the app does, for a Steam Deck in Game Mode or a headless server. See [Command line](#command-line).
 - **In-app updates** — one-click update from GitHub releases, pull a newer build straight from a paired device, or `opensave update` from the terminal.
@@ -312,6 +314,20 @@ Every command accepts `--json` for scripting.
 Google Drive, Dropbox and OneDrive need a browser to grant consent, so those are
 connected once in the desktop app. WebDAV, webhook and local/NAS providers work
 entirely from the terminal.
+
+The desktop **Enable cloud backup and automatically mirror new snapshots**
+switch controls all cloud operations, not only automatic uploads. When off,
+cloud browse/upload/restore are unavailable but saved credentials and backups
+remain intact. Enable it in Cloud Backup (or Settings → Sync), then explicitly
+save settings. Enabling also permits automatic uploads of new snapshots.
+
+The game's **Snapshots** list restores local archives only; it does not fetch
+a cloud object. Use **Cloud Backup → Browse cloud** for an explicit cloud
+restore. An empty local snapshot intentionally restores an empty state.
+Single-file restore now stages and checks the selected file before replacement,
+requires a verifiable safety snapshot of an existing target, and stops on an
+observed local change. Keep safety snapshots when publication fails; this is
+not a guarantee of atomic multi-directory or concurrent-writer recovery.
 
 **Configuration**
 

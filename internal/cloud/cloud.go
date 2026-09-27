@@ -104,6 +104,9 @@ func New(s *store.Store, logf func(level, msg string)) *Service {
 	return svc
 }
 
+// ErrCloudDisabled distinguishes the local switch from a provider outage.
+var ErrCloudDisabled = errors.New("cloud sync is not enabled")
+
 // IsNotConfigured reports whether err just means cloud backup isn't set up
 // (disabled, no destination, or not signed in) — callers like the snapshot
 // auto-upload hook skip logging these instead of alarming the user.
@@ -125,7 +128,7 @@ func (s *Service) config() (store.CloudConfig, error) {
 		return store.CloudConfig{}, err
 	}
 	if !cfg.Enabled {
-		return store.CloudConfig{}, fmt.Errorf("cloud sync is not enabled")
+		return store.CloudConfig{}, ErrCloudDisabled
 	}
 	if cfg.Provider == "jianguoyun" {
 		if cfg.URL != store.JianguoyunBaseURL {
@@ -1129,11 +1132,8 @@ func (s *Service) downloadLegacy(fileName, localPath string) error {
 		return out.Close()
 
 	case "webdav", "jianguoyun":
-		if cfg.Provider == "jianguoyun" {
-			if err := s.ensureJianguoyunFolder(cfg); err != nil {
-				return err
-			}
-		}
+		// Downloads, including read-only verification, never create a remote
+		// directory. A deleted/missing destination must remain a read failure.
 		req, err := http.NewRequest(http.MethodGet, joinURL(cfg.URL, url.PathEscape(fileName)), nil)
 		if err != nil {
 			return err

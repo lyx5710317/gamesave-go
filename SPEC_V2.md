@@ -85,6 +85,41 @@ Before restoring or applying an incoming state:
 
 If neither side is a known descendant of the other, create a conflict. Do not choose a winner solely from modification times. Branch and conflict data must stay compatible with existing OpenSave behavior and migration history.
 
+The granular single-file API must also fail closed: stage and CRC-check the
+selected regular entry before safety-snapshot retention can remove the source,
+use the mapped location-relative path, and verify that an existing destination's
+bytes were captured in the safety archive before replacing it. Reject a changed
+local file rather than overwriting the newly observed state. Publish from a
+closed, flushed sibling temporary file instead of truncating the live file.
+Fixed Chinese/English error categories must not expose archive names or raw
+filesystem errors. This is a scoped API bug fix, not a replacement snapshot
+engine, transaction across all save locations, or proof against all concurrent
+writers/filesystem aliases. Whole-directory restore limitations remain open.
+
+Whole-snapshot `Manager.Restore` now preserves a private copy even for an empty
+destination and fully reads target and newly created safety ZIP entries for
+CRC/length checks before clearing saves. It rejects unmapped archived locations,
+overlapping destination roots, incompatible existing target kinds and observed
+mapping changes instead of reporting a partial restore as success. Existing
+single-file targets accept exactly one top-level regular entry, mapped to the
+configured local filename. Missing destinations are directories: legacy archive
+metadata does not reliably distinguish a deleted file from a one-file folder.
+This is a demonstrated extraction-boundary bug fix, with no schema/protocol
+change. It is not full safety-capture comparison, legacy archive-tree validation,
+filesystem alias proof or multi-root transactional rollback after an I/O failure.
+
+Cloud downloads and read-only verification now reject ambiguous ZIP extraction
+paths before publishing/importing an archive: duplicate paths, non-canonical
+relative paths, file/directory collisions, special entries and directory bodies.
+On Windows the check additionally rejects case-colliding targets, reserved
+device names, trailing dots/spaces and invalid Win32 characters. Linux retains
+case-sensitive names. Listed-size mismatches are rejected before decompression;
+CRC checks still apply. This cloud-ingress check does not rewrite the snapshot
+engine or validate every legacy local/P2P archive. It is not trusted vault
+identity, ancestry, or a decompression/resource-limit guarantee. Jianguoyun
+downloads no longer create a missing remote directory. See
+`docs/CLOUD_ARCHIVE_SAFETY.md` for coverage and remaining manual checks.
+
 ## Automatic backup and cross-device sync
 
 The target Windows workflow is: detect game activity, mark save changes dirty, detect game exit, wait for files to become stable, create a snapshot, then enqueue the upload. This reduces partial captures and cloud API volume. The audited watcher currently performs recursive `fsnotify`, a two-second debounce, lock/stability checks, manifest-hash deduplication, and retry before taking a snapshot directly; game-process/dirty-queue orchestration remains future work.
@@ -96,6 +131,43 @@ Synchronization must be resumable, observable, and conservative. A newly joined 
 SQLite remains the backend store, with versioned migrations required for every schema change. The initial language preference is deliberately stored under `opensave.locale` in frontend `localStorage`: it is UI-only, device-local, available before the daemon API finishes booting, and does not justify a database migration. English is the fallback; Simplified Chinese is selected from compatible system locales when no preference exists.
 
 The desktop UI should present its settings, game-management, cloud-backup, device, and conflict-decision text in the selected language. GameSave Go is the user-facing product name; technical paths, protocol names, legacy command names, and required upstream copyright attribution remain unchanged. The separate inherited `docs/*.html` marketing site is not a localized GameSave Go release site until its content and links receive a dedicated review.
+
+Shared confirmation dialogs resolve omitted title/action/cancel labels in the
+active UI language, including cloud verification and application-password
+removal. Read-only cloud verification returns fixed failure categories rather
+than exposing account identifiers, credentials, request URLs, local paths or
+ZIP entry names. Authentication, network, incomplete inventory, size mismatch,
+archive integrity and local-I/O failures remain failures, not permission to
+disable checks or overwrite data. On 2026-09-26 the owner reported that the
+current candidate worked on the host but failed verification and upload on the
+VM; this is an unresolved compatibility failure, not a completed release gate.
+
+A subsequent loopback-API diagnostic found the host's global cloud switch
+disabled while its Jianguoyun preset and protected-password configuration
+remained present. The owner then confirmed that both host and VM browsing work
+after enabling and saving the switch, then successful new-snapshot VM upload
+and host verification. This resolves the reported access/upload workflow,
+not restored-file/safety-snapshot recovery checks or provider CAS guarantees.
+The local gate is not a provider authentication failure. The existing switch
+still controls both manual cloud access and automatic mirroring. Both settings
+and Cloud Backup must state that behavior explicitly, show disabled status,
+and require an explicit save; never turn it on silently. Cloud inventory read
+errors use fixed localized categories displayed persistently, and a failed
+refresh must discard stale actionable inventory rather than show it as current
+or empty. No engine/schema/credential migration is introduced by this UI fix.
+
+Follow-up on 2026-09-27: the owner clarified that an empty local snapshot had
+been restored rather than the separate cloud snapshot. After selecting cloud
+restore, the owner reports successful restoration and matching content, then
+successful recovery after instructions to use the automatic pre-restore safety
+snapshot. Record these as owner-reported workflow PASS, not an independently
+measured whole-tree/hash result or proof of an identified candidate on both
+devices. A local snapshot restore never implicitly downloads a cloud object;
+the UI must explain that distinction and intentional empty-state restoration.
+
+The owner subsequently reports `game2` succeeded after the candidate's optional
+single-file restore exercise. Record this as owner-reported PASS only; no exact
+two-device executable hashes or independently measured file tree were supplied.
 
 Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The next proposed stable tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for the remaining publication gates.
 

@@ -550,6 +550,9 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.Daemon.Snapshots.Restore(gameID, body.SnapshotID)
 	if err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, notFoundToStatus(err), err.Error())
 		return
 	}
