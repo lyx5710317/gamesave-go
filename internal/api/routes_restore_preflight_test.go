@@ -22,6 +22,7 @@ func TestRestorePreflightCategoriesHidePrivateErrors(t *testing.T) {
 		{"restore_archive", snapshot.ErrRestoreArchive},
 		{"restore_location", snapshot.ErrRestoreLocation},
 		{"restore_safety", snapshot.ErrRestoreSafety},
+		{"restore_changed", snapshot.ErrRestoreChanged},
 	} {
 		r := httptest.NewRecorder()
 		if !writeRestorePreflightError(r, fmt.Errorf("synthetic-private-path: %w", tc.err)) {

@@ -38,6 +38,8 @@ func restorePreflightCode(err error) string {
 		return "restore_location"
 	case errors.Is(err, snapshot.ErrRestoreSafety):
 		return "restore_safety"
+	case errors.Is(err, snapshot.ErrRestoreChanged):
+		return "restore_changed"
 	default:
 		return ""
 	}

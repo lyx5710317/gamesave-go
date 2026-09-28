@@ -5,7 +5,7 @@ import { translate } from './i18n.js';
 
 describe('single-file restore safety diagnostics', () => {
   it('maps whole-restore preflight failures in both languages without private errors', () => {
-    for (const category of ['archive', 'location', 'safety']) {
+    for (const category of ['archive', 'location', 'safety', 'changed']) {
       const key = restorePreflightFailureKey({ code: `restore_${category}`, message: 'synthetic-private-path' });
       expect(key).toBe(`game.restoreFailure.${category}`);
       for (const language of ['zh-CN', 'en']) {

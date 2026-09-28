@@ -94,7 +94,7 @@ closed, flushed sibling temporary file instead of truncating the live file.
 Fixed Chinese/English error categories must not expose archive names or raw
 filesystem errors. This is a scoped API bug fix, not a replacement snapshot
 engine, transaction across all save locations, or proof against all concurrent
-writers/filesystem aliases. Whole-directory restore limitations remain open.
+writers/filesystem aliases. Whole-directory restore retains separate limits.
 
 Whole-snapshot `Manager.Restore` now preserves a private copy even for an empty
 destination and fully reads target and newly created safety ZIP entries for
@@ -104,9 +104,15 @@ mapping changes instead of reporting a partial restore as success. Existing
 single-file targets accept exactly one top-level regular entry, mapped to the
 configured local filename. Missing destinations are directories: legacy archive
 metadata does not reliably distinguish a deleted file from a one-file folder.
-This is a demonstrated extraction-boundary bug fix, with no schema/protocol
-change. It is not full safety-capture comparison, legacy archive-tree validation,
-filesystem alias proof or multi-root transactional rollback after an I/O failure.
+The whole-restore gate also reads the current tree, including empty files,
+excluded/dot files, empty directories and mapped extra roots, compares file
+sizes and SHA-256 bytes with the newly created safety ZIP, then scans the
+current tree again before extraction. A mismatch or observed intervening
+change stops replacement with a fixed bilingual error. This is a scoped
+extraction-boundary improvement with no schema/protocol change. It does not
+lock out concurrent writers between the final scan and extraction, prove all
+filesystem aliases, validate every legacy archive path alias, or make a
+multi-root restore transactional after an I/O failure.
 
 Cloud downloads and read-only verification now reject ambiguous ZIP extraction
 paths before publishing/importing an archive: duplicate paths, non-canonical

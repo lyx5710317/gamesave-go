@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -479,11 +480,6 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	// game is at its snapshot limit and this is the oldest snapshot — would
 	// delete this very snapshot's archive before we extract it. Restore from
 	// a temporary copy so the content survives that pruning.
-	hasContent, err := m.gameHasSaveContent(gameID, game.SavePath)
-	if err != nil {
-		return store.Snapshot{}, fmt.Errorf("inspect current save before restore: %w", err)
-	}
-
 	// Always use a private copy: validate the exact bytes we will extract,
 	// including when the current directory is empty. Retention may prune the
 	// original while creating the safety snapshot.
@@ -499,14 +495,19 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
 		return store.Snapshot{}, err
 	}
-	if hasContent {
+	before, err := readRestoreCurrentState(game.SavePath, restoreRoots)
+	if err != nil {
+		return store.Snapshot{}, ErrRestoreSafety
+	}
+	if len(before.Entries) > 0 {
 
 		safetyComment := fmt.Sprintf("Pre-rollback safety restore point (before restoring %s)", snapshotID)
 		safety, err := m.Create(gameID, safetyComment, true)
 		if err != nil {
 			return store.Snapshot{}, ErrRestoreSafety
 		}
-		if err := verifyRestorePayload(safety.ZipPath); err != nil {
+		protected, err := restoreArchiveInventory(safety.ZipPath)
+		if err != nil || !maps.Equal(before.Entries, protected) {
 			return store.Snapshot{}, ErrRestoreSafety
 		}
 	}
@@ -528,6 +529,10 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	}
 	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
 		return store.Snapshot{}, err
+	}
+	after, err := readRestoreCurrentState(game.SavePath, restoreRoots)
+	if err != nil || !sameRestoreCurrentState(before, after) {
+		return store.Snapshot{}, ErrRestoreChanged
 	}
 	unplaced, err := UnzipRoots(restoreZip, game.SavePath, restoreRoots)
 	for _, name := range unplaced {

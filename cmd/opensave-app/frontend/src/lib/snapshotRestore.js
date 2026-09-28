@@ -10,7 +10,7 @@ export function fileRestoreFailureKey(error) {
 
 // Allowlist whole-restore preflight failures just like single-file failures.
 export function restorePreflightFailureKey(error) {
-  const codes = { restore_archive: 'archive', restore_location: 'location', restore_safety: 'safety' };
+  const codes = { restore_archive: 'archive', restore_location: 'location', restore_safety: 'safety', restore_changed: 'changed' };
   return Object.hasOwn(codes, error?.code) ? `game.restoreFailure.${codes[error.code]}` : null;
 }
 

@@ -2,8 +2,11 @@ package snapshot
 
 import (
 	"archive/zip"
+	"crypto/sha256"
 	"errors"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,35 +17,168 @@ var (
 	ErrRestoreArchive  = errors.New("restore archive validation failed; nothing was changed")
 	ErrRestoreLocation = errors.New("restore locations are missing or incompatible; nothing was changed")
 	ErrRestoreSafety   = errors.New("restore safety snapshot creation or validation failed; nothing was changed")
+	ErrRestoreChanged  = errors.New("current save changed during restore preparation; nothing was replaced")
 )
 
+type restoreFingerprint struct {
+	Directory bool
+	Size      int64
+	Hash      [sha256.Size]byte
+}
+
+type restoreCurrentState struct {
+	Entries map[string]restoreFingerprint
+	Kinds   map[string]string
+}
+
 // Read every entry before destructive extraction, not only the central index.
-// This closes the legacy/local CRC-after-clearing bug. It does not prove that
-// all current files were captured by the safety snapshot, or bound ZIP resources.
 func verifyRestorePayload(zipPath string) error {
+	_, err := restoreArchiveInventory(zipPath)
+	return err
+}
+
+// Hash actual archive bytes, not captured-file database rows, and consume EOF
+// so CRC checks run. Duplicate names cannot prove a unique captured state.
+func restoreArchiveInventory(zipPath string) (map[string]restoreFingerprint, error) {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return ErrRestoreArchive
+		return nil, ErrRestoreArchive
 	}
 	defer r.Close()
+	entries := map[string]restoreFingerprint{}
 	for _, entry := range r.File {
+		if _, exists := entries[entry.Name]; exists {
+			return nil, ErrRestoreArchive
+		}
 		if !entry.Mode().IsRegular() && !entry.FileInfo().IsDir() {
-			return ErrRestoreArchive
+			return nil, ErrRestoreArchive
 		}
 		if entry.FileInfo().IsDir() && entry.UncompressedSize64 != 0 {
-			return ErrRestoreArchive
+			return nil, ErrRestoreArchive
 		}
 		src, err := entry.Open()
 		if err != nil {
-			return ErrRestoreArchive
+			return nil, ErrRestoreArchive
 		}
-		n, readErr := io.Copy(io.Discard, src)
+		sum := sha256.New()
+		n, readErr := io.Copy(sum, src)
 		closeErr := src.Close()
 		if readErr != nil || closeErr != nil || uint64(n) != entry.UncompressedSize64 {
-			return ErrRestoreArchive
+			return nil, ErrRestoreArchive
+		}
+		fp := restoreFingerprint{Directory: entry.FileInfo().IsDir(), Size: n}
+		if !fp.Directory {
+			copy(fp.Hash[:], sum.Sum(nil))
+		}
+		entries[entry.Name] = fp
+	}
+	return entries, nil
+}
+
+// A read-only restore verification scan, matching the existing ZIP root layout.
+// Unlike a normal best-effort snapshot, unreadable or special files stop it.
+// Include excluded/dot files and empty directories: clearing removes them too.
+func readRestoreCurrentState(primary string, extra map[string]string) (restoreCurrentState, error) {
+	state := restoreCurrentState{Entries: map[string]restoreFingerprint{}, Kinds: map[string]string{}}
+	roots := map[string]string{"": primary}
+	for name, path := range extra {
+		roots[name] = path
+	}
+	for root, path := range roots {
+		if strings.TrimSpace(path) == "" {
+			state.Kinds[root] = "unmapped"
+			continue
+		}
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			state.Kinds[root] = "missing"
+			continue
+		}
+		if err != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return state, ErrRestoreSafety
+		}
+		prefix := ""
+		if root != "" {
+			prefix = RootPrefix + root + "/"
+		}
+		if info.Mode().IsRegular() {
+			state.Kinds[root] = "file"
+			fp, err := readRestoreRegularFile(path, info)
+			if err != nil {
+				return state, ErrRestoreSafety
+			}
+			name := prefix + filepath.Base(path)
+			if _, ok := state.Entries[name]; ok {
+				return state, ErrRestoreSafety
+			}
+			state.Entries[name] = fp
+			continue
+		}
+		state.Kinds[root] = "directory"
+		if prefix != "" {
+			state.Entries[prefix] = restoreFingerprint{Directory: true}
+		}
+		err = filepath.WalkDir(path, func(current string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return ErrRestoreSafety
+			}
+			if current == path {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
+				return ErrRestoreSafety
+			}
+			rel, err := filepath.Rel(path, current)
+			if err != nil {
+				return ErrRestoreSafety
+			}
+			name := prefix + filepath.ToSlash(rel)
+			fp := restoreFingerprint{Directory: info.IsDir()}
+			if fp.Directory {
+				name += "/"
+			} else {
+				fp, err = readRestoreRegularFile(current, info)
+				if err != nil {
+					return ErrRestoreSafety
+				}
+			}
+			if _, ok := state.Entries[name]; ok {
+				return ErrRestoreSafety
+			}
+			state.Entries[name] = fp
+			return nil
+		})
+		if err != nil {
+			return state, ErrRestoreSafety
 		}
 	}
-	return nil
+	return state, nil
+}
+
+func readRestoreRegularFile(path string, expected os.FileInfo) (restoreFingerprint, error) {
+	var fp restoreFingerprint
+	f, err := os.Open(path)
+	if err != nil {
+		return fp, ErrRestoreSafety
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(expected, info) {
+		return fp, ErrRestoreSafety
+	}
+	sum := sha256.New()
+	n, err := io.Copy(sum, f)
+	if err != nil || n != info.Size() {
+		return fp, ErrRestoreSafety
+	}
+	fp.Size = n
+	copy(fp.Hash[:], sum.Sum(nil))
+	return fp, nil
+}
+
+func sameRestoreCurrentState(a, b restoreCurrentState) bool {
+	return maps.Equal(a.Entries, b.Entries) && maps.Equal(a.Kinds, b.Kinds)
 }
 
 // Manager-level restore must be complete: the lower-level UnzipRoots contract

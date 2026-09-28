@@ -450,7 +450,7 @@ multiple entries over a file target scattered sibling files. The fix extends
 the existing Manager.Restore/UnzipTo boundary, not a parallel restore engine.
 No schema, archive layout, peer identity or provider implementation is changed.
 
-### Current gate and limitations
+### Gate and limitations in the 2026-09-27 build
 
 - Always preserve the selected archive in a private temporary ZIP, including
   empty destinations, and consume every entry for CRC/length validation before
@@ -462,9 +462,9 @@ No schema, archive layout, peer identity or provider implementation is changed.
   saved mappings after the safety hook. Lower-level UnzipRoots still reports
   unplaced locations for its existing callers; Manager.Restore may not accept
   them as a complete successful restore.
-- Create a safety snapshot when current content exists and read its ZIP fully
-  before proceeding. This detects unreadable/corrupt safety ZIPs, not omitted
-  current files. Complete current-tree capture comparison remains required.
+- At that point, creating a safety snapshot when current content existed and
+  reading its ZIP fully detected unreadable/corrupt ZIPs, but not omitted
+  current files. The 2026-09-28 follow-up below adds the missing comparison.
 - Missing destination paths are directories. Existing primary file targets
   require exactly one top-level regular entry and use the configured basename.
   Do not guess a deleted file from one archive entry; a compatible explicit
@@ -530,6 +530,59 @@ frontend `snapshotRestore.js`, `snapshotRestore.test.js`, `GameDetail.svelte`,
 `CloudBackup.svelte`, English/Chinese catalogs; `e2e/journeys_test.go` and
 `e2e/multiroot_test.go`; `README.md`, `SPEC_V2.md`, `TASKS.md` and this record.
 Earlier in-progress files are not new work in this batch and remain intact.
+
+### Whole current-tree safety capture follow-up (2026-09-28)
+
+The previous ZIP-read check was insufficient: a ZIP can be structurally valid
+and still omit an empty file, an excluded file, a mapped extra location or an
+empty directory, or contain stale bytes. New synthetic regressions first
+demonstrated that the prior gate accepted these cases and proceeded to replace
+the current save. The existing `Manager.Restore` boundary now:
+
+1. Reads every current regular file before the safety snapshot, recording its
+   relative archive name, size and SHA-256. It includes excluded/dot files,
+   empty files and directories, and mapped extra roots. An unreadable or
+   special entry stops the restore rather than permitting a partial capture.
+2. Creates a safety snapshot when there is observed content and fully reads its
+   ZIP. An exact entry/content comparison must succeed; a readable but partial,
+   stale, duplicated or unexpected ZIP cannot authorize replacement.
+3. Rechecks configured locations and scans the current tree again immediately
+   before extraction. An observed edit, addition, deletion or new directory
+   stops with `restore_changed`; creation/capture failures use `restore_safety`.
+   Both have fixed Chinese/English instructions without local paths or content.
+
+This verifies a sequence of observed states, not a globally atomic filesystem
+view or an OS writer lock. A writer can still act after the final scan, and an
+I/O failure during the existing multi-root extraction can still leave a partial
+restore. Legacy path-alias validation, transactional publication and the
+separate untracked-import/branch-checkout paths remain open. Do not treat this
+as production-grade cloud-vault joining or ancestry-aware conflict resolution.
+
+| 2026-09-28 check | Actual result |
+| --- | --- |
+| Existing focused restore baseline before the change | PASS — snapshot 2.188 s, API 2.335 s |
+| New incomplete-safety and changed-current-tree regressions against the prior gate | FAIL as expected — a readable partial/stale safety ZIP and observed edits/additions/deletions were accepted or overwritten |
+| Final focused `go test ./internal/snapshot ./internal/api -run 'Restore\|Rollback' -count=1` | PASS — snapshot 4.469 s, API 3.350 s |
+| `go vet ./internal/snapshot ./internal/api` | PASS |
+| Final `go test ./... -timeout=20m` | PASS — E2E 602.725 s, API 27.902 s, cloud 36.941 s, snapshot 11.986 s; all other tested packages passed or had no tests |
+| Frontend `npm test` / `npm run build` | PASS — 112/112 tests; production assets built |
+| Desktop `wails build` | PASS — Windows amd64 portable in 22.291 s |
+| Real VM/host restore and snapshot synchronization | PASS reported by owner on 2026-09-28 — restoration succeeded and snapshots synchronized on both devices. Exact executable hash on each device, independent full-tree/size/SHA-256 comparison and failure recovery under concurrent writes were not supplied. |
+| Installer/signature/installed upgrade | SKIPPED — only the portable development binary was built |
+
+Portable development candidate: `cmd/opensave-app/build/bin/GameSaveGo.exe`,
+23,132,672 bytes, SHA-256
+`FB09BFA7FF910C3C6A5607234FC1073805A1BAF46C9FC679E33D76ED492D548F`.
+It was not started, installed, signed, committed, pushed or released by this
+follow-up. The existing provider code, cloud credentials and user saves were
+not modified; automated fixtures were synthetic.
+
+After handoff, the owner reports a successful restore and that snapshots can
+synchronize between the two devices. This closes the pending manual happy-path
+report for the new safety-capture build, but does not independently establish
+that both devices ran the exact candidate bytes, prove cloud-vault ancestry or
+validate provider ETag/CAS and concurrent create-only behavior. Those release
+gates remain open.
 
 ### Owner follow-up and source upload authorization
 
