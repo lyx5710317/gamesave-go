@@ -18,6 +18,7 @@ describe('single-file restore safety diagnostics', () => {
       expect(readFileSync(new URL(`../views/${view}.svelte`, import.meta.url), 'utf8')).toContain('restorePreflightFailureKey(e)');
     }
     expect(readFileSync(new URL('../views/CloudBackup.svelte', import.meta.url), 'utf8')).toContain('(res.results || []).map(restorePreflightFailureKey)');
+    expect(translate('zh-CN', 'game.restoreFailure.location')).toContain('目标分支快照缺少');
   });
   it('localizes generated safety comments without rewriting user comments', () => {
     for (const [comment, key] of [

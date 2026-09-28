@@ -555,8 +555,43 @@ This verifies a sequence of observed states, not a globally atomic filesystem
 view or an OS writer lock. A writer can still act after the final scan, and an
 I/O failure during the existing multi-root extraction can still leave a partial
 restore. Legacy path-alias validation, transactional publication and the
-separate untracked-import/branch-checkout paths remain open. Do not treat this
+separate untracked-import path remain open. Do not treat this
 as production-grade cloud-vault joining or ancestry-aware conflict resolution.
+
+Branch checkout follow-up: the old branch path had its own extraction flow.
+Synthetic tests showed that a corrupt incoming ZIP could clear the current save,
+move the branch pointer, log an extraction failure and still report success;
+an incomplete-but-readable outgoing safety ZIP or an observed new file did not
+stop a switch to an empty branch. Populated branches now call the existing
+verified whole-restore boundary before changing the branch pointer. Empty
+branches use its shared current-tree capture comparison, then recheck mapping
+and current bytes before clearing. Fixed restore error categories also reach
+the branch-switch API and localized UI. This reuses the existing snapshot
+engine; it does not implement transactional multi-root publication. Untracked
+backup-file imports remain a separate unfinished path.
+
+A second regression exposed a branch-specific hole: an older incoming archive
+without a newly mapped extra location left that location holding outgoing
+branch files while reporting a successful switch. Branch checkout now rejects
+such an incomplete location set before the restore starts. It does not delete
+or guess where the omitted files belong.
+
+| Branch-checkout follow-up check | Actual result |
+| --- | --- |
+| Existing focused branch/import-overwrite baseline | PASS — snapshot 2.656 s, API 1.366 s |
+| New regressions against the old checkout flow | FAIL as expected — corrupt incoming ZIP, incomplete readable outgoing safety ZIP and concurrent new file were accepted; the old-location snapshot also failed to reject a newly mapped extra location |
+| Final focused branch/restore/API tests (`-count=5`) | PASS — snapshot 38.392 s, API 15.558 s |
+| `go vet ./internal/snapshot ./internal/api` | PASS |
+| Final `go test ./... -timeout=20m` | PASS — E2E 608.292 s, API 27.209 s, snapshot 13.108 s; all other packages passed, were cached or had no tests |
+| Frontend `npm test` and `npm run build` | PASS — 112/112 tests; production assets built |
+| Final Windows `wails build` | PASS — portable development build in 23.136 s |
+| Real VM branch-switch test of this build | SKIPPED — no owner result yet for the new branch-checkout candidate |
+| Untracked backup-file import parity / multi-root disk-failure rollback | BLOCKED — these separate safety gates are not implemented by this branch change |
+
+Final branch-checkout candidate: `cmd/opensave-app/build/bin/GameSaveGo.exe`,
+23,134,208 bytes, SHA-256
+`C7A8F0CAC9032A4043D063333C037A332AB1E39F712B47BD93F3991A7E355339`.
+No real account, credential, user save, installer or signed release was used.
 
 | 2026-09-28 check | Actual result |
 | --- | --- |

@@ -595,6 +595,9 @@ func (s *Server) handleSwitchBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.Daemon.Snapshots.SwitchBranch(gameID, body.Name); err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, notFoundToStatus(err), err.Error())
 		return
 	}

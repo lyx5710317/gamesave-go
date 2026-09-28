@@ -193,7 +193,7 @@ export default {
   'game.edit': 'Edit',
   'game.snapshots': 'Snapshots',
   'game.restoreFailure.archive': 'The snapshot could not be read, failed integrity checks or contains special files. Restore stopped without replacing current saves. Keep the original snapshot.',
-  'game.restoreFailure.location': 'Save locations are unmapped, overlapping or incompatible with the target type. Restore stopped. Check every location; missing paths are treated as directories. Confirm the target file for a single-file save.',
+  'game.restoreFailure.location': 'Save locations are unmapped, overlapping or incompatible, or the target branch snapshot omits a currently configured location. Restore stopped. Check mappings and choose a snapshot with every location; missing paths are treated as directories. Confirm the target file for a single-file save.',
   'game.restoreFailure.safety': 'The safety snapshot could not be created or did not fully preserve the current files, empty files and directories. Restore stopped without replacing current saves. Check the backup directory, space and disk, and keep all snapshots.',
   'game.restoreFailure.changed': 'The current save changed during restore preparation. Restore stopped without replacing it. Close the game and other writers, check the latest content, then retry.',
   'game.localSnapshotsHint': 'This list restores existing local snapshots; it does not download cloud saves. Use Cloud Backup → Browse cloud to restore cloud content. Restoring an empty snapshot leaves an empty folder.',

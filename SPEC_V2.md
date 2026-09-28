@@ -114,6 +114,18 @@ lock out concurrent writers between the final scan and extraction, prove all
 filesystem aliases, validate every legacy archive path alias, or make a
 multi-root restore transactional after an I/O failure.
 
+Branch switching with an incoming snapshot uses the same whole-restore
+preflight and verified outgoing safety capture before moving the active-branch
+pointer. A populated target whose archive omits a currently mapped location
+must stop instead of mixing the outgoing branch's files into the target. A
+deliberately empty branch first verifies its outgoing tree in a
+safety snapshot, rechecks observed changes/mappings, and only then clears
+the configured locations. Corrupt or unmapped incoming snapshots must not be
+reported as a successful switch. An I/O failure during multi-root clearing,
+or a database pointer failure after filesystem replacement, is not yet an
+atomic rollback guarantee. The separate untracked backup-import path still
+requires equivalent preflight and capture validation.
+
 Cloud downloads and read-only verification now reject ambiguous ZIP extraction
 paths before publishing/importing an archive: duplicate paths, non-canonical
 relative paths, file/directory collisions, special entries and directory bodies.

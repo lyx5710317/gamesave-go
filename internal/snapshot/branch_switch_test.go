@@ -1,10 +1,120 @@
 package snapshot
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestSwitchBranchRejectsCorruptIncomingArchiveBeforeChangingBranch(t *testing.T) {
+	env := setup(t)
+	writeSave(t, env.saveDir, "slot1.sav", "seed")
+	branch, err := env.mgr.CreateBranch("game1", "incoming", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := env.store.ListSnapshots("game1", branch)
+	if err != nil || len(snaps) != 1 {
+		t.Fatalf("incoming branch snapshot: %v, %d", err, len(snaps))
+	}
+	if err := os.WriteFile(snaps[0].ZipPath, []byte("synthetic corrupt zip"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSave(t, env.saveDir, "slot1.sav", "current")
+	if err := env.mgr.SwitchBranch("game1", branch); !errors.Is(err, ErrRestoreArchive) {
+		t.Fatalf("corrupt incoming branch accepted: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(env.saveDir, "slot1.sav")); err != nil || string(got) != "current" {
+		t.Fatal("current save replaced")
+	}
+	if game, err := env.store.GetGame("game1"); err != nil || game.ActiveBranch != "main" {
+		t.Fatal("active branch changed")
+	}
+}
+
+func TestSwitchBranchRejectsIncomingSnapshotMissingConfiguredLocation(t *testing.T) {
+	env := setup(t)
+	writeSave(t, env.saveDir, "slot1.sav", "seed")
+	branch, err := env.mgr.CreateBranch("game1", "before-config", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := t.TempDir()
+	if err := env.store.AddGameRoot("game1", "config", config); err != nil {
+		t.Fatal(err)
+	}
+	writeSave(t, env.saveDir, "slot1.sav", "current")
+	writeSave(t, config, "settings.ini", "current config")
+	if err := env.mgr.SwitchBranch("game1", branch); !errors.Is(err, ErrRestoreLocation) {
+		t.Fatalf("incomplete incoming locations accepted: %v", err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(env.saveDir, "slot1.sav"): "current",
+		filepath.Join(config, "settings.ini"):   "current config",
+	} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Fatalf("current state changed at %s: %v", path, err)
+		}
+	}
+	if game, err := env.store.GetGame("game1"); err != nil || game.ActiveBranch != "main" {
+		t.Fatal("active branch changed")
+	}
+}
+
+func TestSwitchEmptyBranchRejectsIncompleteSafetySnapshot(t *testing.T) {
+	env := setup(t)
+	writeSave(t, env.saveDir, "slot1.sav", "current")
+	writeSave(t, env.saveDir, "empty.sav", "")
+	if err := os.Mkdir(filepath.Join(env.saveDir, "empty-dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := env.mgr.CreateBranch("game1", "empty", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.OnUpload = func(path, _ string) {
+		replaceSafetyWithReadableZip(t, path, map[string]string{"slot1.sav": "current", "empty-dir/": ""})
+	}
+	if err := env.mgr.SwitchBranch("game1", branch); !errors.Is(err, ErrRestoreSafety) {
+		t.Fatalf("incomplete outgoing safety accepted: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(env.saveDir, "slot1.sav")); err != nil || string(got) != "current" {
+		t.Fatal("current save replaced")
+	}
+	if _, err := os.Stat(filepath.Join(env.saveDir, "empty.sav")); err != nil {
+		t.Fatal("empty file lost")
+	}
+	if _, err := os.Stat(filepath.Join(env.saveDir, "empty-dir")); err != nil {
+		t.Fatal("empty directory lost")
+	}
+	if game, err := env.store.GetGame("game1"); err != nil || game.ActiveBranch != "main" {
+		t.Fatal("active branch changed")
+	}
+}
+
+func TestSwitchEmptyBranchStopsOnCurrentTreeChange(t *testing.T) {
+	env := setup(t)
+	writeSave(t, env.saveDir, "slot1.sav", "current")
+	branch, err := env.mgr.CreateBranch("game1", "empty", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.OnUpload = func(_, _ string) {
+		writeSave(t, env.saveDir, "new.sav", "concurrent")
+	}
+	if err := env.mgr.SwitchBranch("game1", branch); !errors.Is(err, ErrRestoreChanged) {
+		t.Fatalf("observed concurrent file was not protected: %v", err)
+	}
+	for name, want := range map[string]string{"slot1.sav": "current", "new.sav": "concurrent"} {
+		if got, err := os.ReadFile(filepath.Join(env.saveDir, name)); err != nil || string(got) != want {
+			t.Fatalf("%s was changed: %v", name, err)
+		}
+	}
+	if game, err := env.store.GetGame("game1"); err != nil || game.ActiveBranch != "main" {
+		t.Fatal("active branch changed")
+	}
+}
 
 // Switching to a branch you just made must not empty the save folder.
 //

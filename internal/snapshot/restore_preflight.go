@@ -181,6 +181,27 @@ func sameRestoreCurrentState(a, b restoreCurrentState) bool {
 	return maps.Equal(a.Entries, b.Entries) && maps.Equal(a.Kinds, b.Kinds)
 }
 
+// Destructive operations share this capture gate. A valid ZIP alone cannot
+// prove that every current file and empty directory made it into the archive.
+func (m *Manager) captureVerifiedCurrent(gameID, primary string, extra map[string]string, comment string) (restoreCurrentState, error) {
+	before, err := readRestoreCurrentState(primary, extra)
+	if err != nil {
+		return before, ErrRestoreSafety
+	}
+	if len(before.Entries) == 0 {
+		return before, nil
+	}
+	safety, err := m.Create(gameID, comment, true)
+	if err != nil {
+		return before, ErrRestoreSafety
+	}
+	protected, err := restoreArchiveInventory(safety.ZipPath)
+	if err != nil || !maps.Equal(before.Entries, protected) {
+		return before, ErrRestoreSafety
+	}
+	return before, nil
+}
+
 // Manager-level restore must be complete: the lower-level UnzipRoots contract
 // still allows callers to inspect unplaced locations, but Restore may not
 // silently omit one and report success. Existing extra-file roots are blocked:
