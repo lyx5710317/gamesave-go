@@ -7,7 +7,7 @@
   import { summarizeLocalPreview, summarizeRemoteInventory, summarizeRemoteVault, summarizeJoinOverlap } from '../lib/localPreview.js';
   import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
-  import { restorePreflightFailureKey } from '../lib/snapshotRestore.js';
+  import { backupImportFailureKey, restorePreflightFailureKey } from '../lib/snapshotRestore.js';
   import { cloudVerificationFeedback, cloudArchiveFailureKey, cloudVerificationFailureKey, cloudReadFailureKey } from '../lib/cloudVerification.js';
   import { JIANGUOYUN_BASE_URL, JIANGUOYUN_REMOTE_FOLDER, recommendJianguoyunForUnset, selectCloudProvider } from '../lib/jianguoyun.js';
   import { isTemporarilyHiddenProvider, visibleCloudProviders } from '../lib/cloudProviderVisibility.js';
@@ -595,6 +595,9 @@
         toast($t('cloud.import.finished', { result: bits.join($t('cloud.import.separator')) || $t('cloud.import.nothing') }), res.skipped ? 'info' : 'success');
         for (const key of new Set((res.results || []).map(restorePreflightFailureKey).filter(Boolean))) {
           toast($t(key), 'error');
+        }
+        for (const key of new Set((res.results || []).map(backupImportFailureKey).filter(Boolean))) {
+          toast($t(key), 'info');
         }
       }
       importOpen = false;

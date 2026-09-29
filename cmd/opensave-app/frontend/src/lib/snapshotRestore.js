@@ -14,6 +14,16 @@ export function restorePreflightFailureKey(error) {
   return Object.hasOwn(codes, error?.code) ? `game.restoreFailure.${codes[error.code]}` : null;
 }
 
+// Backup import may skip individual games without failing the whole file.
+// Only fixed backend codes become user-facing guidance; never show archive paths.
+export function backupImportFailureKey(result) {
+  const codes = {
+    backup_untracked_disabled: 'cloud.import.untrackedDisabled',
+    backup_lookup_failed: 'cloud.import.lookupFailed'
+  };
+  return Object.hasOwn(codes, result?.code) ? codes[result.code] : null;
+}
+
 // Translate only known generated safety comments; preserve stored metadata and
 // user-written comments, including those that resemble a system comment.
 export function snapshotComment(snapshot, t) {

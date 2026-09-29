@@ -266,6 +266,13 @@ func TestBackupImportV2SnapshotsModeSkipsUntracked(t *testing.T) {
 	if string(body["skipped"]) != "1" || string(body["restored"]) != "0" || string(body["snapshots"]) != "0" {
 		t.Fatalf("untracked game in snapshots mode should be skipped, got %v", body)
 	}
+	var results []importResult
+	if err := json.Unmarshal(body["results"], &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Code != "backup_untracked_disabled" || results[0].Path != "" {
+		t.Fatalf("untracked snapshots import should fail closed: %+v", results)
+	}
 }
 
 func TestBackupImportV2OverwriteTracked(t *testing.T) {
@@ -321,10 +328,11 @@ func TestBackupImportV2OverwriteTracked(t *testing.T) {
 	}
 }
 
-func TestBackupImportV2OverwriteUntracked(t *testing.T) {
+func TestBackupImportV2OverwriteUntrackedIsDisabled(t *testing.T) {
 	ts := startTestServer(t)
 
-	// An untracked save exported, then damaged, then restored from backup.
+	// A backup must not choose a live destination from an untracked game's
+	// manifest, even if the path exists and contains different local data.
 	loose := filepath.Join(t.TempDir(), "PortableGame", "save")
 	if err := os.MkdirAll(loose, 0o777); err != nil {
 		t.Fatal(err)
@@ -342,31 +350,43 @@ func TestBackupImportV2OverwriteUntracked(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("import failed: %v", body)
 	}
-	if string(body["restored"]) != "1" {
-		t.Fatalf("expected 1 restore, got %v", body)
+	if string(body["restored"]) != "0" || string(body["skipped"]) != "1" {
+		t.Fatalf("untracked overwrite must be skipped, got %v", body)
+	}
+	var results []importResult
+	if err := json.Unmarshal(body["results"], &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Action != "skipped" || results[0].Code != "backup_untracked_disabled" || results[0].Path != "" || results[0].Tracked {
+		t.Fatalf("unexpected untracked result: %+v", results)
 	}
 
 	got, _ := os.ReadFile(filepath.Join(loose, "world.dat"))
-	if string(got) != "good-state" {
-		t.Fatalf("restored content = %q, want good-state", got)
+	if string(got) != "corrupted" {
+		t.Fatalf("untracked live content changed to %q", got)
 	}
-
-	// The overwritten ("corrupted") content must exist in a safety zip.
+	if _, err := ts.daemon.Store.GetGame("portable-game"); err == nil {
+		t.Fatal("skipped game was unexpectedly tracked")
+	}
 	settings, err := ts.daemon.Store.GetSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
-	safetyDir := filepath.Join(settings.BackupsDir, "_import-safety")
-	entries, err := os.ReadDir(safetyDir)
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("no safety zip written in %s: %v", safetyDir, err)
+	if _, err := os.Stat(filepath.Join(settings.BackupsDir, "_import-safety")); !os.IsNotExist(err) {
+		t.Fatalf("disabled path created a safety directory: %v", err)
 	}
-	restoreDir := t.TempDir()
-	if err := snapshot.UnzipTo(filepath.Join(safetyDir, entries[0].Name()), restoreDir); err != nil {
+	if err := os.Remove(filepath.Join(loose, "world.dat")); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(restoreDir, "world.dat")); string(data) != "corrupted" {
-		t.Errorf("safety zip content = %q, want the pre-overwrite state", data)
+	if err := os.Remove(loose); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = ts.do(t, http.MethodPost, "/api/backup/restore", map[string]string{"sourcePath": exportPath, "mode": "overwrite"})
+	if resp.StatusCode != http.StatusOK || string(body["skipped"]) != "1" {
+		t.Fatalf("missing untracked destination should be skipped: %d %v", resp.StatusCode, body)
+	}
+	if _, err := os.Stat(loose); !os.IsNotExist(err) {
+		t.Fatalf("disabled path created an untracked destination: %v", err)
 	}
 }
 

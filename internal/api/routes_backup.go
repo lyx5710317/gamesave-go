@@ -794,16 +794,28 @@ func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode s
 			results = append(results, s.logImportResult(res))
 			continue
 		}
+		local, err := s.Daemon.Store.GetGame(g.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			res.Action = "skipped"
+			res.Code = "backup_lookup_failed"
+			res.Error = "could not check whether this game is tracked; no files were changed"
+			results = append(results, s.logImportResult(res))
+			continue
+		}
+		res.Tracked = err == nil
+		if !res.Tracked {
+			// A backup manifest is not authority to choose a live save path.
+			// Until untracked imports have a verified safety/publish flow,
+			// neither mode may stage or write their contents.
+			res.Action = "skipped"
+			res.Code = "backup_untracked_disabled"
+			res.Error = "game is not tracked on this device; add it with its local save path, then re-import"
+			results = append(results, s.logImportResult(res))
+			continue
+		}
 
-		// Record the archive's extra save locations by name, before the
-		// tracked/untracked paths diverge. A game already tracked here takes a
-		// different branch entirely and returns from it, so doing this on one
-		// side only means the locations are learned for games arriving fresh
-		// and silently lost for games the user already has — the more common
-		// case, and the one where the files matter most.
-		//
-		// Names only, with no path: the app can then ask where each one lives
-		// here rather than the files quietly going nowhere.
+		// Learn names of any additional save locations for tracked games.
+		// Never import a path from the archive as the live destination.
 		for _, name := range g.Locations {
 			if err := s.Daemon.Store.NoteGameRoot(g.ID, name); err != nil {
 				s.Daemon.Log.Log("warn", fmt.Sprintf(
@@ -827,156 +839,39 @@ func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode s
 			continue
 		}
 
-		local, err := s.Daemon.Store.GetGame(g.ID)
-		res.Tracked = err == nil
-
-		if res.Tracked {
-			// The imported state always lands in snapshot history first;
-			// overwrite mode then restores that snapshot through the
-			// standard path (which takes its own pre-restore safety
-			// snapshot of the current save).
-			branch := local.ActiveBranch
-			if branch == "" {
-				branch = "main"
-			}
-			snapID := fmt.Sprintf("snap_%d", baseMs+int64(i))
-			destDir := filepath.Join(settings.BackupsDir, g.ID, branch)
-			destPath := filepath.Join(destDir, snapID+".zip")
-			err := os.MkdirAll(destDir, 0o777)
-			if err == nil {
-				err = copyFile(tmpPath, destPath)
-			}
-			var size int64
-			if err == nil {
-				if info, statErr := os.Stat(destPath); statErr == nil {
-					size = info.Size()
-				}
-				err = s.Daemon.EnsureImportedSnapshot(g.ID, branch, snapID, destPath, size)
-			}
-			if err == nil && mode == "overwrite" {
-				_, err = s.Daemon.Snapshots.Restore(g.ID, snapID)
-				res.Path = local.SavePath
-				res.Action = "restored"
-			} else if err == nil {
-				res.Path = local.SavePath
-				res.Action = "snapshot"
-			}
-			if err != nil {
-				res.Action, res.Error = "skipped", err.Error()
-				res.Code = restorePreflightCode(err)
-			}
-			os.Remove(tmpPath)
-			results = append(results, s.logImportResult(res))
-			continue
+		// The imported state always lands in snapshot history first;
+		// overwrite mode then restores through the existing safety path.
+		branch := local.ActiveBranch
+		if branch == "" {
+			branch = "main"
 		}
-
-		// Not tracked here.
-		if mode == "snapshots" {
-			os.Remove(tmpPath)
-			res.Action = "skipped"
-			res.Error = "not tracked on this machine — track it and re-import, or use overwrite mode"
-			results = append(results, s.logImportResult(res))
-			continue
+		snapID := fmt.Sprintf("snap_%d", baseMs+int64(i))
+		destDir := filepath.Join(settings.BackupsDir, g.ID, branch)
+		destPath := filepath.Join(destDir, snapID+".zip")
+		err = os.MkdirAll(destDir, 0o777)
+		if err == nil {
+			err = copyFile(tmpPath, destPath)
 		}
-		if manifest.OS != runtime.GOOS {
-			os.Remove(tmpPath)
-			res.Action = "skipped"
-			res.Error = fmt.Sprintf("backup was exported on %s — its save paths don't apply on %s", manifest.OS, runtime.GOOS)
-			results = append(results, s.logImportResult(res))
-			continue
+		var size int64
+		if err == nil {
+			if info, statErr := os.Stat(destPath); statErr == nil {
+				size = info.Size()
+			}
+			err = s.Daemon.EnsureImportedSnapshot(g.ID, branch, snapID, destPath, size)
 		}
-
-		target := resolvePortablePath(g.PortablePath)
-		if target == "" {
-			target = g.SavePath
+		if err == nil && mode == "overwrite" {
+			_, err = s.Daemon.Snapshots.Restore(g.ID, snapID)
+			res.Path = local.SavePath
+			res.Action = "restored"
+		} else if err == nil {
+			res.Path = local.SavePath
+			res.Action = "snapshot"
 		}
-		target, err = s.Daemon.CheckRestoreTarget(target)
 		if err != nil {
-			os.Remove(tmpPath)
 			res.Action, res.Error = "skipped", err.Error()
-			results = append(results, s.logImportResult(res))
-			continue
+			res.Code = restorePreflightCode(err)
 		}
-		res.Path = target
-
-		// Never overwrite untracked content without a copy: zip whatever
-		// is there now into the safety folder first, and skip the restore
-		// entirely if that safety copy cannot be written.
-		if pathHasContent(target) {
-			safetyDir := filepath.Join(settings.BackupsDir, "_import-safety")
-			safetyPath := filepath.Join(safetyDir, fmt.Sprintf("%s-%d.zip", sanitizeFilename(g.ID), baseMs))
-			if err := os.MkdirAll(safetyDir, 0o777); err == nil {
-				safetyRoots, safetyErr := s.Daemon.Store.GameRootPaths(g.ID)
-				if safetyErr != nil {
-					safetyRoots = nil
-				}
-				_, err = snapshot.ZipRoots(target, safetyRoots, safetyPath)
-			}
-			if err != nil {
-				os.Remove(tmpPath)
-				res.Action = "skipped"
-				res.Error = "couldn't take a safety copy of the existing files, refusing to overwrite: " + err.Error()
-				results = append(results, s.logImportResult(res))
-				continue
-			}
-			s.Daemon.Log.Log("info", fmt.Sprintf("existing files at %s backed up to %s", target, safetyPath))
-		}
-
-		// When the manifest says this save is a folder, create it before
-		// extracting. UnzipTo decides between "a folder of saves" and "one
-		// save file" by looking at the target, and on a machine that has
-		// never held this game there is nothing there to look at — so it
-		// falls back to the shape of the archive, and a folder containing a
-		// single save looks exactly like a save that is one file. It then
-		// wrote that file into the PARENT directory: the save came back, one
-		// level above where the game looks for it, reported as restored.
-		// Creating the folder first removes the guess entirely.
-		if g.SaveKind == "dir" {
-			if mkErr := os.MkdirAll(target, 0o777); mkErr != nil {
-				os.Remove(tmpPath)
-				res.Action, res.Error = "skipped", mkErr.Error()
-				results = append(results, s.logImportResult(res))
-				continue
-			}
-		}
-
-		importRoots, importErr := s.Daemon.Store.GameRootPaths(g.ID)
-		if importErr != nil {
-			importRoots = nil
-		}
-		unplaced, unzipErr := snapshot.UnzipRoots(tmpPath, target, importRoots)
-		for _, name := range unplaced {
-			s.Daemon.Log.Log("warn", fmt.Sprintf("%q in this backup includes a %q save location, which this device has no folder for — those files were not restored", g.Name, name))
-		}
-		err = unzipErr
 		os.Remove(tmpPath)
-		if err != nil {
-			res.Action, res.Error = "skipped", err.Error()
-			results = append(results, s.logImportResult(res))
-			continue
-		}
-		res.Action = "restored"
-
-		// Track it. Restoring a backup onto a machine that has never seen
-		// these games is the whole point of the format, and putting the files
-		// back without the games left the app empty and every one of them
-		// waiting to be re-added by hand — the files were on disk, but nothing
-		// was watching, syncing or snapshotting them, and nothing said so.
-		//
-		// The manifest's id is reused rather than derived afresh, so the game
-		// keeps the identity its peers and its snapshot history already use.
-		// Failing to track is not failing to restore: the files are already
-		// back, so the outcome stands and only the tracked flag says otherwise.
-		tracked, trackErr := s.Daemon.TrackGame(store.Game{
-			ID: g.ID, Name: g.Name, SavePath: target, AppID: g.AppID,
-		})
-		if trackErr != nil {
-			s.Daemon.Log.Log("warn", fmt.Sprintf(
-				"backup import: restored %q to %s but could not track it: %v", g.Name, target, trackErr))
-		} else {
-			res.Tracked = true
-			res.Path = tracked.SavePath
-		}
 		results = append(results, s.logImportResult(res))
 	}
 	return results
@@ -1000,20 +895,6 @@ func (s *Server) logImportResult(res importResult) importResult {
 	return res
 }
 
-// pathHasContent reports whether target holds anything worth a safety
-// copy: an existing file, or a directory with at least one entry.
-func pathHasContent(target string) bool {
-	info, err := os.Stat(target)
-	if err != nil {
-		return false
-	}
-	if !info.IsDir() {
-		return true
-	}
-	entries, err := os.ReadDir(target)
-	return err == nil && len(entries) > 0
-}
-
 // copyFile copies src to dst (creating/truncating dst).
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
@@ -1030,19 +911,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
-}
-
-// sanitizeFilename strips path separators and oddities from an ID used
-// in a filename.
-func sanitizeFilename(name string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			return r
-		default:
-			return '_'
-		}
-	}, name)
 }
 
 // importLegacyBackup handles v1 archives: each entry is a snapshot zip

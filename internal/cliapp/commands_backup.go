@@ -162,17 +162,10 @@ func cmdBackup(args []string) int {
 				hint("opensave add <name> <path>", "opensave backup import "+source)
 			} else if res.Skipped > 0 {
 				note(fmt.Sprintf("%d entr%s skipped.", res.Skipped, entryPlural(res.Skipped)))
-				if mode == "snapshots" {
-					// The default mode only adds to the history of games this
-					// device already tracks, so restoring onto a fresh install
-					// skips everything. That is the most likely reason someone
-					// is running this command at all, so say what to do next
-					// rather than leaving them to read the activity log.
-					note("Importing as snapshots only adds to games this device already " +
-						"tracks. Nothing here is tracked yet, so use --overwrite to put " +
-						"the saves back and track them.")
-					hint("opensave backup import " + source + " --overwrite")
-				}
+				note("Untracked games are skipped in both import modes. First add each game " +
+					"with its save path on this device, then re-import the backup. " +
+					"The backup's recorded path is never used as an overwrite target.")
+				hint("opensave add <name> <local-save-path>", "opensave backup import "+source)
 			}
 			note(source)
 			return 1
@@ -235,4 +228,6 @@ const backupUsage = `usage:
   opensave backup import <file.sscb> [--overwrite] Read one back
 
   Import adds the contents as snapshots by default, so nothing on disk is
-  replaced. --overwrite restores saves over the current files instead.`
+  replaced. --overwrite restores only games already tracked on this device,
+  after a verified safety snapshot. Untracked games are skipped in both modes;
+  add them with their local save path first, then re-import.`

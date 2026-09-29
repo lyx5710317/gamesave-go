@@ -391,11 +391,14 @@ library — games, settings, snapshot history — to a single portable archive:
 
 - **Cloud Backup → Export** picks which games to include and writes an `.sscb`
   file. Put it on a USB stick or in cloud storage.
-- On the new machine, **Cloud Backup → Import** reads it back.
+- On the new machine, first add each game with its save folder on that machine.
+  Then **Cloud Backup → Import** reads the archive into those tracked games.
+  An untracked game is skipped; the backup's old path is never used to place
+  or overwrite files automatically.
 
-On import you choose what happens to anything already there: **merge**, which
-keeps both, or **overwrite**, which replaces. Overwrite is the destructive one
-and is labelled as such.
+On import choose **add to snapshots**, which leaves live files unchanged, or
+**overwrite**, which restores tracked games after a safety snapshot. Overwrite
+is the destructive option and is labelled as such.
 
 The same thing from a terminal:
 
