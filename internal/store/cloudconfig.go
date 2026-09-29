@@ -24,6 +24,7 @@ type CloudConfig struct {
 	Password            string            `db:"password" json:"password"`
 	PasswordConfigured  bool              `db:"-" json:"passwordConfigured"`
 	HeadersJSON         string            `db:"headers_json" json:"headers"`
+	HeadersConfigured   bool              `db:"-" json:"headersConfigured"`
 	FolderID            string            `db:"folder_id" json:"folderId"`
 	CustomClientIDs     map[string]string `db:"-" json:"customClientIds"`
 	CustomClientSecrets map[string]string `db:"-" json:"customClientSecrets"`
@@ -86,11 +87,17 @@ func (s *Store) GetCloudConfig() (CloudConfig, error) {
 			return CloudConfig{}, fmt.Errorf("unmarshal customClientSecrets: %w", err)
 		}
 	}
+	if err := s.loadAdditionalCloudSecrets(&c); err != nil {
+		return CloudConfig{}, err
+	}
 	return c, nil
 }
 
 // UpdateCloudConfig persists the given config as the new singleton row.
 func (s *Store) UpdateCloudConfig(c CloudConfig) error {
+	if c.Password != "" && c.Provider != "webdav" && c.Provider != "jianguoyun" {
+		return errors.New("password is only supported for protected WebDAV destinations")
+	}
 	var secret *protectedtokens.PasswordStore
 	var newPassword string
 	if protectedJianguoyunConfig(c) {
@@ -144,10 +151,11 @@ func (s *Store) UpdateCloudConfig(c CloudConfig) error {
 		WHERE id = 1`, c)
 		return err
 	}
+	persist := func() error { return s.protectAdditionalCloudSecrets(&c, writeRow) }
 	if newPassword != "" {
-		err = replaceProtectedPassword(secret, newPassword, writeRow)
+		err = replaceProtectedPassword(secret, newPassword, persist)
 	} else {
-		err = writeRow()
+		err = persist()
 	}
 	if err != nil {
 		return fmt.Errorf("update cloud config: %w", err)
@@ -155,11 +163,11 @@ func (s *Store) UpdateCloudConfig(c CloudConfig) error {
 	return nil
 }
 
-// LoadCloudPassword is used only immediately before a Jianguoyun WebDAV
-// request. Settings APIs never receive the application password.
+// LoadCloudPassword is used only immediately before a WebDAV request. Settings
+// APIs never receive a Windows-protected password.
 func (s *Store) LoadCloudPassword(c CloudConfig) (string, error) {
 	if !protectedJianguoyunConfig(c) {
-		return c.Password, nil
+		return s.loadAdditionalCloudPassword(c)
 	}
 	secret, err := s.jianguoyunPasswordStore()
 	if err != nil {

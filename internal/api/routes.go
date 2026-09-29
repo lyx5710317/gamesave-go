@@ -101,6 +101,7 @@ type cloudSyncPatch struct {
 	Username            *string           `json:"username"`
 	Password            *string           `json:"password"`
 	Headers             *string           `json:"headers"`
+	ClearHeaders        *bool             `json:"clearHeaders"`
 	FolderID            *string           `json:"folderId"`
 	CustomClientIDs     map[string]string `json:"customClientIds"`
 	CustomClientSecrets map[string]string `json:"customClientSecrets"`
@@ -202,31 +203,45 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 			// A credential from one destination must never be copied into a
 			// different provider's SQLite configuration by a partial patch.
 			cfg.Password = ""
+			cfg.PasswordConfigured = false
+			cfg.HeadersJSON = "{}"
+			cfg.HeadersConfigured = false
 		}
 		cfg.Provider = *patch.Provider
 	}
 	if patch.URL != nil {
+		if cfg.Provider == "webdav" && *patch.URL != cfg.URL {
+			cfg.Password = ""
+			cfg.PasswordConfigured = false
+		}
 		cfg.URL = *patch.URL
 	}
 	if patch.Username != nil {
 		cfg.Username = *patch.Username
 	}
 	if patch.Password != nil {
-		if *patch.Password != "" || (cfg.Provider != "jianguoyun" && !cfg.PasswordConfigured) {
+		if *patch.Password != "" {
 			cfg.Password = *patch.Password
 		}
 	}
 	if patch.Headers != nil {
-		cfg.HeadersJSON = *patch.Headers
+		if *patch.Headers != "{}" || !cfg.HeadersConfigured {
+			cfg.HeadersJSON = *patch.Headers
+		}
+	}
+	if patch.ClearHeaders != nil && *patch.ClearHeaders {
+		cfg.HeadersJSON = "{}"
 	}
 	if patch.FolderID != nil {
 		cfg.FolderID = *patch.FolderID
 	}
+	changedClientIDs := map[string]bool{}
 	if patch.CustomClientIDs != nil {
 		if cfg.CustomClientIDs == nil {
 			cfg.CustomClientIDs = map[string]string{}
 		}
 		for k, v := range patch.CustomClientIDs {
+			changedClientIDs[k] = cfg.CustomClientIDs[k] != v
 			cfg.CustomClientIDs[k] = v
 		}
 	}
@@ -235,7 +250,16 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 			cfg.CustomClientSecrets = map[string]string{}
 		}
 		for k, v := range patch.CustomClientSecrets {
-			cfg.CustomClientSecrets[k] = v
+			if v != "" {
+				cfg.CustomClientSecrets[k] = v
+			} else if changedClientIDs[k] {
+				delete(cfg.CustomClientSecrets, k)
+			}
+		}
+	}
+	for provider, changed := range changedClientIDs {
+		if changed && (patch.CustomClientSecrets == nil || patch.CustomClientSecrets[provider] == "") {
+			delete(cfg.CustomClientSecrets, provider)
 		}
 	}
 	return s.Daemon.Store.UpdateCloudConfig(cfg)

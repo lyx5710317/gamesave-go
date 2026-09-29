@@ -300,16 +300,18 @@ func (s *Server) settingsWire() map[string]any {
 		out["cloudSyncError"] = "protected cloud configuration is unavailable; settings were not changed"
 	} else {
 		out["cloudSync"] = map[string]any{
-			"enabled":             cloud.Enabled,
-			"provider":            cloud.Provider,
-			"url":                 cloud.URL,
-			"username":            cloud.Username,
-			"password":            cloud.Password,
-			"passwordConfigured":  cloud.PasswordConfigured,
-			"headers":             cloud.HeadersJSON,
-			"folderId":            cloud.FolderID,
-			"customClientIds":     cloud.CustomClientIDs,
-			"customClientSecrets": cloud.CustomClientSecrets,
+			"enabled":                       cloud.Enabled,
+			"provider":                      cloud.Provider,
+			"url":                           cloud.URL,
+			"username":                      cloud.Username,
+			"password":                      "",
+			"passwordConfigured":            cloud.PasswordConfigured,
+			"headers":                       "{}",
+			"headersConfigured":             cloud.HeadersConfigured,
+			"folderId":                      cloud.FolderID,
+			"customClientIds":               cloud.CustomClientIDs,
+			"customClientSecrets":           map[string]string{},
+			"customClientSecretsConfigured": configuredClientSecrets(cloud.CustomClientSecrets),
 			"tokens": map[string]any{
 				"accessToken":  "", // never shipped to the UI
 				"refreshToken": "",
@@ -319,6 +321,16 @@ func (s *Server) settingsWire() map[string]any {
 		}
 	}
 	return out
+}
+
+func configuredClientSecrets(values map[string]string) map[string]bool {
+	configured := make(map[string]bool)
+	for provider, value := range values {
+		if value != "" {
+			configured[provider] = true
+		}
+	}
+	return configured
 }
 
 // gamesPayload returns every game with its branches+snapshots nested the
