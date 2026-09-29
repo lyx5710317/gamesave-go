@@ -29,6 +29,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/opensave/opensave/testutil"
 )
 
 // cliBin is the binary under test, built once for the whole package.
@@ -207,7 +209,10 @@ func (c *cli) startDaemon() {
 	c.daemon = cmd
 
 	addrFile := filepath.Join(c.home, ".opensave", "daemon.addr")
-	deadline := time.Now().Add(30 * time.Second)
+	// Instrumented Windows builds can take substantially longer to start the
+	// subprocess while the rest of the race suite is running. Use the same
+	// bounded timeout scale as the HTTP-backed E2E harness.
+	deadline := time.Now().Add(30 * time.Second * testutil.TimeoutScale)
 	for time.Now().Before(deadline) {
 		if raw, err := os.ReadFile(addrFile); err == nil && strings.TrimSpace(string(raw)) != "" {
 			// Published, but confirm it actually answers before returning.
