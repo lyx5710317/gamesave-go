@@ -32,6 +32,24 @@ downloaded and checked (SHA-256
 but it predates the shutdown fix and is **superseded**. Do not use it as the
 final VM candidate.
 
+The current branch candidate is [run 36589803878](https://github.com/lyx5710317/gamesave-go/actions/runs/36589803878),
+built from `31f447fae570f35faac1a68884ab6b8966ab2763`. Its Windows
+build and independent verification jobs passed. The downloaded installer is
+`GameSaveGo.Setup.exe`, 12,458,199 bytes, SHA-256
+`7AE2490E1FAB297584B2EE9FAEDAE99FA97A71BE6862B4215062E30F8EB4A498`;
+the locally computed hash matches the verification job log, and local
+`gh attestation verify` with the source ref, commit and workflow constraints
+passed. Windows metadata shows GameSave Go 1.1.1 and `NotSigned` as expected.
+This is **not** a public Release or an installed-VM PASS. The owner has been
+asked to test this exact candidate in a synthetic-save VM; results are pending.
+On this commit, two Linux and two Windows race CI jobs passed, and local
+`go test ./... -p 2 -timeout 2700s`, 117 frontend tests, frontend build,
+Wails build and full `npm audit` passed. The default-timeout `go test ./...`
+had earlier hit its 10-minute ceiling, and one earlier concurrent full run
+failed a Jianguoyun fixture credential read; the isolated case passed 20
+repetitions and the whole cloud package passed 5 repetitions. These failures
+remain in the evidence record rather than being rewritten as passes.
+
 ## Version identities
 
 - `v1.1.1` is the proposed **desktop product/release tag**. Existing manually

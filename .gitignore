@@ -17,6 +17,8 @@ cmd/opensave-app/frontend/dist/*
 !cmd/opensave-app/frontend/dist/.gitkeep
 cmd/opensave-app/frontend/node_modules/
 cmd/opensave-app/build/bin/
+# Downloaded, attested Actions candidates are local test artifacts.
+cmd/opensave-app/build/candidate-*/
 
 # IDE
 .idea/
