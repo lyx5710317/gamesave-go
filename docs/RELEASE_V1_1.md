@@ -5,6 +5,16 @@ clean-machine upgrade is claimed by this document. Untracked v2 backup-file
 imports now fail closed rather than overwriting a path supplied by the archive;
 tracked-game imports still use the verified restore path.
 
+On 2026-09-29, a release-finalization branch added Windows protected storage
+for generic WebDAV passwords, custom OAuth client secrets, and custom request
+headers. Existing plaintext SQLite values migrate with rollback on failure;
+the settings API returns only configured flags. This branch is not yet an
+installed VM candidate or a public release. The Linux/Steam Deck storage path
+still uses its previous behavior, so the Windows guarantee must not be
+generalized to every platform. Changing a generic WebDAV URL cannot reuse the
+old URL-bound credential, but cleanup of old credential entries remains under
+review.
+
 ## Version identities
 
 - `v1.1.1` is the proposed **desktop product/release tag**. Existing manually
@@ -119,6 +129,13 @@ unexecuted checks with inferred passes.
   and remediation before a public release; production classification does not
   remove build-tool risk. The Go vulnerability check was **BLOCKED** because
   the official Go module proxy was unreachable while fetching `govulncheck`.
+- **PASS (release-finalization branch, 2026-09-29):** refreshed the frontend
+  build dependencies to Svelte 5, Vite 8 and Vitest 5. `npm ci`, all 117
+  frontend tests, the production build, and local Wails build passed with a
+  Node 24 runtime. Full `npm audit` now reports zero findings. The host's old
+  Node 20.10 cannot run the new toolchain; CI uses Node 22. A retry of the Go
+  vulnerability scan remains **BLOCKED** by a timeout reaching the official
+  Go module proxy. The complete `go test ./...` also passed, including e2e.
 - **PASS (local packaging only):** a local portable Wails candidate builds at
   `cmd/opensave-app/build/bin/GameSaveGo-preflight.exe` (23,127,552 bytes;
   SHA-256 `5BA60C3C8E6BE8ABD526426487E70456F10FB08D68FD43C08B34DC91600CA99B`).
