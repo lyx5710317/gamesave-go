@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-GameSave Cloud is derived from and continues to preserve the OpenSave architecture. The repository's root `LICENSE` remains the controlling MIT license for the OpenSave-derived code and must not be removed.
+GameSave Go is derived from and continues to preserve the OpenSave architecture. The repository's root `LICENSE` remains the controlling MIT license for the OpenSave-derived code and must not be removed.
 
 ## OpenSave
 

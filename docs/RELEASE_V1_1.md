@@ -15,6 +15,17 @@ generalized to every platform. Changing a generic WebDAV URL cannot reuse the
 old URL-bound credential, but cleanup of old credential entries remains under
 review.
 
+The first PR #2 Linux race run found a shutdown race in background conflict
+resolution and an intermittent two-device deletion-soak failure. The API
+shutdown now drains its own background conflict task before closing the daemon;
+focused tests passed locally, but a new Linux race run must verify the change.
+The deletion failure remains under investigation and blocks a public release.
+Candidate run 36575850861 was attested and its Windows installer independently
+downloaded and checked (SHA-256
+`5A961EFF006949FCAE83D55A9082994D0CA328CEE8DAA13F4796E621C41560C0`),
+but it predates the shutdown fix and is **superseded**. Do not use it as the
+final VM candidate.
+
 ## Version identities
 
 - `v1.1.1` is the proposed **desktop product/release tag**. Existing manually
