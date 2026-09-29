@@ -656,27 +656,31 @@ func (e *Engine) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	full := filepath.Join(base, filepath.FromSlash(body.RelPath))
-	_ = os.Chmod(full, 0o666)
-	if info, statErr := os.Stat(full); statErr == nil {
-		if info.IsDir() {
-			_ = os.Remove(full) // empty dirs only, like rmdirSync
-		} else {
-			_ = os.Remove(full)
-		}
-		e.Log("info", fmt.Sprintf("peer-requested deletion applied: %s", body.RelPath))
+	if err := removePeerRequestedPath(full); err != nil {
+		jsonError(w, http.StatusConflict, "Could not delete the requested save path.")
+		return
+	}
+	e.Log("info", fmt.Sprintf("peer-requested deletion applied: %s", body.RelPath))
 
-		// This side just changed without running a sync, so nothing has
-		// updated its merge-base — it still describes a state that contains
-		// the file that was removed. A base behind both sides does not merely
-		// go stale, it manufactures conflicts: the next ordinary one-sided
-		// edit here reads as a two-way divergence and prompts on a save the
-		// peer never touched. Re-derive it now rather than waiting for some
-		// later sync to happen along and put it right.
-		if peer, ok := e.peerByAddress(clientIP(r)); ok {
-			e.refreshLineageAfterDeletion(gameID, peer)
-		}
+	// This side just changed without running a sync, so nothing has
+	// updated its merge-base — it still describes a state that contains
+	// the file that was removed. Re-derive it now rather than waiting for
+	// some later sync to happen along and put it right.
+	if peer, ok := e.peerByAddress(clientIP(r)); ok {
+		e.refreshLineageAfterDeletion(gameID, peer)
 	}
 	jsonOK(w, map[string]any{"success": true})
+}
+
+// removePeerRequestedPath is idempotent for a path already absent, but never
+// reports a locked file or non-empty directory as successfully deleted.
+func removePeerRequestedPath(full string) error {
+	_ = os.Chmod(full, 0o666)
+	err := os.Remove(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // refreshLineageAfterDeletion re-reads the peer's manifest and re-records the

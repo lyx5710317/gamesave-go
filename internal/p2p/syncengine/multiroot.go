@@ -200,7 +200,9 @@ func (e *Engine) syncOneRoot(ctx context.Context, gameID string, game store.Game
 	}
 
 	e.applyLocalDeletions(sr.root, decision)
-	e.propagateDeletions(ctx, peer, gameID, sr.root, decision)
+	if err := e.propagateDeletions(ctx, peer, gameID, sr.root, decision); err != nil {
+		return err
+	}
 	e.createPulledDirsIn(sr.root, decision.DirsToPull)
 
 	if len(decision.FilesToPull) > 0 {

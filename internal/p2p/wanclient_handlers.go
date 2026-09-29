@@ -449,6 +449,7 @@ func (w *WanClient) serveDeleteFile(route string, rawBody json.RawMessage, fromP
 	gameID := route[strings.LastIndex(route, "/")+1:]
 	var body struct {
 		RelPath string `json:"relPath"`
+		Root    string `json:"root"`
 	}
 	if err := json.Unmarshal(rawBody, &body); err != nil || body.RelPath == "" {
 		return 400, map[string]string{"error": "relPath is required."}
@@ -457,12 +458,17 @@ func (w *WanClient) serveDeleteFile(route string, rawBody json.RawMessage, fromP
 	if err != nil {
 		return 404, map[string]string{"error": "Game not found."}
 	}
-	if !delta.IsSafePath(game.SavePath, body.RelPath) {
+	base, ok := w.engine.resolveServeRoot(gameID, game, body.Root)
+	if !ok {
+		return 404, map[string]string{"error": "Save location not found."}
+	}
+	if !delta.IsSafePath(base, body.RelPath) {
 		return 403, map[string]string{"error": "invalid path"}
 	}
-	full := filepath.Join(game.SavePath, filepath.FromSlash(body.RelPath))
-	_ = os.Chmod(full, 0o666)
-	_ = os.Remove(full)
+	full := filepath.Join(base, filepath.FromSlash(body.RelPath))
+	if err := removePeerRequestedPath(full); err != nil {
+		return 409, map[string]string{"error": "Could not delete the requested save path."}
+	}
 
 	if peer, pErr := w.engine.Store.GetPeer(fromPeerID); pErr == nil {
 		w.engine.refreshLineageAfterDeletion(gameID, syncengine.Peer{

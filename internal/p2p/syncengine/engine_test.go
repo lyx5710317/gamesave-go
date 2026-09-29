@@ -23,6 +23,7 @@ type fakeTransport struct {
 	remoteBranch string
 	latestSnap   *SnapshotInfo
 	manifestErr  error // when set, FetchManifest returns it (peer-missing sim)
+	deleteErr    error // when set, peer deletion fails without changing files
 
 	deletedOnPeer []string
 	pullTriggers  int
@@ -81,6 +82,9 @@ func (f *fakeTransport) DeleteRemote(ctx context.Context, peer Peer, ref FileRef
 	f.mu.Lock()
 	f.deletedOnPeer = append(f.deletedOnPeer, ref.RelPath)
 	f.mu.Unlock()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	full := filepath.Join(f.remoteDir, filepath.FromSlash(ref.RelPath))
 	return os.RemoveAll(full)
 }
@@ -274,6 +278,28 @@ func TestSync_DeletionPropagation(t *testing.T) {
 	// The peer's deletion applied locally.
 	if _, err := os.Stat(filepath.Join(env.localDir, "b.dat")); !os.IsNotExist(err) {
 		t.Error("b.dat should have been deleted locally (peer deleted it)")
+	}
+}
+
+func TestSync_FailedRemoteDeletionDoesNotClaimSuccess(t *testing.T) {
+	env := setupEngine(t)
+	write(t, env.localDir, "shared.dat", "before")
+	write(t, env.remoteDir, "shared.dat", "before")
+	if err := env.store.SetSyncState("game1", env.peer.ID, []string{"shared.dat"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(env.localDir, "shared.dat")); err != nil {
+		t.Fatal(err)
+	}
+	env.transport.deleteErr = errors.New("simulated peer disk failure")
+	if result, err := env.engine.SyncWithPeer(context.Background(), "game1", env.peer); err == nil || result.Status == "deletions_synced" {
+		t.Fatalf("failed deletion was reported as synced: result=%+v err=%v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(env.remoteDir, "shared.dat")); err != nil {
+		t.Fatalf("failed deletion changed the peer file: %v", err)
+	}
+	if pushed := env.store.GetPushedHash("game1", env.peer.ID); pushed != "" {
+		t.Fatalf("failed deletion advanced the pushed hash: %q", pushed)
 	}
 }
 
