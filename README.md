@@ -50,7 +50,7 @@ GameSave Go gives **every** game the Steam Cloud experience:
 - **Whole-restore preflight** — read the selected ZIP, compare the safety ZIP against the observed current file tree (including empty files, excluded files, extra locations and empty directories), and stop if the tree changes during preparation. Populated-branch switching now uses this gate too; switching to an intentionally empty branch verifies its outgoing backup before clearing. Unmapped, overlapping or incompatible locations also stop the restore. Missing paths restore as folders rather than guessing file mode from a single ZIP entry. This is not a lock or a multi-location transaction; disk-failure rollback, full legacy archive alias checks and concurrent-writer guarantees remain open.
 - **Cross-device game matching** — the same title tracked under different names on two machines (a Steam install here, a differently-named folder there) can be matched by Steam App ID or linked by hand. App-ID matching is opt-in, so two separate copies of a game are never merged without asking.
 - **A full command line** — `opensave` does everything the app does, for a Steam Deck in Game Mode or a headless server. See [Command line](#command-line).
-- **Desktop updates** — the Windows app checks only this fork's GameSave Go GitHub releases. A paired device's inherited sync-component version is not a desktop update offer; peer binary installation is disabled while product identity and signing are reviewed. The compatibility CLI has a separate, legacy manual update command and is not the desktop update channel.
+- **Desktop updates** — the Windows app checks only this fork's GameSave Go GitHub releases. A paired device's inherited sync-component version is not a desktop update offer; peer binary installation is disabled while product identity is reviewed. The compatibility CLI has a separate, legacy manual update command and is not the desktop update channel.
 - **Privacy-first** — no accounts, no telemetry. The relay only routes WebSocket frames and writes no save to disk; the hop to it is encrypted, and you can self-host it so nobody else is on the path at all.
 
 ## Screenshots
@@ -59,21 +59,28 @@ The inherited screenshots show the upstream interface and are intentionally not 
 
 ## Install
 
-> **GameSave Go 1.1.1 is still a development build.** This fork has no verified
-> public installer or signed release yet. To try the current code, use
-> [Build from source](#build-from-source). The package names and Steam Deck
-> instructions below describe inherited **upstream OpenSave** distributions;
-> they are not GameSave Go 1.1.1 downloads. The [1.1 release checklist](docs/RELEASE_V1_1.md)
-> tracks the remaining packaging and upgrade checks.
+> **GameSave Go 1.1.1 is still a development build; no public GameSave Go
+> Release has been published yet.** The only official download channel, once
+> release checks pass, will be this repository's
+> [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases).
+> GitHub Actions candidate artifacts and third-party mirrors are not official
+> releases. To try the current source, use [Build from source](#build-from-source).
 
-| Platform | Download | Run |
-|---|---|---|
-| **Windows** | `OpenSave.Setup.exe` (installer) or portable `OpenSave.exe` | Double-click |
-| **Linux** | `opensave-linux-amd64.tar.gz` | extract, then `./opensave` |
-| **Steam Deck / SteamOS** | `OpenSave.flatpak` | see [Steam Deck install](#steam-deck-install) |
+**由于个人开源项目暂未购买商业代码签名证书，Windows 可能出现 SmartScreen 提示。**
+未签名程序不具备 Windows 已验证发布者身份；如果设备策略阻止运行，请勿关闭安全防护来强行安装。
+发布时会为每个下载文件提供 `SHA256SUMS`，并通过 GitHub Artifact
+Attestations 记录构建来源。下载后应核对文件散列和证明；来源证明不能保证程序没有漏洞，
+也不能消除 SmartScreen 提示。
 
-The [upstream OpenSave releases](https://github.com/Liquid-co/OpenSave/releases)
-are provided here only as a compatibility reference, not as GameSave Go releases.
+发布后的 Windows 校验示例（请先从上面的 GitHub Releases 下载对应文件）：
+
+```powershell
+Get-FileHash -Algorithm SHA256 '.\GameSaveGo.Setup.exe'
+gh attestation verify '.\GameSaveGo.Setup.exe' -R lyx5710317/gamesave-go
+```
+
+将第一条命令的结果与同一 Release 的 `SHA256SUMS` 中对应文件名比较。
+以下 Steam Deck 内容仅介绍继承的**上游 OpenSave** 兼容分发，不是 GameSave Go 的官方下载。
 
 ### Steam Deck install
 

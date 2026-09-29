@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_version:
-        description: "Expected desktop tag (for example v1.1.1); builds an unsigned Windows candidate only"
+        description: "Expected desktop tag (for example v1.1.1); builds an unpublished Windows candidate only"
         required: true
         type: string
 
@@ -52,10 +52,10 @@ jobs:
   windows:
     needs: [preflight]
     runs-on: windows-latest
-    # Expose whether a signing cert secret is configured (secrets can't be
-    # read directly in step `if:`, so map it to job-level env here).
-    env:
-      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -150,25 +150,16 @@ jobs:
               --set-icon "cmd/opensave-app/build/windows/icon.ico"
           done
 
-      # Optional Authenticode signing — runs only when the repo has a
-      # WINDOWS_CERT_BASE64 (+ WINDOWS_CERT_PASSWORD) secret configured.
-      - name: Code sign (optional)
-        if: env.HAS_SIGNING == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          WIN_CERT_B64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WIN_CERT_PW: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          $pfx = "$env:RUNNER_TEMP\cert.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT_B64))
-          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1).FullName
-          Get-ChildItem cmd/opensave-app/build/bin/*.exe, dist/*.exe | ForEach-Object {
-            & $signtool sign /f $pfx /p $env:WIN_CERT_PW /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($_.Name)" }
-            & $signtool verify /pa $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $($_.Name)" }
-          }
-          Remove-Item -LiteralPath $pfx -Force
+      # Attest the final bytes after rcedit. This proves the build source and
+      # workflow, but is not an Authenticode signature or SmartScreen bypass.
+      - name: Attest Windows release files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            cmd/opensave-app/build/bin/GameSaveGo.exe
+            cmd/opensave-app/build/bin/GameSaveGo.Setup.exe
+            dist/opensave-cli.exe
+            dist/opensave-relay.exe
 
       - uses: actions/upload-artifact@v4
         with:
@@ -177,10 +168,43 @@ jobs:
             cmd/opensave-app/build/bin/*
             dist/*
 
+  verify-windows-candidate:
+    needs: [windows]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: windows
+      - name: Verify exact candidate bytes and build identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find windows -type f -name '*.exe' -print0)
+          if [ "${#files[@]}" -ne 4 ]; then
+            echo "::error::Expected four Windows executables, found ${#files[@]}"
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+
   linux:
     needs: [preflight]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -272,6 +296,16 @@ jobs:
           (cd decky-pkg && zip -r ../OpenSave-decky-plugin.zip OpenSave)
           unzip -l OpenSave-decky-plugin.zip
 
+      - name: Attest Linux release files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            opensave-linux-amd64.tar.gz
+            opensave-linux-arm64.tar.gz
+            *.deb
+            *.rpm
+            OpenSave-decky-plugin.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -289,6 +323,10 @@ jobs:
   flatpak:
     needs: [linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -331,6 +369,10 @@ jobs:
             echo "::error::unresolved libraries inside the flatpak sandbox"
             exit 1
           fi
+      - name: Attest Flatpak release file
+        uses: actions/attest@v4
+        with:
+          subject-path: OpenSave.flatpak
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
@@ -347,21 +389,15 @@ jobs:
   # Publish a real GitHub Release with all downloadable assets on tag push.
   release:
     needs: [windows, linux, flatpak]
-    # Off by default. Publishing requires an explicit repository-level gate,
-    # completed release checklist, and a configured signing identity.
+    # Off by default. The owner enables this only after the release checklist
+    # is reviewed. Unsigned Windows binaries require prominent user guidance.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+      id-token: write
+      attestations: write
     steps:
-      - name: Require signing before public release
-        run: |
-          if [ "$HAS_SIGNING" != "true" ]; then
-            echo "::error::Windows signing certificate/password are required for public release"
-            exit 1
-          fi
       - uses: actions/download-artifact@v4
         with:
           name: windows
@@ -374,17 +410,42 @@ jobs:
         with:
           name: flatpak
           path: flatpak
-      # scripts/install.sh verifies downloads against this before installing.
-      # Piping an installer to a shell is trust enough; it should at least
-      # refuse bytes it can't vouch for.
-      - name: Generate SHA256SUMS
+      # Verify the exact bytes downloaded from the build jobs. A matching
+      # hash alone cannot identify the workflow/commit that produced them.
+      - name: Verify build provenance and generate SHA256SUMS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          find windows linux flatpak -type f \
+          set -euo pipefail
+          mapfile -d '' assets < <(find windows linux flatpak -type f \
             \( -name '*.exe' -o -name '*.msi' -o -name '*.tar.gz' \
                -o -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \
-               -o -name '*.zip' \) \
-            -exec sha256sum {} + | sed 's| .*/| |' > SHA256SUMS
+               -o -name '*.zip' \) -print0 | sort -z)
+          if [ "${#assets[@]}" -lt 10 ]; then
+            echo "::error::Expected all Windows/Linux/Flatpak assets, found ${#assets[@]}"
+            exit 1
+          fi
+          declare -A seen=()
+          : > SHA256SUMS
+          for file in "${assets[@]}"; do
+            name="$(basename "$file")"
+            if [[ -n "${seen[$name]:-}" ]]; then
+              echo "::error::Duplicate release asset name: $name"
+              exit 1
+            fi
+            seen[$name]=1
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" > /dev/null
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$name" >> SHA256SUMS
+          done
           cat SHA256SUMS
+
+      - name: Attest SHA256SUMS
+        uses: actions/attest@v4
+        with:
+          subject-path: SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -396,7 +457,12 @@ jobs:
           # Note: re-publishing the same tag appends another generated-notes
           # block; if a tag is ever re-cut, tidy the release body by hand.
           generate_release_notes: true
-          fail_on_unmatched_files: false
+          body: |
+            **由于个人开源项目暂未购买商业代码签名证书，Windows 可能出现 SmartScreen 提示。**
+            Windows 安装包没有经过 Authenticode 签名；GitHub 构建来源证明不能代替已验证发布者身份，也不能保证程序没有漏洞。若设备策略阻止安装，请勿关闭安全防护强行运行。
+
+            请仅从本仓库的 GitHub Releases 下载。用 `SHA256SUMS` 核对每个下载文件，并用 `gh attestation verify <文件名> -R lyx5710317/gamesave-go` 验证构建来源。
+          fail_on_unmatched_files: true
           files: |
             windows/**/*.exe
             linux/*.tar.gz

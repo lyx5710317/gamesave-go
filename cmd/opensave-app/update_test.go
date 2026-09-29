@@ -225,6 +225,8 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 			Permissions map[string]string `yaml:"permissions"`
 			Steps       []struct {
 				Name string            `yaml:"name"`
+				Uses string            `yaml:"uses"`
+				With map[string]string `yaml:"with"`
 				If   string            `yaml:"if"`
 				Env  map[string]string `yaml:"env"`
 				Run  string            `yaml:"run"`
@@ -268,23 +270,49 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		}
 	}
 	windows := workflow.Jobs["windows"]
-	var candidateBuild, signingStep string
+	var candidateBuild string
+	attested := false
 	for _, step := range windows.Steps {
 		switch step.Name {
 		case "Build Windows app (NSIS installer + portable exe)":
 			candidateBuild = step.Run
-		case "Code sign (optional)":
-			signingStep = step.If
+		case "Attest Windows release files":
+			attested = step.Uses == "actions/attest@v4"
 		}
 	}
 	if !strings.Contains(candidateBuild, `if [ "$GITHUB_EVENT_NAME" = "push" ]; then`) ||
 		!strings.Contains(candidateBuild, `wails build -nsis -ldflags "$LD"`) ||
-		!strings.Contains(signingStep, "github.event_name == 'push'") {
-		t.Fatal("manual candidate build must remain unsigned and avoid stamping a branch as a release")
+		!attested || windows.Permissions["id-token"] != "write" || windows.Permissions["attestations"] != "write" {
+		t.Fatal("candidate build must keep development identity and attest its final bytes")
 	}
 	if !strings.Contains(workflow.Jobs["linux"].If, "github.event_name == 'push'") ||
 		!strings.Contains(workflow.Jobs["relay-docker"].If, "github.event_name == 'push'") {
 		t.Fatal("manual Windows candidates must not start other release builds")
+	}
+	for _, jobName := range []string{"linux", "flatpak"} {
+		job := workflow.Jobs[jobName]
+		if job.Permissions["id-token"] != "write" || job.Permissions["attestations"] != "write" {
+			t.Errorf("%s release assets lack attestation permissions", jobName)
+		}
+		found := false
+		for _, step := range job.Steps {
+			found = found || step.Uses == "actions/attest@v4"
+		}
+		if !found {
+			t.Errorf("%s release assets are not attested", jobName)
+		}
+	}
+	verification, ok := workflow.Jobs["verify-windows-candidate"]
+	if !ok || !strings.Contains(verification.If, "workflow_dispatch") {
+		t.Fatal("manual candidate must verify downloaded attested files")
+	}
+	var verifyScript strings.Builder
+	for _, step := range verification.Steps {
+		verifyScript.WriteString(step.Run)
+	}
+	if !strings.Contains(verifyScript.String(), "gh attestation verify") ||
+		!strings.Contains(verifyScript.String(), "--source-digest") {
+		t.Fatal("candidate does not verify provenance against its exact commit")
 	}
 	release, ok := workflow.Jobs["release"]
 	if !ok {
@@ -292,18 +320,47 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 	}
 	if !strings.Contains(release.If, "github.event_name == 'push'") ||
 		!strings.Contains(release.If, "GAMESAVE_GO_PUBLIC_RELEASE_READY") ||
-		release.Permissions["contents"] != "write" {
+		release.Permissions["contents"] != "write" ||
+		release.Permissions["id-token"] != "write" ||
+		release.Permissions["attestations"] != "write" {
 		t.Fatal("public release is not behind its explicit write-permission gate")
 	}
 	var releaseScripts strings.Builder
+	sumsAttested := false
+	var releaseBody string
 	for _, step := range release.Steps {
 		releaseScripts.WriteString(step.Run)
+		if step.Name == "Attest SHA256SUMS" {
+			sumsAttested = step.Uses == "actions/attest@v4"
+		}
+		if step.Name == "Publish release" {
+			releaseBody = step.With["body"]
+		}
 	}
-	if !strings.Contains(releaseScripts.String(), "HAS_SIGNING") {
-		t.Fatal("public release does not require Windows signing credentials")
+	if !strings.Contains(releaseScripts.String(), "gh attestation verify") ||
+		!strings.Contains(releaseScripts.String(), "--source-digest") ||
+		!strings.Contains(releaseScripts.String(), "SHA256SUMS") || !sumsAttested ||
+		!strings.Contains(string(raw), "fail_on_unmatched_files: true") {
+		t.Fatal("public release must verify build provenance and publish exact checksums")
+	}
+	if strings.Contains(string(raw), "WINDOWS_CERT_BASE64") || strings.Contains(string(raw), "HAS_SIGNING") {
+		t.Fatal("unsigned open-source release policy must not depend on commercial signing secrets")
+	}
+	if !strings.Contains(releaseBody, "Windows 可能出现 SmartScreen 提示") ||
+		!strings.Contains(releaseBody, "SHA256SUMS") ||
+		!strings.Contains(releaseBody, "gh attestation verify") {
+		t.Fatal("public release notes must disclose unsigned Windows builds and verification")
 	}
 	if !strings.Contains(string(raw), "GameSaveGo.Setup.exe") || strings.Contains(string(raw), "discord.gg") {
 		t.Fatal("release still uses the upstream installer name or community invitation")
+	}
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "Windows 可能出现 SmartScreen 提示") ||
+		!strings.Contains(string(readme), "github.com/lyx5710317/gamesave-go/releases") {
+		t.Fatal("official download channel or unsigned Windows warning is missing")
 	}
 }
 

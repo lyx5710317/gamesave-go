@@ -196,6 +196,8 @@ Desktop product releases use their own semantic version and stamped release-tag 
 
 Desktop update notices must come only from verified GameSave Go releases in the project's GitHub repository. A peer's inherited core version (for example `2.3.1`) is sync compatibility metadata, never a desktop update offer; peer binary installation remains disabled until a separate verified product-identity design is approved. The Windows tray follows the selected desktop UI language, while the installer asks for its own English/简体中文 language because the UI preference is not available before installation.
 
+Official downloads are served only from this repository's GitHub Releases after the explicit publication gate and safety review. The owner has chosen not to purchase Windows Authenticode signing for this personal open-source project. Each published asset must be built by GitHub Actions, covered by a release `SHA256SUMS` entry and a verifiable GitHub Artifact Attestation bound to the expected repository, workflow, ref and commit. README and release notes must disclose that unsigned Windows installers may trigger SmartScreen or be blocked by device policy. Attestation proves build provenance, not application safety or Windows publisher identity; it does not waive the backup, credential, dependency, upgrade or restore checks.
+
 ## Security and data ownership
 
 - User save data belongs to the user and stays local or in the user's chosen provider.
