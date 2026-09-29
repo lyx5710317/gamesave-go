@@ -231,6 +231,22 @@ upgrade/rollback on that clean VM and live cloud-credential use remain open.
 The owner reports no Windows code-signing certificate. No GameSave Go GitHub
 release was published.
 
+The source branch was pushed to GitHub in three phase-focused commits.
+The branch-ref, unsigned Windows candidate workflow
+([run 36534491985](https://github.com/lyx5710317/gamesave-go/actions/runs/36534491985))
+passed its preflight and Windows jobs; Linux, Flatpak and public release jobs
+were skipped as designed. The workflow artifact exists, but its download and
+guest binary hash have not been independently inspected.
+
+After that run, `npm audit fix` without `--force` updated only the Nano ID
+and PostCSS lockfile entries. Frontend tests (114) and build passed, and the
+full audit fell from 12 to 10 findings (8 moderate, 1 high, 1 critical).
+The remaining fixes require Svelte/Vite/Vitest major upgrades; no forced
+upgrade was attempted. `npm audit --omit=dev` still found zero. The
+`govulncheck` tool could not be fetched from either `proxy.golang.org` or
+direct `golang.org` on this host, so the Go vulnerability scan remains
+BLOCKED, not clean.
+
 Do not publish a formal installer or public test download yet. The signer,
 dependency/security findings, and the following clean-VM matrix must be
 verified on the same candidate first:
