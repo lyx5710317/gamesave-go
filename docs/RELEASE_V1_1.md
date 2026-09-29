@@ -247,6 +247,13 @@ upgrade was attempted. `npm audit --omit=dev` still found zero. The
 direct `golang.org` on this host, so the Go vulnerability scan remains
 BLOCKED, not clean.
 
+The updated branch then passed a second unsigned Windows candidate workflow
+([run 36537434811](https://github.com/lyx5710317/gamesave-go/actions/runs/36537434811))
+at commit `aa90d3d`; the `windows` artifact is available in that run's
+Artifacts section. The publication job was skipped. A local rebuild after
+the lockfile refresh passed, but its installer is unsigned. Do not represent
+either candidate as a formal signed release.
+
 Do not publish a formal installer or public test download yet. The signer,
 dependency/security findings, and the following clean-VM matrix must be
 verified on the same candidate first:
