@@ -20,6 +20,12 @@ resolution and an intermittent two-device deletion-soak failure. The API
 shutdown now drains its own background conflict task before closing the daemon;
 focused tests passed locally, but a new Linux race run must verify the change.
 The deletion failure remains under investigation and blocks a public release.
+The subsequent review found and corrected a definite false-success path:
+LAN/WAN delete handlers previously ignored disk deletion errors, and the sync
+engine ignored transport deletion errors while advancing state. WAN deletion
+now also resolves the requested named save location. These corrections have
+focused tests, but whether they fully explain the intermittent soak failure
+remains unproven until repeated race and two-device runs pass.
 Candidate run 36575850861 was attested and its Windows installer independently
 downloaded and checked (SHA-256
 `5A961EFF006949FCAE83D55A9082994D0CA328CEE8DAA13F4796E621C41560C0`),
