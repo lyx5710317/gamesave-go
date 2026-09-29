@@ -54,7 +54,10 @@ func (e *Engine) ResolveConflict(ctx context.Context, gameID, peerID, resolution
 		// this for free via SwitchBranch's safety snapshot; this path
 		// otherwise wouldn't.)
 		if _, err := e.Snapshots.Create(gameID, fmt.Sprintf("This device's version (before keeping %s's)", peer.Name), true); err != nil {
-			e.Log("warn", fmt.Sprintf("safety snapshot before keep-remote failed: %v", err))
+			e.Log("error", fmt.Sprintf("refusing keep-remote because its safety snapshot failed: %v", err))
+			return "", fmt.Errorf(
+				"could not back up this device's save before keeping %s's version, so nothing was changed: %w",
+				peer.Name, err)
 		}
 		if err := e.overwriteLocalWithRemote(ctx, gameID, peer, "Resolved conflict: Overwrite with remote"); err != nil {
 			return "", err

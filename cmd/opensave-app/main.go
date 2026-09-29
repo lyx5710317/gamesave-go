@@ -38,7 +38,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "OpenSave",
+		Title:     productName,
 		Width:     1280,
 		Height:    800,
 		MinWidth:  960,

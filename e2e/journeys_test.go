@@ -342,18 +342,24 @@ func TestJourney_RestoreOntoAFreshMachineAfterALoss(t *testing.T) {
 	if id := fresh.TrackGame("Loss"); id != gameID {
 		t.Fatalf("step 2: both devices should derive the id %q, this one got %q", gameID, id)
 	}
+	var importOutcome struct {
+		Restored int `json:"restored"`
+		Skipped  int `json:"skipped"`
+		Results  []struct {
+			Code string `json:"code"`
+		} `json:"results"`
+	}
 	if status := fresh.APIStatus(http.MethodPost, "/api/backup/restore",
-		map[string]any{"sourcePath": archive, "mode": "overwrite"}, nil); status >= 400 {
+		map[string]any{"sourcePath": archive, "mode": "overwrite"}, &importOutcome); status >= 400 {
 		t.Fatalf("step 2: restore failed with HTTP %d: %s", status, fresh.LastError())
 	}
 
-	// The save is back, and the excluded file came with it — it was in the
-	// snapshot, which is the whole reason exclusions do not touch snapshots.
-	if !testutil.WaitFor(30*time.Second, func() bool { return fresh.ReadSave("save.dat") == "80 hours in" }) {
-		t.Fatalf("step 3: the save did not restore: %q", fresh.ReadSave("save.dat"))
+	// A missing location blocks the whole restore, not just that location.
+	if importOutcome.Restored != 0 || importOutcome.Skipped != 1 || len(importOutcome.Results) != 1 || importOutcome.Results[0].Code != "restore_location" {
+		t.Fatalf("step 3: incomplete mapping not reported: %+v", importOutcome)
 	}
-	if got := fresh.ReadSave("machine.cfg"); got != "the old PC" {
-		t.Errorf("step 3: the excluded file was not in the backup (%q) — an exclusion must not reduce what is backed up", got)
+	if fresh.ReadSave("save.dat") != "" || fresh.ReadSave("machine.cfg") != "" {
+		t.Fatal("step 3: partial restore modified the fresh save")
 	}
 
 	// The location is remembered by name and reported as needing a folder,
@@ -376,6 +382,10 @@ func TestJourney_RestoreOntoAFreshMachineAfterALoss(t *testing.T) {
 	// Point it at a folder here, pair with the original, and converge.
 	freshCfg := extraDir(t, fresh, "config")
 	addRoot(t, fresh, gameID, "config", freshCfg)
+	fresh.API(http.MethodPost, "/api/backup/restore", map[string]any{"sourcePath": archive, "mode": "overwrite"}, &importOutcome)
+	if importOutcome.Restored != 1 || importOutcome.Skipped != 0 || fresh.ReadSave("save.dat") != "80 hours in" || fresh.ReadSave("machine.cfg") != "the old PC" || readIn(freshCfg, "settings.ini") != "my keybinds" {
+		t.Fatal("step 5: fully mapped archive did not restore all locations/excluded bytes")
+	}
 	fresh.PairWith(original)
 
 	time.Sleep(syncSettleWindow)

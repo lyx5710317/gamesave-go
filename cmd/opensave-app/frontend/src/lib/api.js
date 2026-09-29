@@ -1,5 +1,7 @@
 // REST + WebSocket client for the embedded OpenSave daemon.
 
+import { PRODUCT_NAME } from './branding.js';
+
 let baseURL = '';
 
 /** Resolve the daemon address from the Wails-bound Go method. */
@@ -30,8 +32,8 @@ export async function initApi() {
     }
   }
   throw new Error(
-    `The window can't reach OpenSave's background service at ${baseURL} (${lastErr?.message ?? 'no response'}). ` +
-      `This is usually another program blocking local connections (firewall/antivirus), or a leftover OpenSave still running — ` +
+    `The window can't reach ${PRODUCT_NAME}'s background service at ${baseURL} (${lastErr?.message ?? 'no response'}). ` +
+      `This is usually another program blocking local connections (firewall/antivirus), or a leftover ${PRODUCT_NAME} process still running — ` +
       `check the system tray and Task Manager, then hit Retry.`
   );
 }
@@ -45,7 +47,11 @@ async function request(method, path, body) {
   const res = await fetch(baseURL + path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+    const error = new Error(data.error || `${method} ${path} failed (${res.status})`);
+    if (typeof data.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(data.code)) {
+      error.code = data.code;
+    }
+    throw error;
   }
   return data;
 }
@@ -113,11 +119,11 @@ const app = () => window.go?.main?.App;
 // dev build still announced itself as 2.0.0 — a plausible number, so believed.
 // "dev" cannot go stale and cannot be mistaken for a release.
 const FALLBACK_INFO = {
-  name: 'OpenSave',
+  name: PRODUCT_NAME,
   version: 'dev',
-  tagline: 'Peer-to-peer game save sync',
+  tagline: 'Local-first game save backup and sync',
   license: 'MIT',
-  copyright: '© 2026 Siva Prakash & OpenSave contributors',
+  copyright: '© 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors',
   tech: 'Go + Wails'
 };
 
@@ -128,8 +134,8 @@ export const native = {
   changelogReleases: () => app()?.ChangelogReleases?.() ?? Promise.resolve([]),
   whatsNew: () => app()?.WhatsNew?.() ?? Promise.resolve([]),
   updateGreeting: () => app()?.UpdateGreeting?.() ?? Promise.resolve({}),
-  installFromPeer: (peerId) => app()?.InstallUpdateFromPeer?.(peerId) ?? Promise.resolve('not available in browser preview'),
   installFromUrl: (url) => app()?.InstallUpdateFromURL?.(url) ?? Promise.resolve('not available in browser preview'),
+  setTrayLocale: (language) => app()?.SetTrayLocale?.(language) ?? Promise.resolve(),
   selectDirectory: (title) => app()?.SelectDirectory(title ?? '') ?? Promise.resolve(''),
   // Reveals a folder in the system file manager. Resolves to '' on success,
   // or a message explaining why it couldn't be opened.

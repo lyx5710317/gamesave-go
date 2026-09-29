@@ -28,6 +28,10 @@ const minPlausibleBinary = 1 << 20
 // Download streams url to path, calling progress at most a few times a second
 // with bytes done and the total when the server declared one (-1 if not).
 func Download(url, path string, progress func(done, total int64)) error {
+	return downloadWithMaxBytes(url, path, 0, progress)
+}
+
+func downloadWithMaxBytes(url, path string, maxBytes int64, progress func(done, total int64)) error {
 	client := &http.Client{Timeout: 15 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -36,6 +40,9 @@ func Download(url, path string, progress func(done, total int64)) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %s", resp.Status)
+	}
+	if maxBytes > 0 && resp.ContentLength > maxBytes {
+		return fmt.Errorf("download exceeds published release asset size")
 	}
 
 	out, err := os.Create(path)
@@ -51,6 +58,9 @@ func Download(url, path string, progress func(done, total int64)) error {
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
+			if maxBytes > 0 && done+int64(n) > maxBytes {
+				return fmt.Errorf("download exceeds published release asset size")
+			}
 			if _, err := out.Write(buf[:n]); err != nil {
 				return err
 			}

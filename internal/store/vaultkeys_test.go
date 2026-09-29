@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/opensave/opensave/internal/e2ee"
 )
 
@@ -40,6 +41,13 @@ func TestEnsureVaultCreatesOnceAndIsStable(t *testing.T) {
 	}
 	if id == "" {
 		t.Fatal("created a vault with no id")
+	}
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		t.Fatalf("new vault id is not a UUID: %q: %v", id, err)
+	}
+	if parsedID.Version() != uuid.Version(4) {
+		t.Fatalf("new vault id version = %d, want UUID v4", parsedID.Version())
 	}
 	first, err := kr.Current()
 	if err != nil {

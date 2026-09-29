@@ -1,5 +1,12 @@
 # Getting Started with OpenSave
 
+> **GameSave Go note:** This inherited guide explains compatible core features,
+> but screenshots and some labels may differ from the current desktop app.
+> Install GameSave Go only from this repository's GitHub Releases after a public
+> release is announced. There is no official GameSave Go download yet; see
+> [README installation status](README.md#install). Upstream OpenSave downloads
+> are a different product.
+
 This guide assumes you have never used OpenSave and starts from nothing. It
 explains what each thing means as it comes up. If you want the short version,
 the [README](README.md) has a four-step quick start; if you want the reference,
@@ -54,21 +61,13 @@ emulators.
 
 ## 2. Installing it
 
-Download the latest build from the
-[releases page](https://github.com/Liquid-co/OpenSave/releases).
-
-**Windows** — download `OpenSave.exe` and run it. There is no installer and
-nothing goes in the registry.
-
-> Windows SmartScreen may warn you because the build is not code-signed
-> (signing certificates cost money this project does not have). Click **More
-> info → Run anyway** if you are comfortable with that.
-
-**Linux** — download the tarball, extract it, and run `./OpenSave`.
-
-**Steam Deck** — see [section 11](#11-steam-deck).
-
-Do this on **each device** you want to sync. They all need the app.
+GameSave Go has no public release yet. When one is announced, obtain it only
+from this repository's [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases),
+and check its `SHA256SUMS` and Artifact Attestation as described in the
+[README](README.md#install). The unsigned Windows installer may show a
+SmartScreen warning or be blocked by device policy; do not disable security
+protections to force installation. Linux and Steam Deck packages from this
+fork are not yet validated for public distribution.
 
 ## 3. First run: finding your saves
 
@@ -185,6 +184,12 @@ Prefer to run your own relay instead of the hosted one? See
 
 Once paired, tracked games sync automatically. You do not need to press
 anything.
+
+If a game is stored in a temporary folder on the first device, the second
+device will not guess a new folder under its own user profile. Track the game
+on the second device and set its actual save folder, or configure an explicit
+path translation in Settings → Advanced. An already-existing identical path
+on the same machine remains usable.
 
 Both devices need to be **tracking the same game** for it to sync. If a game is
 named differently on each machine, OpenSave can usually match them by Steam App
@@ -385,11 +390,14 @@ library — games, settings, snapshot history — to a single portable archive:
 
 - **Cloud Backup → Export** picks which games to include and writes an `.sscb`
   file. Put it on a USB stick or in cloud storage.
-- On the new machine, **Cloud Backup → Import** reads it back.
+- On the new machine, first add each game with its save folder on that machine.
+  Then **Cloud Backup → Import** reads the archive into those tracked games.
+  An untracked game is skipped; the backup's old path is never used to place
+  or overwrite files automatically.
 
-On import you choose what happens to anything already there: **merge**, which
-keeps both, or **overwrite**, which replaces. Overwrite is the destructive one
-and is labelled as such.
+On import choose **add to snapshots**, which leaves live files unchanged, or
+**overwrite**, which restores tracked games after a safety snapshot. Overwrite
+is the destructive option and is labelled as such.
 
 The same thing from a terminal:
 

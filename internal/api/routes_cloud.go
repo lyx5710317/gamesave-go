@@ -1,16 +1,17 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/opensave/opensave/internal/cloud"
 	"github.com/opensave/opensave/internal/snapshot"
+	"github.com/opensave/opensave/internal/vaultmeta"
 )
 
 // pendingPKCE holds verifier state between /api/auth/start and
@@ -27,11 +28,70 @@ func (s *Server) cloudRoutes(r chi.Router) {
 	r.Post("/api/auth/disconnect", s.handleAuthDisconnect)
 
 	r.Get("/api/cloud/browse", s.handleCloudBrowse)
+	r.Get("/api/cloud/uploads", s.handleCloudUploads)
+	r.Get("/api/cloud/join/local-preview", s.handleCloudJoinLocalPreview)
+	r.Get("/api/cloud/join/remote-vault", s.handleCloudJoinRemoteVault)
 	r.Get("/api/cloud/snapshots/{gameId}", s.handleCloudSnapshots)
+	r.Post("/api/cloud/verify/{gameId}", s.handleCloudVerify)
 	r.Post("/api/cloud/restore/{gameId}", s.handleCloudRestore)
 	r.Post("/api/cloud/delete/{gameId}", s.handleCloudDelete)
 	r.Post("/api/cloud/delete-game/{gameId}", s.handleCloudDeleteGame)
 	r.Post("/api/cloud/sync-local/{gameId}", s.handleCloudSyncLocal)
+	r.Post("/api/cloud/jianguoyun/disconnect", s.handleJianguoyunDisconnect)
+}
+
+func (s *Server) handleJianguoyunDisconnect(w http.ResponseWriter, r *http.Request) {
+	if err := s.Daemon.Store.DisconnectJianguoyun(); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// handleCloudUploads shows only in-memory transfer activity from this run.
+// The cloud service has already stripped local paths, tokens, and raw errors.
+func (s *Server) handleCloudUploads(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"uploads": s.Daemon.Cloud.UploadActivity()})
+}
+
+// handleCloudJoinLocalPreview only reads current local saves. It does not
+// infer that a remote vault is absent, authorize a join, or perform uploads.
+func (s *Server) handleCloudJoinLocalPreview(w http.ResponseWriter, r *http.Request) {
+	discovered, err := s.scanMeasuredSaves()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	scan, err := vaultmeta.ScanLocal(s.Daemon.Store, discovered)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, scan)
+}
+
+// handleCloudJoinRemoteVault performs only a bounded, read-only inspection.
+// An absent document is not proof of an empty remote snapshot directory.
+func (s *Server) handleCloudJoinRemoteVault(w http.ResponseWriter, r *http.Request) {
+	metadata, err := s.Daemon.Cloud.InspectRemoteVault(r.Context())
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "valid", "revision": metadata.Revision, "deviceCount": len(metadata.Devices),
+		})
+	case errors.Is(err, cloud.ErrVaultMetadataNotFound):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "missing"})
+	case errors.Is(err, cloud.ErrVaultMetadataReadUnsupported):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "unsupported"})
+	case errors.Is(err, vaultmeta.ErrUnsupportedSchema):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "upgrade-required"})
+	case errors.Is(err, vaultmeta.ErrInvalidMetadata), errors.Is(err, cloud.ErrVaultMetadataInvalidSize):
+		writeJSON(w, http.StatusOK, map[string]string{"status": "invalid"})
+	default:
+		// Do not expose request URLs, account identifiers, credentials, or
+		// malformed response contents in this optional discovery response.
+		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "unavailable"})
+	}
 }
 
 // handleCloudBrowse lists every cloud snapshot the provider holds, grouped
@@ -40,7 +100,11 @@ func (s *Server) cloudRoutes(r chi.Router) {
 func (s *Server) handleCloudBrowse(w http.ResponseWriter, r *http.Request) {
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeCloudReadError(w, http.StatusBadGateway, err)
+		return
+	}
+	if err := validateRecognizableCloudInventory(files); err != nil {
+		writeCloudReadError(w, http.StatusConflict, err)
 		return
 	}
 
@@ -160,7 +224,11 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 	files, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeCloudReadError(w, http.StatusBadGateway, err)
+		return
+	}
+	if err := validateRecognizableCloudInventory(files); err != nil {
+		writeCloudReadError(w, http.StatusConflict, err)
 		return
 	}
 
@@ -180,6 +248,132 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, matches)
 }
 
+// A name-only browser cannot safely distinguish two provider objects with
+// the same recognizable snapshot name. Never present that inventory as an
+// ordinary, actionable list. Restore and verification have their own exact
+// object checks; this guard also protects the pre-join summary.
+var errCloudInventoryInvalid = errors.New("remote snapshot inventory is ambiguous or malformed")
+
+func validateRecognizableCloudInventory(files []cloud.CloudFile) error {
+	seen := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if _, _, _, ok := snapshot.ParseExportEntryName(file.Name); !ok {
+			continue
+		}
+		if file.SizeBytes < 0 {
+			return errCloudInventoryInvalid
+		}
+		if _, duplicate := seen[file.Name]; duplicate {
+			return errCloudInventoryInvalid
+		}
+		seen[file.Name] = struct{}{}
+	}
+	return nil
+}
+
+// handleCloudVerify reads one remote ZIP without restoring or publishing it.
+// A valid ZIP and a same-byte local copy are useful checks, not vault identity
+// or ancestry proof. The listing must identify exactly one remote object.
+func (s *Server) handleCloudVerify(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "gameId")
+	var body struct {
+		FileName string `json:"fileName"`
+	}
+	if err := readJSON(r, &body); err != nil || body.FileName == "" {
+		writeError(w, http.StatusBadRequest, "fileName is required")
+		return
+	}
+	g, branch, snapID, ok := snapshot.ParseExportEntryName(body.FileName)
+	if !ok || g != gameID || !safeCloudRestorePart(g) || !safeCloudRestorePart(branch) || !safeCloudRestorePart(snapID) {
+		writeError(w, http.StatusBadRequest, "fileName does not belong to this game")
+		return
+	}
+	files, err := s.Daemon.Cloud.List()
+	if err != nil {
+		writeCloudVerificationError(w, http.StatusBadGateway, err)
+		return
+	}
+	var remote *cloud.CloudFile
+	for i := range files {
+		if files[i].Name != body.FileName {
+			continue
+		}
+		if remote != nil {
+			writeCloudVerificationError(w, http.StatusConflict, cloud.ErrRemoteSnapshotAmbiguous)
+			return
+		}
+		remote = &files[i]
+	}
+	if remote == nil {
+		writeCloudVerificationError(w, http.StatusNotFound, cloud.ErrJianguoyunMissing)
+		return
+	}
+	settings, err := s.Daemon.Store.GetSettings()
+	if err != nil {
+		writeCloudVerificationError(w, http.StatusInternalServerError, err)
+		return
+	}
+	localPath := filepath.Join(settings.BackupsDir, gameID, branch, snapID+".zip")
+	result, err := s.Daemon.Cloud.VerifyRemoteSnapshot(*remote, localPath)
+	if err != nil {
+		writeCloudVerificationError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// A fixed code makes VM failures actionable without returning remote bodies,
+// URLs, application passwords, account names, local paths or ZIP entry names.
+func writeCloudVerificationError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{
+		"error": "cloud snapshot could not be verified; no saves were changed",
+		"code":  "cloud_verify_" + cloudFailureCategory(err),
+	})
+}
+
+func writeCloudReadError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{
+		"error": "cloud inventory unavailable; no saves were changed",
+		"code":  "cloud_read_" + cloudFailureCategory(err),
+	})
+}
+
+func cloudFailureCategory(err error) string {
+	code := "failed"
+	var localPathErr *os.PathError
+	switch {
+	case errors.Is(err, cloud.ErrCloudDisabled):
+		code = "disabled"
+	case cloud.IsNotConfigured(err):
+		code = "configuration"
+	case errors.Is(err, cloud.ErrJianguoyunAuth):
+		code = "authentication"
+	case errors.Is(err, cloud.ErrJianguoyunPermission):
+		code = "permission"
+	case errors.Is(err, cloud.ErrJianguoyunQuota):
+		code = "quota"
+	case errors.Is(err, cloud.ErrJianguoyunRateLimit):
+		code = "rate_limit"
+	case errors.Is(err, cloud.ErrJianguoyunNetwork):
+		code = "network"
+	case errors.Is(err, cloud.ErrJianguoyunMissing):
+		code = "missing"
+	case errors.Is(err, cloud.ErrJianguoyunIncomplete), errors.Is(err, errCloudInventoryInvalid):
+		code = "incomplete_inventory"
+	case errors.Is(err, cloud.ErrRemoteSnapshotAmbiguous):
+		code = "ambiguous"
+	case errors.Is(err, cloud.ErrUnsafeSnapshotArchive):
+		code = "unsafe_archive"
+	case errors.Is(err, cloud.ErrSnapshotSizeMismatch):
+		code = "size_mismatch"
+	case errors.Is(err, cloud.ErrSnapshotArchiveIntegrity), errors.Is(err, cloud.ErrJianguoyunIntegrity):
+		code = "integrity"
+	case errors.As(err, &localPathErr):
+		code = "local_io"
+	}
+	return code
+}
+
 // handleCloudRestore downloads a remote snapshot zip, registers it, and
 // restores it over the save.
 func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +387,7 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g, branch, snapID, ok := snapshot.ParseExportEntryName(body.FileName)
-	if !ok || g != gameID {
+	if !ok || g != gameID || !safeCloudRestorePart(branch) || !safeCloudRestorePart(snapID) {
 		writeError(w, http.StatusBadRequest, "fileName does not belong to this game")
 		return
 	}
@@ -214,8 +408,39 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	destPath := filepath.Join(destDir, snapID+".zip")
 
-	if err := s.Daemon.Cloud.Download(body.FileName, destPath); err != nil {
+	remoteFiles, err := s.Daemon.Cloud.List()
+	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var remote *cloud.CloudFile
+	for i := range remoteFiles {
+		if remoteFiles[i].Name != body.FileName {
+			continue
+		}
+		if remote != nil {
+			writeError(w, http.StatusConflict, "multiple remote snapshots have this name; restore is ambiguous")
+			return
+		}
+		remote = &remoteFiles[i]
+	}
+	if remote == nil {
+		writeError(w, http.StatusNotFound, "remote snapshot not found")
+		return
+	}
+	// Current providers expose size but no trusted SHA-256. The verifier also
+	// checks ZIP CRCs and refuses to replace a different local archive; a
+	// future vault manifest can supply its recorded hash here.
+	if err := s.Daemon.Cloud.DownloadVerified(*remote, destPath, ""); err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, cloud.ErrLocalSnapshotConflict) {
+			status = http.StatusConflict
+		}
+		if errors.Is(err, cloud.ErrUnsafeSnapshotArchive) {
+			writeError(w, status, cloud.ErrUnsafeSnapshotArchive.Error())
+			return
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	info, err := os.Stat(destPath)
@@ -229,11 +454,27 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.Daemon.Snapshots.Restore(gameID, snapID); err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("downloaded but restore failed: %v", err))
 		return
 	}
 	s.BroadcastGamesUpdate()
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "snapshotId": snapID})
+}
+
+func safeCloudRestorePart(part string) bool {
+	if part == "" {
+		return false
+	}
+	for _, ch := range part {
+		if ch != '_' && ch != '-' && (ch < 'a' || ch > 'z') &&
+			(ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // handleCloudDelete removes one snapshot from the cloud provider. Local
@@ -290,8 +531,9 @@ func (s *Server) handleCloudDeleteGame(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted, "failed": failed})
 }
 
-// handleCloudSyncLocal uploads every local snapshot of a game that the
-// provider doesn't have yet.
+// handleCloudSyncLocal uploads local snapshots only when the provider's
+// listing contains no object with the same name. Size alone cannot prove
+// identity, and an existing object must never be silently overwritten.
 func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 	if _, err := s.Daemon.Store.GetGame(gameID); err != nil {
@@ -304,14 +546,9 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	// Sizes, not just names. Skipping on the name alone means an archive that
-	// arrived truncated stays truncated forever: it is present, so every later
-	// push passes over it. Uploads interrupted partway do happen — a snapshot
-	// taken by a short-lived CLI process used to die mid-copy — and the file
-	// left behind looks like a backup while containing nothing.
-	remoteSizes := map[string]int64{}
+	remoteNames := map[string]struct{}{}
 	for _, f := range remote {
-		remoteSizes[f.Name] = f.SizeBytes
+		remoteNames[f.Name] = struct{}{}
 	}
 
 	branches, err := s.Daemon.Store.ListBranches(gameID)
@@ -328,7 +565,7 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		snapID     string
 	}
 	var pending []pendingUpload
-	skipped := 0
+	conflicts := 0
 	for _, branch := range branches {
 		snaps, err := s.Daemon.Store.ListSnapshots(gameID, branch)
 		if err != nil {
@@ -336,17 +573,12 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, snap := range snaps {
 			remoteName := fmt.Sprintf("%s__%s__%s.zip", gameID, branch, snap.ID)
-			if size, present := remoteSizes[remoteName]; present && size == snap.SizeBytes {
-				skipped++
+			if _, present := remoteNames[remoteName]; present {
+				// Even an equal size cannot establish equal content. Until the
+				// provider supports an account-bound, conditional object write
+				// and trusted content verification, require explicit resolution.
+				conflicts++
 				continue
-			} else if present {
-				// Present but the wrong size: re-upload over it. A provider
-				// that does not report sizes returns 0, which reads as a
-				// mismatch and costs one redundant upload — the safe way to
-				// be wrong about this.
-				s.Daemon.Log.Log("warn", fmt.Sprintf(
-					"cloud copy of %s is %d bytes, local is %d — re-uploading",
-					remoteName, size, snap.SizeBytes))
 			}
 			pending = append(pending, pendingUpload{zipPath: snap.ZipPath, remoteName: remoteName, snapID: snap.ID})
 		}
@@ -360,20 +592,25 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaded := 0
+	failed := 0
 	for _, p := range pending {
 		progress(uploaded, p.snapID, false)
-		if err := s.Daemon.Cloud.Upload(p.zipPath, p.remoteName); err != nil {
-			if strings.Contains(err.Error(), "not enabled") {
+		if err := s.Daemon.Cloud.UploadIfAbsent(p.zipPath, p.remoteName); err != nil {
+			if errors.Is(err, cloud.ErrRemoteSnapshotConflict) || errors.Is(err, os.ErrExist) {
+				conflicts++
+				continue
+			}
+			if cloud.IsNotConfigured(err) {
 				progress(uploaded, "", true)
-				writeError(w, http.StatusBadRequest, err.Error())
+				writeError(w, http.StatusBadRequest, "cloud backup is not configured or authenticated")
 				return
 			}
-			s.Daemon.Log.Log("warn", fmt.Sprintf("upload %s failed: %v", p.remoteName, err))
-			skipped++
+			s.Daemon.Log.Log("warn", fmt.Sprintf("upload %s failed; check cloud transfer activity", p.remoteName))
+			failed++
 			continue
 		}
 		uploaded++
 	}
 	progress(uploaded, "", true)
-	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": skipped})
+	writeJSON(w, http.StatusOK, map[string]int{"uploaded": uploaded, "skipped": 0, "conflicts": conflicts, "failed": failed})
 }

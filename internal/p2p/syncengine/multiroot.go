@@ -187,6 +187,18 @@ func (e *Engine) syncOneRoot(ctx context.Context, gameID string, game store.Game
 		Proto:        remoteData.Proto,
 	}
 
+	// This location is about to lose local files. The snapshot covers every
+	// location of the game, which makes the incoming replacement reversible
+	// and keeps the safety rule identical to the primary save path.
+	if atRisk := filesAtRisk(local, decision); len(atRisk) > 0 {
+		comment := fmt.Sprintf("Before sync replaced local files in the %q save location", sr.root.Name)
+		if _, err := e.Snapshots.Create(gameID, comment, true); err != nil {
+			return fmt.Errorf(
+				"refusing to replace %d local file(s) in the %q save location of %q: they could not be snapshotted first: %w",
+				len(atRisk), sr.root.Name, game.Name, err)
+		}
+	}
+
 	e.applyLocalDeletions(sr.root, decision)
 	e.propagateDeletions(ctx, peer, gameID, sr.root, decision)
 	e.createPulledDirsIn(sr.root, decision.DirsToPull)

@@ -2,8 +2,11 @@ package p2p
 
 import (
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/opensave/opensave/internal/delta"
 	"github.com/opensave/opensave/internal/store"
 )
 
@@ -18,6 +21,103 @@ func newMatchTestEngine(t *testing.T) (*Engine, *store.Store) {
 		t.Fatalf("EnsureDefaultSettings error = %v", err)
 	}
 	return &Engine{Store: s, Log: func(string, string) {}}, s
+}
+
+func TestTemporaryAutoTrackPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{`C:\Users\Alice\AppData\Local\Temp\test-saves`, true},
+		{`c:/users/alice/appdata/local/temp/test-saves`, true},
+		{`C:\Windows\Temp\game`, true},
+		{`/tmp/game`, true},
+		{`/var/tmp/game`, true},
+		{`/private/tmp/game`, true},
+		{`C:\Users\Alice\AppData\Local\Tempest\game`, false},
+		{`C:\Users\Alice\Saved Games\game`, false},
+		{`C:\game save`, false},
+		{`/home/alice/.local/share/game`, false},
+	}
+	for _, tt := range tests {
+		if got := temporaryAutoTrackPath(tt.path); got != tt.want {
+			t.Errorf("temporaryAutoTrackPath(%q) = %t, want %t", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestEnsureManifestGameRejectsGuessedTemporaryPath(t *testing.T) {
+	e, s := newMatchTestEngine(t)
+	peerPath := `C:\Users\Alice\AppData\Local\Temp\test-saves`
+	_, err := e.ensureManifestGame("vm-test", manifestGameQuery{Name: "VM Test", SavePath: peerPath})
+	if err == nil || !strings.Contains(err.Error(), "temporary save path") {
+		t.Fatalf("ensureManifestGame error = %v, want actionable temporary-path error", err)
+	}
+	if _, err := s.GetGame("vm-test"); err == nil {
+		t.Fatal("temporary peer path must not be auto-tracked")
+	}
+
+	// A user-supplied translation to a real local folder is explicit intent.
+	settings, err := s.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	localPath := filepath.Join(t.TempDir(), "game-save")
+	settings.PathTranslations = []store.TranslationRule{{FromPattern: peerPath, ToPattern: localPath}}
+	if err := s.UpdateSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	game, err := e.ensureManifestGame("vm-test", manifestGameQuery{Name: "VM Test", SavePath: peerPath})
+	if err != nil {
+		t.Fatalf("explicit translation should permit tracking: %v", err)
+	}
+	if game.SavePath != localPath {
+		t.Errorf("translated save path = %q, want %q", game.SavePath, localPath)
+	}
+}
+
+func TestEnsureManifestGameKeepsExistingSameMachineTemporaryPath(t *testing.T) {
+	e, _ := newMatchTestEngine(t)
+	// The existing same-machine case is used by the end-to-end test daemons:
+	// both peers can see this exact directory, so no destination is guessed.
+	savePath := t.TempDir()
+	game, err := e.ensureManifestGame("same-machine-test", manifestGameQuery{
+		Name: "Same Machine Test", SavePath: savePath,
+	})
+	if err != nil {
+		t.Fatalf("existing unchanged temporary path should remain trackable: %v", err)
+	}
+	if !strings.EqualFold(filepath.Clean(game.SavePath), filepath.Clean(savePath)) {
+		t.Errorf("save path = %q, want %q", game.SavePath, savePath)
+	}
+
+	missing := filepath.Join(t.TempDir(), "not-yet-created")
+	if _, err := e.ensureManifestGame("missing-temporary-test", manifestGameQuery{
+		Name: "Missing Temporary Test", SavePath: missing,
+	}); err == nil {
+		t.Fatal("a missing temporary destination must require an explicit path")
+	}
+}
+
+func TestEnsureManifestGameKeepsExistingCurrentTempWithProfileAlias(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows profile aliases are required for this case")
+	}
+	e, _ := newMatchTestEngine(t)
+	savePath := t.TempDir()
+	t.Setenv("USERPROFILE", filepath.Join(t.TempDir(), "different-profile"))
+	if strings.EqualFold(filepath.Clean(delta.TranslatePathToLocal(savePath, nil)), filepath.Clean(savePath)) {
+		t.Skip("temporary path is not under a translated Windows user profile")
+	}
+	game, err := e.ensureManifestGame("current-temp-alias", manifestGameQuery{
+		Name: "Current Temp Alias", SavePath: savePath,
+	})
+	if err != nil {
+		t.Fatalf("an existing path under this process's temp root must not be guessed away: %v", err)
+	}
+	if !strings.EqualFold(filepath.Clean(game.SavePath), filepath.Clean(savePath)) {
+		t.Errorf("save path = %q, want existing path %q", game.SavePath, savePath)
+	}
 }
 
 // TestEnsureManifestGameMatching pins the peer-game resolution order:

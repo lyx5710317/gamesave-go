@@ -1,6 +1,6 @@
-# Quark Netdisk Candidate Provider (Not Implemented)
+# Quark Netdisk Candidate Provider (Deferred)
 
-Status: candidate research record only. Quark is not part of the initial MVP implementation and must not be represented as supported.
+Status (2026-09-25): deferred at the owner's request. This is a retained candidate design record, not active evaluation, an experiment, an implementation task, or a release gate. Quark is not supported by the app. Resume work only if the owner explicitly requests it; the official-access entry gate below still applies.
 
 ## Entry gate
 

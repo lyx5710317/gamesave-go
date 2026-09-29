@@ -3,8 +3,10 @@ import { get } from 'svelte/store';
 import {
   DEFAULT_LOCALE,
   STORAGE_KEY,
+  bindNativeLocale,
   createLocaleStore,
   locale,
+  messages,
   resolveLocale,
   t,
   translate
@@ -27,8 +29,19 @@ function currentValue(store) {
 
 describe('translations', () => {
   it('provides English and Simplified Chinese strings', () => {
-    expect(translate('en', 'nav.home')).toBe('Home');
-    expect(translate('zh-CN', 'nav.home')).toBe('主页');
+    expect(translate('en', 'nav.games')).toBe('Games');
+    expect(translate('zh-CN', 'nav.games')).toBe('游戏');
+    expect(translate('en', 'cloud.title')).toBe('Cloud Backup');
+    expect(translate('zh-CN', 'cloud.title')).toBe('云备份');
+    expect(translate('en', 'cloud.activity.conflict')).toContain('existing backup preserved');
+    expect(translate('zh-CN', 'cloud.activity.conflict')).toContain('已保留原有备份');
+    expect(translate('en', 'activity.empty.title')).toBe('Nothing yet');
+    expect(translate('zh-CN', 'activity.empty.title')).toBe('暂无活动');
+    expect(translate('zh-CN', 'app.updateFailed', { error: '校验失败' })).toContain('校验失败');
+  });
+
+  it('keeps both shipped catalogs on the same set of keys', () => {
+    expect(Object.keys(messages['zh-CN']).sort()).toEqual(Object.keys(messages.en).sort());
   });
 
   it('falls back to English before returning the key', () => {
@@ -77,5 +90,18 @@ describe('locale selection', () => {
     const storage = memoryStorage({ [STORAGE_KEY]: 'ja-JP' });
     const store = createLocaleStore({ storage, navigatorLanguage: 'zh-CN' });
     expect(currentValue(store)).toBe('zh-CN');
+  });
+
+  it('sends the restored language and later changes to native surfaces', () => {
+    const store = createLocaleStore({
+      storage: memoryStorage({ [STORAGE_KEY]: 'zh-CN' }),
+      navigatorLanguage: 'en-US'
+    });
+    const received = [];
+    const unsubscribe = bindNativeLocale(store, (language) => received.push(language));
+    store.set('en');
+    unsubscribe();
+    store.set('zh-CN');
+    expect(received).toEqual(['zh-CN', 'en']);
   });
 });

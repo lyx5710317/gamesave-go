@@ -198,6 +198,11 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 		cfg.Enabled = *patch.Enabled
 	}
 	if patch.Provider != nil {
+		if *patch.Provider != cfg.Provider {
+			// A credential from one destination must never be copied into a
+			// different provider's SQLite configuration by a partial patch.
+			cfg.Password = ""
+		}
 		cfg.Provider = *patch.Provider
 	}
 	if patch.URL != nil {
@@ -207,7 +212,9 @@ func (s *Server) applyCloudPatch(patch *cloudSyncPatch) error {
 		cfg.Username = *patch.Username
 	}
 	if patch.Password != nil {
-		cfg.Password = *patch.Password
+		if *patch.Password != "" || (cfg.Provider != "jianguoyun" && !cfg.PasswordConfigured) {
+			cfg.Password = *patch.Password
+		}
 	}
 	if patch.Headers != nil {
 		cfg.HeadersJSON = *patch.Headers
@@ -543,6 +550,9 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.Daemon.Snapshots.Restore(gameID, body.SnapshotID)
 	if err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, notFoundToStatus(err), err.Error())
 		return
 	}
@@ -585,6 +595,9 @@ func (s *Server) handleSwitchBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.Daemon.Snapshots.SwitchBranch(gameID, body.Name); err != nil {
+		if writeRestorePreflightError(w, err) {
+			return
+		}
 		writeError(w, notFoundToStatus(err), err.Error())
 		return
 	}
@@ -631,10 +644,20 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePresetScan(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.Daemon.Store.GetSettings()
+	found, err := s.scanMeasuredSaves()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, found)
+}
+
+// scanMeasuredSaves is shared by the existing discovery UI and the read-only
+// cloud join preview, so both report the same measured candidate locations.
+func (s *Server) scanMeasuredSaves() ([]presets.DiscoveredSave, error) {
+	settings, err := s.Daemon.Store.GetSettings()
+	if err != nil {
+		return nil, err
 	}
 	found := s.Daemon.Scanner.Scan(settings.CustomScanPaths)
 	found = presets.FilterExcluded(found, settings.ExcludePaths)
@@ -649,5 +672,5 @@ func (s *Server) handlePresetScan(w http.ResponseWriter, r *http.Request) {
 	if found == nil {
 		found = []presets.DiscoveredSave{} // never null on the wire
 	}
-	writeJSON(w, http.StatusOK, found)
+	return found, nil
 }

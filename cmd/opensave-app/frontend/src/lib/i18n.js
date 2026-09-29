@@ -88,6 +88,19 @@ export function createLocaleStore({
 }
 
 export const locale = createLocaleStore();
+
+// Keep native surfaces (notably the tray) in step with the WebView language.
+// The first subscription event also restores the persisted choice at startup.
+export function bindNativeLocale(store, setNativeLocale) {
+  return store.subscribe((language) => {
+    try {
+      Promise.resolve(setNativeLocale(language)).catch(() => {});
+    } catch {
+      // Browser preview and an unavailable native bridge must not break UI language.
+    }
+  });
+}
+
 export const t = derived(locale, (language) => (key, params = {}) =>
   translate(language, key, params)
 );

@@ -29,6 +29,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/opensave/opensave/testutil"
 )
 
 // cliBin is the binary under test, built once for the whole package.
@@ -137,6 +139,21 @@ func (c *cli) env() []string {
 // run executes the CLI and returns its combined output and exit code.
 func (c *cli) run(args ...string) (string, int) {
 	c.t.Helper()
+	// The CLI falls back to port 8383 when daemon.addr is absent. On a
+	// developer machine that can be a real running installation, not this
+	// test's isolated home. Pin an intentionally unreachable address until
+	// our own daemon publishes its real one; recreate it after daemon stop.
+	addrFile := filepath.Join(c.home, ".opensave", "daemon.addr")
+	if _, err := os.Stat(addrFile); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(addrFile), 0o700); err != nil {
+			c.t.Fatal(err)
+		}
+		if err := os.WriteFile(addrFile, []byte("127.0.0.1:0"), 0o600); err != nil {
+			c.t.Fatal(err)
+		}
+	} else if err != nil {
+		c.t.Fatal(err)
+	}
 	cmd := exec.Command(cliBin, args...)
 	cmd.Env = c.env()
 	cmd.Dir = c.home
@@ -192,7 +209,10 @@ func (c *cli) startDaemon() {
 	c.daemon = cmd
 
 	addrFile := filepath.Join(c.home, ".opensave", "daemon.addr")
-	deadline := time.Now().Add(30 * time.Second)
+	// Instrumented Windows builds can take substantially longer to start the
+	// subprocess while the rest of the race suite is running. Use the same
+	// bounded timeout scale as the HTTP-backed E2E harness.
+	deadline := time.Now().Add(30 * time.Second * testutil.TimeoutScale)
 	for time.Now().Before(deadline) {
 		if raw, err := os.ReadFile(addrFile); err == nil && strings.TrimSpace(string(raw)) != "" {
 			// Published, but confirm it actually answers before returning.

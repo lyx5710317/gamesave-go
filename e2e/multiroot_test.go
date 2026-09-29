@@ -313,9 +313,8 @@ func TestMultiRoot_BackupCarriesEveryLocation(t *testing.T) {
 }
 
 // Restoring a backup onto a machine with no folder for one of its locations
-// must not guess. The primary save comes back, the location is recorded by
-// name so it can be pointed somewhere later, and its files stay out of the
-// save folder.
+// must not guess or claim a partial restore. Keep current files, record the
+// missing location, then restore the whole snapshot after explicit mapping.
 func TestMultiRoot_BackupOntoADeviceMissingTheLocation(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "BackupNoLoc-A")
 	a.WriteSave("save.sav", "primary data")
@@ -335,13 +334,27 @@ func TestMultiRoot_BackupOntoADeviceMissingTheLocation(t *testing.T) {
 
 	b := testutil.NewTestDaemon(t, "BackupNoLoc-B")
 	b.TrackGame("BackupNoLoc") // no config location configured here
+	b.WriteSave("current.sav", "keep current")
+	var result struct {
+		Restored int `json:"restored"`
+		Skipped  int `json:"skipped"`
+		Results  []struct {
+			Code string `json:"code"`
+		} `json:"results"`
+	}
 	if status := b.APIStatus(http.MethodPost, "/api/backup/restore",
-		map[string]any{"sourcePath": target + ".sscb", "mode": "overwrite"}, nil); status >= 400 {
+		map[string]any{"sourcePath": target + ".sscb", "mode": "overwrite"}, &result); status >= 400 {
 		t.Fatalf("restore failed with HTTP %d: %s", status, b.LastError())
 	}
 
-	if got := b.ReadSave("save.sav"); got != "primary data" {
-		t.Errorf("primary save = %q, want it restored regardless", got)
+	if result.Restored != 0 || result.Skipped != 1 || len(result.Results) != 1 || result.Results[0].Code != "restore_location" {
+		t.Fatalf("missing location not reported: %+v", result)
+	}
+	if got := b.ReadSave("save.sav"); got != "" {
+		t.Errorf("primary save changed before full mapping: %q", got)
+	}
+	if got := b.ReadSave("current.sav"); got != "keep current" {
+		t.Errorf("current state changed: %q", got)
 	}
 	if got := b.ReadSave("settings.ini"); got != "" {
 		t.Errorf("an unplaceable location's file was dumped into the save folder as %q", got)
@@ -359,5 +372,11 @@ func TestMultiRoot_BackupOntoADeviceMissingTheLocation(t *testing.T) {
 	}
 	if roots[0].Mapped {
 		t.Error("the location was recorded as mapped; this device has no folder for it")
+	}
+	bConfig := extraDir(t, b, "config")
+	addRoot(t, b, gameID, "config", bConfig)
+	b.API(http.MethodPost, "/api/backup/restore", map[string]any{"sourcePath": target + ".sscb", "mode": "overwrite"}, &result)
+	if result.Restored != 1 || result.Skipped != 0 || b.ReadSave("save.sav") != "primary data" || readIn(bConfig, "settings.ini") != "fullscreen=1" {
+		t.Fatal("complete mapped restore failed")
 	}
 }

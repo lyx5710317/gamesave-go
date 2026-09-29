@@ -4,17 +4,58 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: "Expected desktop tag (for example v1.1.1); builds an unpublished Windows candidate only"
+        required: true
+        type: string
 
 permissions:
-  contents: write # needed to publish a GitHub Release
+  contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check desktop release tag against package metadata
+        shell: bash
+        env:
+          EXPECTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_version || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ['EXPECTED_TAG']
+          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch' and os.environ['GITHUB_REF'].startswith('refs/tags/'):
+              raise SystemExit('Candidate builds must use a branch, not a release tag')
+          product = json.loads(Path('cmd/opensave-app/wails.json').read_text(encoding='utf-8'))['info']['productVersion']
+          windows = json.loads(Path('cmd/opensave-app/build/windows/info.json').read_text(encoding='utf-8'))
+          frontend = json.loads(Path('cmd/opensave-app/frontend/package.json').read_text(encoding='utf-8'))['version']
+          frontend_lock = json.loads(Path('cmd/opensave-app/frontend/package-lock.json').read_text(encoding='utf-8'))
+          app_source = Path('cmd/opensave-app/app.go').read_text(encoding='utf-8')
+          app_version = re.search(r'^var AppVersion = "([^"]+)"$', app_source, re.MULTILINE)
+          dev_marker = re.search(r'^var DesktopReleaseTag = ""$', app_source, re.MULTILINE)
+          if (tag != 'v' + product or frontend != product or
+                  frontend_lock['version'] != product or frontend_lock['packages']['']['version'] != product or
+                  windows['fixed']['file_version'] != product + '.0' or
+                  windows['info']['0000']['ProductVersion'] != product or
+                  app_version is None or app_version.group(1) != product or
+                  dev_marker is None):
+              raise SystemExit(f'Release metadata mismatch: tag={tag}, desktop={product}, frontend={frontend}, Windows={windows["fixed"]["file_version"]}')
+          print(f'Desktop release {tag}; inherited core/peer version is kept separate')
+          PY
+
   windows:
+    needs: [preflight]
     runs-on: windows-latest
-    # Expose whether a signing cert secret is configured (secrets can't be
-    # read directly in step `if:`, so map it to job-level env here).
-    env:
-      HAS_SIGNING: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -50,25 +91,19 @@ jobs:
         working-directory: cmd/opensave-app
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          wails build -nsis -ldflags "-X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
-      # Stamped with the same version and build time as the app.
-      #
-      # These were built with "-s -w" alone, so they carried whatever was
-      # hardcoded in internal/version and no build time at all. On a final
-      # release that value matches the tag, which is why it went unnoticed;
-      # on v2.3.0-beta.1 the published CLI reported itself as 2.3.0. A CLI
-      # that does not know it is a pre-release is not offered later betas,
-      # and is never offered the final either, since the version it claims
-      # is the one being released.
-      #
-      # The missing BuildTime matters separately: two peers on the SAME
-      # version decide whose binary is newer by comparing it.
+          LD="-X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            LD="-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} $LD"
+          fi
+          wails build -nsis -ldflags "$LD"
+      # The tag is the GameSave Go desktop release, not the inherited
+      # core/peer protocol version. Keep the latter at internal/version.Version
+      # until its cross-device migration is designed. BuildTime still lets
+      # peers distinguish same-core-version builds.
       - name: Build CLI + relay
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          LD="-s -w -X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          LD="-s -w -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
           go build -ldflags="$LD" -o dist/opensave-cli.exe ./cmd/opensave-cli
           go build -ldflags="$LD" -o dist/opensave-relay.exe ./cmd/opensave-relay
 
@@ -89,18 +124,15 @@ jobs:
             echo "::error::installer is only $size bytes — payload missing"
             exit 1
           fi
-          mv "${inst[0]}" cmd/opensave-app/build/bin/OpenSave.Setup.exe
+          mv "${inst[0]}" cmd/opensave-app/build/bin/GameSaveGo.Setup.exe
 
       # Wails 2.12 doesn't reliably embed Windows versioninfo, so stamp it
       # onto the built binaries with rcedit (what electron-builder uses).
       - name: Stamp version metadata (rcedit)
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          # Windows file-versions must be numeric (x.y.z.w) — strip any
-          # semver pre-release suffix ("2.1.0-beta.1" -> "2.1.0.0").
-          FV="${V%%-*}.0"
+          V=$(node -p 'require("./cmd/opensave-app/wails.json").info.productVersion')
+          FV="${V}.0"
           # the npm "rcedit" package is a library with no CLI — fetch the real binary
           curl -sL --retry 3 -o "$RUNNER_TEMP/rcedit.exe" \
             https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe
@@ -109,30 +141,25 @@ jobs:
             # holding the compressed payload, leaving a 50 KB stub
             case "$exe" in *Setup*|*installer*) continue ;; esac
             "$RUNNER_TEMP/rcedit.exe" "$exe" \
-              --set-version-string "ProductName" "OpenSave" \
-              --set-version-string "CompanyName" "OpenSave" \
-              --set-version-string "FileDescription" "OpenSave — peer-to-peer game save sync" \
-              --set-version-string "LegalCopyright" "Copyright (c) 2026 Siva Prakash & OpenSave contributors" \
+              --set-version-string "ProductName" "GameSave Go" \
+              --set-version-string "CompanyName" "GameSave Go" \
+              --set-version-string "FileDescription" "GameSave Go — local-first game save backup and sync" \
+              --set-version-string "LegalCopyright" "Copyright (c) 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors" \
               --set-file-version "$FV" \
               --set-product-version "$V" \
               --set-icon "cmd/opensave-app/build/windows/icon.ico"
           done
 
-      # Optional Authenticode signing — runs only when the repo has a
-      # WINDOWS_CERT_BASE64 (+ WINDOWS_CERT_PASSWORD) secret configured.
-      - name: Code sign (optional)
-        if: env.HAS_SIGNING == 'true' && startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          WIN_CERT_B64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WIN_CERT_PW: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          $pfx = "$env:RUNNER_TEMP\cert.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT_B64))
-          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1).FullName
-          Get-ChildItem cmd/opensave-app/build/bin/*.exe | ForEach-Object {
-            & $signtool sign /f $pfx /p $env:WIN_CERT_PW /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
-          }
+      # Attest the final bytes after rcedit. This proves the build source and
+      # workflow, but is not an Authenticode signature or SmartScreen bypass.
+      - name: Attest Windows release files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            cmd/opensave-app/build/bin/GameSaveGo.exe
+            cmd/opensave-app/build/bin/GameSaveGo.Setup.exe
+            dist/opensave-cli.exe
+            dist/opensave-relay.exe
 
       - uses: actions/upload-artifact@v4
         with:
@@ -141,8 +168,44 @@ jobs:
             cmd/opensave-app/build/bin/*
             dist/*
 
-  linux:
+  verify-windows-candidate:
+    needs: [windows]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: windows
+      - name: Verify exact candidate bytes and build identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find windows -type f -name '*.exe' -print0)
+          if [ "${#files[@]}" -ne 4 ]; then
+            echo "::error::Expected four Windows executables, found ${#files[@]}"
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+            sha256sum "$file"
+          done
+
+  linux:
+    needs: [preflight]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -159,17 +222,16 @@ jobs:
       - name: Build Linux app
         working-directory: cmd/opensave-app
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          wails build -tags webkit2_41 -ldflags "-X github.com/opensave/opensave/cmd/opensave-app.DesktopReleaseTag=${GITHUB_REF_NAME} -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
       - name: Build CLI + relay, assemble tar.gz
         run: |
           # Same stamping as the app; see the Windows job for why.
           V="${GITHUB_REF_NAME#v}"
-          LD="-s -w -X github.com/opensave/opensave/internal/version.Version=$V -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
+          LD="-s -w -X github.com/opensave/opensave/internal/version.BuildTime=$(date +%s)"
           go build -ldflags="$LD" -o dist/opensave-cli ./cmd/opensave-cli
           go build -ldflags="$LD" -o dist/opensave-relay ./cmd/opensave-relay
           mkdir -p opensave-linux
-          cp cmd/opensave-app/build/bin/OpenSave opensave-linux/opensave
+          cp cmd/opensave-app/build/bin/GameSaveGo opensave-linux/opensave
           cp dist/opensave-cli dist/opensave-relay opensave-linux/
           # Desktop integration: launcher entry, icon, and a one-line installer.
           cp cmd/opensave-app/build/linux/opensave.desktop opensave-linux/
@@ -204,7 +266,7 @@ jobs:
 
           V="${GITHUB_REF_NAME#v}"
           mkdir -p dist/completions
-          cp cmd/opensave-app/build/bin/OpenSave dist/opensave
+          cp cmd/opensave-app/build/bin/GameSaveGo dist/opensave
           ./dist/opensave-cli completion bash > dist/completions/opensave.bash
           ./dist/opensave-cli completion zsh  > dist/completions/_opensave
           ./dist/opensave-cli completion fish > dist/completions/opensave.fish
@@ -235,6 +297,16 @@ jobs:
           (cd decky-pkg && zip -r ../OpenSave-decky-plugin.zip OpenSave)
           unzip -l OpenSave-decky-plugin.zip
 
+      - name: Attest Linux release files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            opensave-linux-amd64.tar.gz
+            opensave-linux-arm64.tar.gz
+            *.deb
+            *.rpm
+            OpenSave-decky-plugin.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -252,6 +324,10 @@ jobs:
   flatpak:
     needs: [linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -294,12 +370,17 @@ jobs:
             echo "::error::unresolved libraries inside the flatpak sandbox"
             exit 1
           fi
+      - name: Attest Flatpak release file
+        uses: actions/attest@v4
+        with:
+          subject-path: OpenSave.flatpak
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
           path: OpenSave.flatpak
 
   relay-docker:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -309,8 +390,14 @@ jobs:
   # Publish a real GitHub Release with all downloadable assets on tag push.
   release:
     needs: [windows, linux, flatpak]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Off by default. The owner enables this only after the release checklist
+    # is reviewed. Unsigned Windows binaries require prominent user guidance.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -324,43 +411,59 @@ jobs:
         with:
           name: flatpak
           path: flatpak
-      # scripts/install.sh verifies downloads against this before installing.
-      # Piping an installer to a shell is trust enough; it should at least
-      # refuse bytes it can't vouch for.
-      - name: Generate SHA256SUMS
+      # Verify the exact bytes downloaded from the build jobs. A matching
+      # hash alone cannot identify the workflow/commit that produced them.
+      - name: Verify build provenance and generate SHA256SUMS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          find windows linux flatpak -type f \
+          set -euo pipefail
+          mapfile -d '' assets < <(find windows linux flatpak -type f \
             \( -name '*.exe' -o -name '*.msi' -o -name '*.tar.gz' \
                -o -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \
-               -o -name '*.zip' \) \
-            -exec sha256sum {} + | sed 's| .*/| |' > SHA256SUMS
+               -o -name '*.zip' \) -print0 | sort -z)
+          if [ "${#assets[@]}" -lt 10 ]; then
+            echo "::error::Expected all Windows/Linux/Flatpak assets, found ${#assets[@]}"
+            exit 1
+          fi
+          declare -A seen=()
+          : > SHA256SUMS
+          for file in "${assets[@]}"; do
+            name="$(basename "$file")"
+            if [[ -n "${seen[$name]:-}" ]]; then
+              echo "::error::Duplicate release asset name: $name"
+              exit 1
+            fi
+            seen[$name]=1
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" > /dev/null
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$name" >> SHA256SUMS
+          done
           cat SHA256SUMS
+
+      - name: Attest SHA256SUMS
+        uses: actions/attest@v4
+        with:
+          subject-path: SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: OpenSave ${{ github.ref_name }}
-          # Hyphenated tags (v2.1.0-beta.1) publish as pre-releases, so
-          # /releases/latest ignores them. Only devices on the beta channel
-          # are offered these: either the user ticked Settings -> Updates, or
-          # they are already running a pre-release (see selfupdate).
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: GameSave Go ${{ github.ref_name }}
+          # Pre-release channels are not wired to the separate desktop version
+          # yet. The preflight accepts only the exact stable metadata tag.
+          prerelease: false
           # Note: re-publishing the same tag appends another generated-notes
           # block; if a tag is ever re-cut, tidy the release body by hand.
           generate_release_notes: true
-          # `body` is placed above the generated notes, so the invitation is
-          # the first thing in every release rather than buried under a
-          # commit list.
           body: |
-            ### 💬 Questions, bug reports, or just want to say hello?
+            **由于个人开源项目暂未购买商业代码签名证书，Windows 可能出现 SmartScreen 提示。**
+            Windows 安装包没有经过 Authenticode 签名；GitHub 构建来源证明不能代替已验证发布者身份，也不能保证程序没有漏洞。若设备策略阻止安装，请勿关闭安全防护强行运行。
 
-            **[Join the OpenSave Discord →](https://discord.gg/hvBv92DZvn)**
-
-            It is the fastest way to get help, and where new builds get
-            discussed before they ship.
-
-            ---
-          fail_on_unmatched_files: false
+            请仅从本仓库的 GitHub Releases 下载。用 `SHA256SUMS` 核对每个下载文件，并用 `gh attestation verify <文件名> -R lyx5710317/gamesave-go` 验证构建来源。
+          fail_on_unmatched_files: true
           files: |
             windows/**/*.exe
             linux/*.tar.gz

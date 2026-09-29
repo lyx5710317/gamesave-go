@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 
@@ -22,7 +23,7 @@ func (a *App) wantsPreReleases() bool {
 
 // updateRepo is the GitHub "owner/repo" whose releases are checked for a
 // newer version. Change this one line if the project moves.
-const updateRepo = "Liquid-co/OpenSave"
+const updateRepo = "lyx5710317/gamesave-go"
 
 // CheckForUpdate best-effort asks GitHub for the latest published release
 // and reports whether it is newer than the running build. Any failure
@@ -31,13 +32,13 @@ const updateRepo = "Liquid-co/OpenSave"
 func (a *App) CheckForUpdate() map[string]any {
 	none := map[string]any{"available": false, "current": AppVersion}
 
-	rel, err := selfupdate.LatestRelease(updateRepo, "OpenSave/"+AppVersion, a.wantsPreReleases())
+	rel, err := selfupdate.LatestRelease(updateRepo, "GameSaveGo/"+AppVersion, a.wantsPreReleases())
 	if err != nil || rel.TagName == "" {
 		return none
 	}
 
 	latest := rel.Version()
-	if compareVersions(latest, AppVersion) <= 0 {
+	if !shouldOfferDesktopRelease(rel, AppVersion, DesktopReleaseTag) {
 		return none
 	}
 	url := rel.HTMLURL
@@ -54,7 +55,9 @@ func (a *App) CheckForUpdate() map[string]any {
 	// empty so the banner opens the release page, where the .flatpak lives.
 	assetURL := ""
 	if !runningInFlatpak() {
-		assetURL = selectUpdateAsset(rel.Assets)
+		if asset, _, err := releaseUpdateAssets(rel, selectUpdateAsset(rel.Assets), runtime.GOOS); err == nil {
+			assetURL = asset.BrowserDownloadURL
+		}
 	}
 
 	notes := rel.Body
@@ -73,30 +76,86 @@ func (a *App) CheckForUpdate() map[string]any {
 	}
 }
 
+// releaseUpdateAssets binds a renderer-provided URL to the selected
+// platform binary and SHA256SUMS in the same GitHub release. No other HTTPS
+// URL (including another asset in the release) is an install target.
+func releaseUpdateAssets(rel selfupdate.Release, requestedURL, goos string) (selfupdate.Asset, selfupdate.Asset, error) {
+	wantURL := selectUpdateAssetFor(rel.Assets, goos)
+	if requestedURL == "" || requestedURL != wantURL {
+		return selfupdate.Asset{}, selfupdate.Asset{}, fmt.Errorf("update asset is not the selected release download")
+	}
+	var name string
+	for _, asset := range rel.Assets {
+		if asset.BrowserDownloadURL == requestedURL {
+			if name != "" {
+				return selfupdate.Asset{}, selfupdate.Asset{}, fmt.Errorf("update asset URL is ambiguous")
+			}
+			name = asset.Name
+		}
+	}
+	asset, err := selfupdate.FindReleaseAsset(rel, updateRepo, name)
+	if err != nil {
+		return selfupdate.Asset{}, selfupdate.Asset{}, err
+	}
+	sums, err := selfupdate.FindReleaseAsset(rel, updateRepo, "SHA256SUMS")
+	return asset, sums, err
+}
+
+// shouldOfferDesktopRelease keeps product updates separate from peer protocol
+// versions. A source-built copy at the same version may move to the matching
+// official release once; a tagged build never offers itself again.
+func shouldOfferDesktopRelease(rel selfupdate.Release, currentVersion, installedTag string) bool {
+	if rel.TagName == "" {
+		return false
+	}
+	switch compareVersions(rel.Version(), currentVersion) {
+	case 1:
+		return true
+	case -1:
+		return false
+	default:
+		return installedTag == "" && rel.TagName == "v"+currentVersion
+	}
+}
+
 // releaseAsset is the subset of a GitHub release asset the updater needs.
 type releaseAsset = selfupdate.Asset
 
 // selectUpdateAsset picks the OS-appropriate one-click update asset:
-// OpenSave.exe on Windows, the linux tarball on Linux. Returns "" when no
-// matching asset exists (the UI then opens the release page instead).
+// GameSaveGo.exe (or the legacy OpenSave.exe) on Windows, and the existing
+// Linux tarball on Linux. Returns "" when no matching asset exists (the UI
+// then opens the release page instead).
 func selectUpdateAsset(assets []releaseAsset) string {
 	return selectUpdateAssetFor(assets, runtime.GOOS)
 }
 
 func selectUpdateAssetFor(assets []releaseAsset, goos string) string {
+	return selectUpdateAssetForArch(assets, goos, runtime.GOARCH)
+}
+
+func selectUpdateAssetForArch(assets []releaseAsset, goos, goarch string) string {
+	if goos == "windows" {
+		// Prefer the fork's branded portable binary. The legacy name stays as
+		// a fallback so users can cross the rename boundary without reinstalling.
+		for _, wanted := range []string{"gamesavego.exe", "opensave.exe"} {
+			for _, a := range assets {
+				if strings.EqualFold(a.Name, wanted) {
+					return a.BrowserDownloadURL
+				}
+			}
+		}
+		return ""
+	}
+
+	// The arm64 Linux tarball currently contains only CLI and relay binaries,
+	// not a desktop app. Never extract it as an app update.
+	if goos != "linux" || goarch != "amd64" {
+		return ""
+	}
 	for _, a := range assets {
 		name := strings.ToLower(a.Name)
-		switch goos {
-		case "windows":
-			// Portable app binary only — not the installer/cli/relay.
-			if name == "opensave.exe" {
-				return a.BrowserDownloadURL
-			}
-		case "linux":
-			if strings.HasPrefix(name, "opensave-linux") &&
-				(strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".tgz")) {
-				return a.BrowserDownloadURL
-			}
+		if name == "opensave-linux-amd64.tar.gz" || name == "opensave-linux-amd64.tgz" {
+			return a.BrowserDownloadURL
 		}
 	}
 	return ""

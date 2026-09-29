@@ -1,5 +1,6 @@
 // Central app state, fed by the daemon's init dump + live WS updates.
 import { writable, derived, get } from 'svelte/store';
+import { t } from './i18n.js';
 
 export const view = writable({ name: 'home', params: {} });
 export const settings = writable(null);
@@ -68,10 +69,12 @@ export const confirmRequest = writable(null); // {title, message, confirmText, c
 export function askConfirm(message, opts = {}) {
   return new Promise((resolve) => {
     confirmRequest.set({
-      title: opts.title ?? 'Are you sure?',
+      // Resolve omitted labels in the dialog's active language, including
+      // language changes while it is open. Keep explicit caller labels.
+      title: opts.title ?? null,
       message,
-      confirmText: opts.confirmText ?? 'Confirm',
-      cancelText: opts.cancelText ?? 'Cancel',
+      confirmText: opts.confirmText ?? null,
+      cancelText: opts.cancelText ?? null,
       danger: opts.danger ?? false,
       resolve
     });
@@ -153,7 +156,7 @@ export function applyMessage(msg) {
       const now = Date.now();
       if (now - (lastSyncErrorToast[data.gameId] ?? 0) > 60_000) {
         lastSyncErrorToast[data.gameId] = now;
-        toast(`Sync failed for “${gameName}”${reason ? ' — ' + reason : ''}. OpenSave will retry automatically.`, 'error');
+        toast(`Sync failed for “${gameName}”${reason ? ' — ' + reason : ''}. GameSave Go will retry automatically.`, 'error');
       }
       break;
     }
@@ -210,7 +213,7 @@ export function applyMessage(msg) {
     case 'app-update':
       appUpdate.set(data ?? null);
       if (data?.state === 'error') {
-        toast(`Update failed — ${data.error}. Nothing was changed; you're still on the current version.`, 'error');
+        toast(get(t)('app.updateFailed', { error: data.error ?? '' }), 'error');
         setTimeout(() => appUpdate.set(null), 500);
       }
       break;

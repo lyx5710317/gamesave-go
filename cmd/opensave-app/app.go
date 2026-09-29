@@ -10,6 +10,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	opensave "github.com/opensave/opensave"
@@ -21,26 +22,48 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// AppVersion mirrors internal/version.Version — the single source of
-// truth for the app version. Keep wails.json's info.productVersion (which
-// drives the Windows executable/installer metadata) in sync with it.
-var AppVersion = version.Version
+// AppVersion is the GameSave Go desktop version shown in the UI. It is kept
+// separate from the inherited core/peer version in internal/version.
+var AppVersion = "1.1.1"
+
+// DesktopReleaseTag is empty in source-built/development binaries. Tagged
+// release builds stamp it with -ldflags, allowing an equal-version official
+// release to be offered once to a development build but not to itself.
+var DesktopReleaseTag = ""
+
+// productName is the user-facing name of this fork. Compatibility-sensitive
+// identifiers (package paths, .opensave data, protocol names, and the
+// single-instance key) deliberately keep their existing OpenSave values.
+const productName = "GameSave Go"
 
 // App is the Wails-bound bridge between the webview frontend and the
 // embedded daemon. Methods on it are callable from JS.
 type App struct {
-	ctx         context.Context
-	daemon      *daemon.Daemon
-	server      *api.Server
-	addr        string
-	bootErr     string
-	reallyQuit  bool
-	updatedFrom string // previous version when this run is the first on a new build
+	ctx               context.Context
+	daemon            *daemon.Daemon
+	server            *api.Server
+	addr              string
+	bootErr           string
+	reallyQuit        bool
+	updatedFrom       string // previous version when this run is the first on a new build
+	trayChinese       atomic.Bool
+	trayLocaleChanged chan struct{}
 }
 
 // NewApp creates the App shell (daemon boots in startup).
 func NewApp() *App {
-	return &App{}
+	return &App{trayLocaleChanged: make(chan struct{}, 1)}
+}
+
+// SetTrayLocale follows the device-local UI preference. The frontend keeps
+// opensave.locale in localStorage; the tray needs this explicit native bridge
+// because it cannot read WebView storage. Unknown languages fall back to en.
+func (a *App) SetTrayLocale(language string) {
+	a.trayChinese.Store(language == "zh-CN")
+	select {
+	case a.trayLocaleChanged <- struct{}{}:
+	default:
+	}
 }
 
 // startup boots the daemon + local API server once the webview exists.
@@ -61,8 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	// Detect "first run after an update" so the UI can greet with the
-	// changelog — this is how users see what's new after a peer-to-peer
-	// update, which carries no release notes of its own. A rebuild of the
+	// changelog. A rebuild of the
 	// same version (build timestamp changed, version didn't) is not an
 	// update worth announcing.
 	a.updatedFrom = stampVersionFile(d.Paths.HomeDir)
@@ -70,7 +92,7 @@ func (a *App) startup(ctx context.Context) {
 		a.updatedFrom = ""
 	}
 	if a.updatedFrom != "" {
-		d.Log.Log("success", "OpenSave updated: "+a.updatedFrom+" → "+AppVersion)
+		d.Log.Log("success", productName+" updated: "+a.updatedFrom+" → "+AppVersion)
 	}
 
 	settings, err := d.Store.GetSettings()
@@ -145,12 +167,12 @@ func (a *App) shutdown(ctx context.Context) {
 // AppInfo returns static app metadata for the About dialog / status bar.
 func (a *App) AppInfo() map[string]string {
 	return map[string]string{
-		"name":      "OpenSave",
+		"name":      productName,
 		"version":   AppVersion,
 		"buildTime": strconv.FormatInt(version.BuildTimeMs(), 10),
-		"tagline":   "Peer-to-peer game save sync",
+		"tagline":   "Local-first game save backup and sync",
 		"license":   "MIT",
-		"copyright": "© 2026 Siva Prakash & OpenSave contributors",
+		"copyright": "© 2026 Siva Prakash, OpenSave contributors & GameSave Go contributors",
 		"tech":      "Go + Wails",
 	}
 }
@@ -232,7 +254,7 @@ func (a *App) SelectBackupFile(title string) string {
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: title,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "OpenSave backup (*.sscb)", Pattern: "*.sscb"},
+			{DisplayName: productName + " backup (*.sscb)", Pattern: "*.sscb"},
 			{DisplayName: "All files", Pattern: "*.*"},
 		},
 	})
@@ -248,7 +270,7 @@ func (a *App) SelectSaveFile(title, defaultName string) string {
 		Title:           title,
 		DefaultFilename: defaultName,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "OpenSave backup (*.sscb)", Pattern: "*.sscb"},
+			{DisplayName: productName + " backup (*.sscb)", Pattern: "*.sscb"},
 		},
 	})
 	if err != nil {

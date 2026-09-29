@@ -100,8 +100,9 @@ func (e *Engine) hasRootConflict(gameID, root string) bool {
 // to do with that, including raising its own question if it has work of its
 // own.
 //
-// A snapshot is taken first either way. That snapshot covers every location
-// of the game, so it is a real undo for a choice made about one of them.
+// Keeping the remote copy takes a verified snapshot first. That snapshot
+// covers every location of the game, so it is a real undo for a choice made
+// about one of them. Keeping the local copy changes no local files.
 func (e *Engine) ResolveRootConflict(ctx context.Context, gameID, peerID, root, resolution string) error {
 	e.mu.Lock()
 	conflict := e.rootConflicts[rootConflictKey(gameID, root)]
@@ -124,11 +125,6 @@ func (e *Engine) ResolveRootConflict(ctx context.Context, gameID, peerID, root, 
 		return fmt.Errorf("this device no longer has a folder for the %q location", root)
 	}
 
-	comment := fmt.Sprintf("Before resolving the %q save location with %s", root, peer.Name)
-	if _, err := e.Snapshots.Create(gameID, comment, true); err != nil {
-		e.Log("warn", fmt.Sprintf("safety snapshot before resolving a location failed: %v", err))
-	}
-
 	switch resolution {
 	case "keep-local":
 		// Our copy becomes the shared state: record it as the agreed base so
@@ -149,6 +145,14 @@ func (e *Engine) ResolveRootConflict(ctx context.Context, gameID, peerID, root, 
 		return nil
 
 	case "keep-remote":
+		comment := fmt.Sprintf("Before keeping %s's %q save location", peer.Name, root)
+		if _, err := e.Snapshots.Create(gameID, comment, true); err != nil {
+			e.Log("error", fmt.Sprintf("refusing keep-remote for the %q save location because its safety snapshot failed: %v", root, err))
+			return fmt.Errorf(
+				"could not back up the %q save location before keeping %s's version, so nothing was changed: %w",
+				root, peer.Name, err)
+		}
+
 		// Adopt the peer's copy of this folder. The lineage is cleared first
 		// so the pull that follows is judged as a fresh start rather than
 		// against the base the two just disagreed about — leaving it would

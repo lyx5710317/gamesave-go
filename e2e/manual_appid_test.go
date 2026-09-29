@@ -19,7 +19,6 @@ import (
 func TestManualAppID_DrivesCrossDeviceMatching(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "ManualAppID-A")
 	b := testutil.NewTestDaemon(t, "ManualAppID-B")
-	a.PairWith(b)
 
 	// Both devices opt in to App-ID matching; it is off by default.
 	a.API(http.MethodPost, "/api/settings", map[string]any{"matchByAppId": true}, nil)
@@ -50,6 +49,10 @@ func TestManualAppID_DrivesCrossDeviceMatching(t *testing.T) {
 	if got := readBack[gameA].AppID; got != appID {
 		t.Fatalf("app id read back as %q, want %q", got, appID)
 	}
+	// Pair only after both edits are saved. Tracking starts a background sync;
+	// pairing first lets that sync race the manual App ID edits and may create
+	// a separate remote entry before the test can exercise App-ID matching.
+	a.PairWith(b)
 
 	// The payoff: two names with nothing in common now sync, because the
 	// shared App ID is what resolves the peer's game to the local one.

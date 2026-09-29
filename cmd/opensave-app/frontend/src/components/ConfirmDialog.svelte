@@ -1,6 +1,7 @@
 <script>
   import { confirmRequest, answerConfirm } from '../lib/stores.js';
   import { backdropClose } from '../lib/backdrop.js';
+  import { t } from '../lib/i18n.js';
 
   let confirmBtn;
 
@@ -19,18 +20,18 @@
 
 {#if $confirmRequest}
   <div class="backdrop" use:backdropClose={() => answerConfirm(false)} role="presentation">
-    <div class="modal card" role="alertdialog" aria-modal="true" aria-label={$confirmRequest.title}>
-      <h3>{$confirmRequest.title}</h3>
+    <div class="modal card" role="alertdialog" aria-modal="true" aria-label={$confirmRequest.title ?? $t('dialog.title')}>
+      <h3>{$confirmRequest.title ?? $t('dialog.title')}</h3>
       <p class="message">{$confirmRequest.message}</p>
       <div class="actions">
-        <button class="btn" on:click={() => answerConfirm(false)}>{$confirmRequest.cancelText}</button>
+        <button class="btn" on:click={() => answerConfirm(false)}>{$confirmRequest.cancelText ?? $t('dialog.cancel')}</button>
         <button
           class="btn primary"
           class:danger={$confirmRequest.danger}
           bind:this={confirmBtn}
           on:click={() => answerConfirm(true)}
         >
-          {$confirmRequest.confirmText}
+          {$confirmRequest.confirmText ?? $t('dialog.confirm')}
         </button>
       </div>
     </div>

@@ -464,17 +464,40 @@ func cloudPush(asJSON bool, args []string) int {
 	if err != nil {
 		return fail(asJSON, err)
 	}
-	if asJSON {
-		return emitRawJSON(raw)
-	}
 	var res struct {
-		Uploaded int `json:"uploaded"`
+		Uploaded  int `json:"uploaded"`
+		Skipped   int `json:"skipped"`
+		Conflicts int `json:"conflicts"`
+		Failed    int `json:"failed"`
 	}
-	_ = json.Unmarshal(raw, &res)
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return fail(asJSON, fmt.Errorf("decode cloud upload result: %w", err))
+	}
+	if asJSON {
+		if code := emitRawJSON(raw); code != 0 {
+			return code
+		}
+		if res.Failed > 0 || res.Conflicts > 0 {
+			return 1
+		}
+		return 0
+	}
+	if res.Conflicts > 0 {
+		fmt.Fprintf(os.Stderr, "%d cloud snapshot(s) need review; %d uploaded, %d transfer(s) failed. Matching names were not uploaded.\n",
+			res.Conflicts, res.Uploaded, res.Failed)
+		return 1
+	}
+	if res.Failed > 0 {
+		fmt.Fprintf(os.Stderr, "%d cloud upload(s) failed; %d uploaded, %d already current. Check cloud transfer activity and retry.\n",
+			res.Failed, res.Uploaded, res.Skipped)
+		return 1
+	}
 	if res.Uploaded > 0 {
 		success("Uploaded %d snapshot(s) for %s", res.Uploaded, bold(args[0]))
-	} else {
+	} else if res.Skipped > 0 {
 		success("%s is already up to date in the cloud.", bold(args[0]))
+	} else {
+		hint("No snapshots were uploaded.")
 	}
 	return 0
 }

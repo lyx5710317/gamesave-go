@@ -1,14 +1,8 @@
 package e2e
 
-// Restoring a backup onto a machine that has never seen these games — the
-// reason the format exists, and the one moment it has to work.
-//
-// It did not. `opensave backup export` with no ids sent no game list, and the
-// endpoint falls back to a snapshot-library archive that records only
-// snapshot files: no names, no save locations. Restoring one onto a fresh
-// install matched nothing, skipped every entry, and reported success. The
-// user was left with an empty app, a "restored" message, and the reason
-// buried in the activity log.
+// An imported archive is not allowed to choose a live save destination on a
+// fresh installation. The user first tracks each game at a local path, then
+// imports through the normal verified restore path.
 
 import (
 	"os"
@@ -17,9 +11,8 @@ import (
 	"testing"
 )
 
-// The whole migration story: back up on one install, restore on a clean one,
-// get the games back — tracked, with their saves.
-func TestFreshRestore_BackupRestoresGamesOntoACleanInstall(t *testing.T) {
+// Back up on one install, track games on a clean one, and restore their saves.
+func TestFreshRestore_BackupRestoresTrackedGamesOntoACleanInstall(t *testing.T) {
 	origin := newCLI(t)
 	origin.startDaemon()
 
@@ -40,6 +33,10 @@ func TestFreshRestore_BackupRestoresGamesOntoACleanInstall(t *testing.T) {
 	if s := fresh.mustRun("status"); !strings.Contains(s, "Nothing tracked yet") {
 		t.Fatalf("the second install was supposed to start empty:\n%s", s)
 	}
+	freshA := fresh.saveDir("alpha", nil)
+	freshB := fresh.saveDir("beta", nil)
+	fresh.mustRun("add", "Alpha Quest", freshA)
+	fresh.mustRun("add", "Beta Saga", freshB)
 
 	restored := fresh.mustRun("backup", "import", archive, "--overwrite")
 	if strings.Contains(restored, "Nothing was restored") {
@@ -55,10 +52,10 @@ func TestFreshRestore_BackupRestoresGamesOntoACleanInstall(t *testing.T) {
 	}
 
 	// And the saves themselves must be back, including nested files.
-	if got := origin.readSave(dirA, "hero.sav"); got != "hero-progress" {
+	if got := fresh.readSave(freshA, "hero.sav"); got != "hero-progress" {
 		t.Errorf("hero.sav = %q, want %q", got, "hero-progress")
 	}
-	if got := origin.readSave(dirB, "nested/data.sav"); got != "second-game" {
+	if got := fresh.readSave(freshB, "nested/data.sav"); got != "second-game" {
 		t.Errorf("nested/data.sav = %q, want %q", got, "second-game")
 	}
 }
@@ -66,13 +63,8 @@ func TestFreshRestore_BackupRestoresGamesOntoACleanInstall(t *testing.T) {
 // A save folder holding exactly ONE file — which is most of them — must be
 // restored as a folder, not as a loose file in the directory above it.
 //
-// Restoring decides between "a folder of saves" and "one save file" by
-// looking at the destination, and on a machine that has never held the game
-// there is nothing there to look at. Falling back to the shape of the archive
-// cannot tell the two apart, and the single file was written into the PARENT
-// directory: the save came back one level above where the game reads it, and
-// the restore reported success. This is the shape most likely to be hit for
-// real, and the least likely to be noticed.
+// The explicitly tracked destination must retain its folder shape even when
+// the archive contains only one file.
 func TestFreshRestore_ASingleFileSaveFolderIsRestoredAsAFolder(t *testing.T) {
 	origin := newCLI(t)
 	origin.startDaemon()
@@ -91,11 +83,11 @@ func TestFreshRestore_ASingleFileSaveFolderIsRestoredAsAFolder(t *testing.T) {
 
 	fresh := newCLI(t)
 	fresh.startDaemon()
+	restoredDir := fresh.saveDir("solo", nil)
+	fresh.mustRun("add", "Solo Game", restoredDir)
 	fresh.mustRun("backup", "import", archive, "--overwrite")
 
-	// The manifest records this machine's own home, so the save comes back
-	// under the restoring install's tree.
-	restoredDir := filepath.Join(fresh.home, "saves", "solo")
+	// The save goes to the locally selected folder, not a manifest path.
 	if got := fresh.readSave(restoredDir, "only.sav"); got != "the only save" {
 		stray := filepath.Join(fresh.home, "saves", "only.sav")
 		if _, err := os.Stat(stray); err == nil {
@@ -131,8 +123,8 @@ func TestFreshRestore_SnapshotModeOnACleanInstallSaysWhatToDo(t *testing.T) {
 	if !strings.Contains(out, "Nothing was restored") {
 		t.Errorf("a no-op restore did not say so:\n%s", out)
 	}
-	if !strings.Contains(out, "--overwrite") {
-		t.Errorf("the message does not point at the mode that would work:\n%s", out)
+	if !strings.Contains(out, "opensave add") {
+		t.Errorf("the message does not point at tracking the game first:\n%s", out)
 	}
 }
 

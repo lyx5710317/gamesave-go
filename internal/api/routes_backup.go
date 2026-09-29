@@ -2,14 +2,15 @@ package api
 
 import (
 	"archive/zip"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,30 @@ import (
 	"github.com/opensave/opensave/internal/snapshot"
 	"github.com/opensave/opensave/internal/store"
 )
+
+func writeRestorePreflightError(w http.ResponseWriter, err error) bool {
+	code := restorePreflightCode(err)
+	if code == "" {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]string{"code": code, "error": "restore preflight failed; keep the current save and snapshots"})
+	return true
+}
+
+func restorePreflightCode(err error) string {
+	switch {
+	case errors.Is(err, snapshot.ErrRestoreArchive):
+		return "restore_archive"
+	case errors.Is(err, snapshot.ErrRestoreLocation):
+		return "restore_location"
+	case errors.Is(err, snapshot.ErrRestoreSafety):
+		return "restore_safety"
+	case errors.Is(err, snapshot.ErrRestoreChanged):
+		return "restore_changed"
+	default:
+		return ""
+	}
+}
 
 // handleSnapshotFiles lists the entries inside a snapshot ZIP (for the
 // granular-restore browser in the UI).
@@ -92,9 +117,8 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		path, ok := paths[rootName]
-		if !ok {
-			writeError(w, http.StatusBadRequest,
-				"That file belongs to the "+strconv.Quote(rootName)+" save location, which this device has no folder for.")
+		if !ok || strings.TrimSpace(path) == "" {
+			writeFileRestoreError(w, "location")
 			return
 		}
 		target = path
@@ -104,13 +128,62 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	safetyComment := fmt.Sprintf("Safety snapshot before restoring file %q from %s", body.RelPath, snapshotID)
-	if _, err := s.Daemon.Snapshots.Create(gameID, safetyComment, true); err != nil {
-		s.Daemon.Log.Log("warn", "safety snapshot before file restore failed: "+err.Error())
+	dest, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath))
+	if err != nil {
+		writeFileRestoreError(w, "target")
+		return
 	}
-
-	if err := extractSingleFile(snap.ZipPath, body.RelPath, snapshot.ArchiveEntryRelPath(body.RelPath), target); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	// Stage before creating the safety snapshot: retention can delete the
+	// selected archive, and a CRC failure must never truncate the live file.
+	staged, err := stageSnapshotFile(snap.ZipPath, body.RelPath)
+	if err != nil {
+		writeFileRestoreError(w, "archive")
+		return
+	}
+	defer os.Remove(staged)
+	before, existed, err := restoreFileDigest(dest)
+	if err != nil {
+		writeFileRestoreError(w, "target")
+		return
+	}
+	safetyComment := fmt.Sprintf("Safety snapshot before single-file restore from %s", snapshotID)
+	safety, err := s.Daemon.Snapshots.Create(gameID, safetyComment, true)
+	if err != nil {
+		writeFileRestoreError(w, "safety")
+		return
+	}
+	if existed {
+		safetyEntry := body.RelPath
+		if info, statErr := os.Lstat(target); statErr == nil && info.Mode().IsRegular() {
+			safetyEntry = filepath.Base(target)
+			if root, extra := snapshot.RootOfArchiveEntry(body.RelPath); extra {
+				safetyEntry = snapshot.RootPrefix + root + "/" + safetyEntry
+			}
+		}
+		protected, verifyErr := stageSnapshotFile(safety.ZipPath, safetyEntry)
+		if verifyErr != nil {
+			writeFileRestoreError(w, "safety")
+			return
+		}
+		digest, present, verifyErr := restoreFileDigest(protected)
+		os.Remove(protected)
+		if verifyErr != nil || !present || digest != before {
+			writeFileRestoreError(w, "safety")
+			return
+		}
+	}
+	// A safety snapshot of a different state does not authorize replacement.
+	after, present, err := restoreFileDigest(dest)
+	if err != nil || present != existed || after != before {
+		writeFileRestoreError(w, "changed")
+		return
+	}
+	if checked, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath)); err != nil || checked != dest {
+		writeFileRestoreError(w, "target")
+		return
+	}
+	if err := publishRestoredFile(staged, dest); err != nil {
+		writeFileRestoreError(w, "publish")
 		return
 	}
 	s.BroadcastGamesUpdate()
@@ -125,40 +198,162 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 // location: the archive stores it under a prefix, and it must land in that
 // location's folder without the prefix coming along.
 func extractSingleFile(zipPath, entryName, destRel, savePath string) error {
+	dest, err := singleFileRestoreTarget(savePath, destRel)
+	if err != nil {
+		return err
+	}
+	staged, err := stageSnapshotFile(zipPath, entryName)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staged)
+	return publishRestoredFile(staged, dest)
+}
+
+func writeFileRestoreError(w http.ResponseWriter, category string) {
+	writeJSON(w, http.StatusConflict, map[string]string{
+		"error": "single-file restore could not complete; keep the original and safety snapshots",
+		"code":  "file_restore_" + category,
+	})
+}
+
+// Resolve from the mapped relative path, never from the archive's root prefix.
+// A missing configured save path remains a directory, matching delta's rule.
+func singleFileRestoreTarget(savePath, rel string) (string, error) {
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "/") || filepath.IsAbs(filepath.FromSlash(rel)) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))) != rel || strings.HasSuffix(rel, "/") || !delta.IsSafePath(savePath, rel) || (runtime.GOOS == "windows" && strings.ContainsAny(rel, ":<>\"|?*")) {
+		return "", errors.New("invalid restore target")
+	}
+	dest := filepath.Join(savePath, filepath.FromSlash(rel))
+	if info, err := os.Lstat(savePath); err == nil && !info.IsDir() {
+		if !info.Mode().IsRegular() || strings.Contains(rel, "/") {
+			return "", errors.New("invalid single-file target")
+		}
+		dest = savePath
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	// Do not follow a symlink/junction into another save location.
+	for p := dest; ; p = filepath.Dir(p) {
+		info, err := os.Lstat(p)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("linked restore target")
+		}
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	return dest, nil
+}
+
+func stageSnapshotFile(zipPath, entryName string) (string, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return fmt.Errorf("open snapshot zip: %w", err)
+		return "", errors.New("snapshot could not be opened")
 	}
 	defer zr.Close()
 
 	want := strings.ReplaceAll(entryName, "\\", "/")
+	var selected *zip.File
+	matches := 0
 	for _, f := range zr.File {
-		if strings.ReplaceAll(f.Name, "\\", "/") != want {
-			continue
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+		if name == want || (runtime.GOOS == "windows" && strings.EqualFold(name, want)) {
+			matches++
 		}
-		src, err := f.Open()
-		if err != nil {
-			return err
+		if name == want {
+			selected = f
 		}
-		defer src.Close()
+	}
+	if selected == nil || matches != 1 || !selected.Mode().IsRegular() {
+		return "", errors.New("snapshot entry missing, ambiguous or not a regular file")
+	}
+	src, err := selected.Open()
+	if err != nil {
+		return "", errors.New("snapshot entry could not be opened")
+	}
+	defer src.Close()
+	tmp, err := os.CreateTemp("", ".opensave-restore-file-*.part")
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	ok := false
+	defer func() {
+		tmp.Close()
+		if !ok {
+			os.Remove(name)
+		}
+	}()
+	n, err := io.Copy(tmp, src)
+	if err != nil || uint64(n) != selected.UncompressedSize64 {
+		return "", errors.New("snapshot entry integrity check failed")
+	}
+	if err := tmp.Sync(); err != nil {
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return name, nil
+}
 
-		destPath := filepath.Join(savePath, filepath.FromSlash(want))
-		if info, statErr := os.Stat(savePath); statErr == nil && !info.IsDir() {
-			destPath = savePath // single-file save mode
-		}
-		if err := os.MkdirAll(filepath.Dir(destPath), 0o777); err != nil {
-			return err
-		}
-		_ = os.Chmod(destPath, 0o666)
-		dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o666)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-		_, err = io.Copy(dst, src)
+func restoreFileDigest(path string) ([sha256.Size]byte, bool, error) {
+	var result [sha256.Size]byte
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return result, false, nil
+	}
+	if err != nil {
+		return result, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return result, false, errors.New("restore target is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return result, false, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return result, false, err
+	}
+	copy(result[:], h.Sum(nil))
+	return result, true, nil
+}
+
+func publishRestoredFile(staged, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o777); err != nil {
 		return err
 	}
-	return fmt.Errorf("file %q not found in snapshot", entryName)
+	// Use the destination filesystem for final publication, including when
+	// OS temporary storage lives on a different volume. Never truncate dest.
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".opensave-restore-publish-*.part")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	src, err := os.Open(staged)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	if _, err := io.Copy(tmp, src); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), dest)
 }
 
 // ── .sscb format v2 ──────────────────────────────────────────────────
@@ -568,6 +763,7 @@ type importResult struct {
 	Action  string `json:"action"` // restored | snapshot | skipped
 	Path    string `json:"path,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode string) []importResult {
@@ -598,16 +794,28 @@ func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode s
 			results = append(results, s.logImportResult(res))
 			continue
 		}
+		local, err := s.Daemon.Store.GetGame(g.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			res.Action = "skipped"
+			res.Code = "backup_lookup_failed"
+			res.Error = "could not check whether this game is tracked; no files were changed"
+			results = append(results, s.logImportResult(res))
+			continue
+		}
+		res.Tracked = err == nil
+		if !res.Tracked {
+			// A backup manifest is not authority to choose a live save path.
+			// Until untracked imports have a verified safety/publish flow,
+			// neither mode may stage or write their contents.
+			res.Action = "skipped"
+			res.Code = "backup_untracked_disabled"
+			res.Error = "game is not tracked on this device; add it with its local save path, then re-import"
+			results = append(results, s.logImportResult(res))
+			continue
+		}
 
-		// Record the archive's extra save locations by name, before the
-		// tracked/untracked paths diverge. A game already tracked here takes a
-		// different branch entirely and returns from it, so doing this on one
-		// side only means the locations are learned for games arriving fresh
-		// and silently lost for games the user already has — the more common
-		// case, and the one where the files matter most.
-		//
-		// Names only, with no path: the app can then ask where each one lives
-		// here rather than the files quietly going nowhere.
+		// Learn names of any additional save locations for tracked games.
+		// Never import a path from the archive as the live destination.
 		for _, name := range g.Locations {
 			if err := s.Daemon.Store.NoteGameRoot(g.ID, name); err != nil {
 				s.Daemon.Log.Log("warn", fmt.Sprintf(
@@ -631,155 +839,39 @@ func (s *Server) importBackupV2(zr *zip.Reader, manifest *backupManifest, mode s
 			continue
 		}
 
-		local, err := s.Daemon.Store.GetGame(g.ID)
-		res.Tracked = err == nil
-
-		if res.Tracked {
-			// The imported state always lands in snapshot history first;
-			// overwrite mode then restores that snapshot through the
-			// standard path (which takes its own pre-restore safety
-			// snapshot of the current save).
-			branch := local.ActiveBranch
-			if branch == "" {
-				branch = "main"
-			}
-			snapID := fmt.Sprintf("snap_%d", baseMs+int64(i))
-			destDir := filepath.Join(settings.BackupsDir, g.ID, branch)
-			destPath := filepath.Join(destDir, snapID+".zip")
-			err := os.MkdirAll(destDir, 0o777)
-			if err == nil {
-				err = copyFile(tmpPath, destPath)
-			}
-			var size int64
-			if err == nil {
-				if info, statErr := os.Stat(destPath); statErr == nil {
-					size = info.Size()
-				}
-				err = s.Daemon.EnsureImportedSnapshot(g.ID, branch, snapID, destPath, size)
-			}
-			if err == nil && mode == "overwrite" {
-				_, err = s.Daemon.Snapshots.Restore(g.ID, snapID)
-				res.Path = local.SavePath
-				res.Action = "restored"
-			} else if err == nil {
-				res.Path = local.SavePath
-				res.Action = "snapshot"
-			}
-			if err != nil {
-				res.Action, res.Error = "skipped", err.Error()
-			}
-			os.Remove(tmpPath)
-			results = append(results, s.logImportResult(res))
-			continue
+		// The imported state always lands in snapshot history first;
+		// overwrite mode then restores through the existing safety path.
+		branch := local.ActiveBranch
+		if branch == "" {
+			branch = "main"
 		}
-
-		// Not tracked here.
-		if mode == "snapshots" {
-			os.Remove(tmpPath)
-			res.Action = "skipped"
-			res.Error = "not tracked on this machine — track it and re-import, or use overwrite mode"
-			results = append(results, s.logImportResult(res))
-			continue
+		snapID := fmt.Sprintf("snap_%d", baseMs+int64(i))
+		destDir := filepath.Join(settings.BackupsDir, g.ID, branch)
+		destPath := filepath.Join(destDir, snapID+".zip")
+		err = os.MkdirAll(destDir, 0o777)
+		if err == nil {
+			err = copyFile(tmpPath, destPath)
 		}
-		if manifest.OS != runtime.GOOS {
-			os.Remove(tmpPath)
-			res.Action = "skipped"
-			res.Error = fmt.Sprintf("backup was exported on %s — its save paths don't apply on %s", manifest.OS, runtime.GOOS)
-			results = append(results, s.logImportResult(res))
-			continue
+		var size int64
+		if err == nil {
+			if info, statErr := os.Stat(destPath); statErr == nil {
+				size = info.Size()
+			}
+			err = s.Daemon.EnsureImportedSnapshot(g.ID, branch, snapID, destPath, size)
 		}
-
-		target := resolvePortablePath(g.PortablePath)
-		if target == "" {
-			target = g.SavePath
+		if err == nil && mode == "overwrite" {
+			_, err = s.Daemon.Snapshots.Restore(g.ID, snapID)
+			res.Path = local.SavePath
+			res.Action = "restored"
+		} else if err == nil {
+			res.Path = local.SavePath
+			res.Action = "snapshot"
 		}
-		target, err = s.Daemon.CheckRestoreTarget(target)
 		if err != nil {
-			os.Remove(tmpPath)
 			res.Action, res.Error = "skipped", err.Error()
-			results = append(results, s.logImportResult(res))
-			continue
+			res.Code = restorePreflightCode(err)
 		}
-		res.Path = target
-
-		// Never overwrite untracked content without a copy: zip whatever
-		// is there now into the safety folder first, and skip the restore
-		// entirely if that safety copy cannot be written.
-		if pathHasContent(target) {
-			safetyDir := filepath.Join(settings.BackupsDir, "_import-safety")
-			safetyPath := filepath.Join(safetyDir, fmt.Sprintf("%s-%d.zip", sanitizeFilename(g.ID), baseMs))
-			if err := os.MkdirAll(safetyDir, 0o777); err == nil {
-				safetyRoots, safetyErr := s.Daemon.Store.GameRootPaths(g.ID)
-				if safetyErr != nil {
-					safetyRoots = nil
-				}
-				_, err = snapshot.ZipRoots(target, safetyRoots, safetyPath)
-			}
-			if err != nil {
-				os.Remove(tmpPath)
-				res.Action = "skipped"
-				res.Error = "couldn't take a safety copy of the existing files, refusing to overwrite: " + err.Error()
-				results = append(results, s.logImportResult(res))
-				continue
-			}
-			s.Daemon.Log.Log("info", fmt.Sprintf("existing files at %s backed up to %s", target, safetyPath))
-		}
-
-		// When the manifest says this save is a folder, create it before
-		// extracting. UnzipTo decides between "a folder of saves" and "one
-		// save file" by looking at the target, and on a machine that has
-		// never held this game there is nothing there to look at — so it
-		// falls back to the shape of the archive, and a folder containing a
-		// single save looks exactly like a save that is one file. It then
-		// wrote that file into the PARENT directory: the save came back, one
-		// level above where the game looks for it, reported as restored.
-		// Creating the folder first removes the guess entirely.
-		if g.SaveKind == "dir" {
-			if mkErr := os.MkdirAll(target, 0o777); mkErr != nil {
-				os.Remove(tmpPath)
-				res.Action, res.Error = "skipped", mkErr.Error()
-				results = append(results, s.logImportResult(res))
-				continue
-			}
-		}
-
-		importRoots, importErr := s.Daemon.Store.GameRootPaths(g.ID)
-		if importErr != nil {
-			importRoots = nil
-		}
-		unplaced, unzipErr := snapshot.UnzipRoots(tmpPath, target, importRoots)
-		for _, name := range unplaced {
-			s.Daemon.Log.Log("warn", fmt.Sprintf("%q in this backup includes a %q save location, which this device has no folder for — those files were not restored", g.Name, name))
-		}
-		err = unzipErr
 		os.Remove(tmpPath)
-		if err != nil {
-			res.Action, res.Error = "skipped", err.Error()
-			results = append(results, s.logImportResult(res))
-			continue
-		}
-		res.Action = "restored"
-
-		// Track it. Restoring a backup onto a machine that has never seen
-		// these games is the whole point of the format, and putting the files
-		// back without the games left the app empty and every one of them
-		// waiting to be re-added by hand — the files were on disk, but nothing
-		// was watching, syncing or snapshotting them, and nothing said so.
-		//
-		// The manifest's id is reused rather than derived afresh, so the game
-		// keeps the identity its peers and its snapshot history already use.
-		// Failing to track is not failing to restore: the files are already
-		// back, so the outcome stands and only the tracked flag says otherwise.
-		tracked, trackErr := s.Daemon.TrackGame(store.Game{
-			ID: g.ID, Name: g.Name, SavePath: target, AppID: g.AppID,
-		})
-		if trackErr != nil {
-			s.Daemon.Log.Log("warn", fmt.Sprintf(
-				"backup import: restored %q to %s but could not track it: %v", g.Name, target, trackErr))
-		} else {
-			res.Tracked = true
-			res.Path = tracked.SavePath
-		}
 		results = append(results, s.logImportResult(res))
 	}
 	return results
@@ -803,20 +895,6 @@ func (s *Server) logImportResult(res importResult) importResult {
 	return res
 }
 
-// pathHasContent reports whether target holds anything worth a safety
-// copy: an existing file, or a directory with at least one entry.
-func pathHasContent(target string) bool {
-	info, err := os.Stat(target)
-	if err != nil {
-		return false
-	}
-	if !info.IsDir() {
-		return true
-	}
-	entries, err := os.ReadDir(target)
-	return err == nil && len(entries) > 0
-}
-
 // copyFile copies src to dst (creating/truncating dst).
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
@@ -833,19 +911,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
-}
-
-// sanitizeFilename strips path separators and oddities from an ID used
-// in a filename.
-func sanitizeFilename(name string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			return r
-		default:
-			return '_'
-		}
-	}, name)
 }
 
 // importLegacyBackup handles v1 archives: each entry is a snapshot zip

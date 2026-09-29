@@ -132,11 +132,9 @@ func addFileEntry(w *zip.Writer, filePath, entryName string) (string, error) {
 }
 
 // UnzipTo extracts a snapshot ZIP over targetPath. Single-file save mode
-// (target is an existing file, or the archive holds exactly one root-level
-// file and the target doesn't exist) extracts into the target's parent
-// directory after removing the old file; directory mode clears the target
-// directory and extracts into it — both matching unzipDirectory() in the
-// JS app.
+// (target is an existing regular file) restores exactly one root-level file
+// to that configured filename. A missing path is a directory; legacy archive
+// metadata cannot distinguish a one-file directory from a deleted file.
 func UnzipTo(zipPath, targetPath string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -147,8 +145,11 @@ func UnzipTo(zipPath, targetPath string) error {
 	isFile := false
 	if info, statErr := os.Stat(targetPath); statErr == nil {
 		isFile = !info.IsDir()
-	} else if len(r.File) == 1 && !r.File[0].FileInfo().IsDir() {
-		isFile = true
+	} else if !os.IsNotExist(statErr) {
+		return ErrRestoreLocation
+	}
+	if isFile && (len(r.File) != 1 || !r.File[0].Mode().IsRegular() || strings.ContainsAny(r.File[0].Name, "/\\")) {
+		return ErrRestoreLocation
 	}
 
 	var destDir string
@@ -174,7 +175,11 @@ func UnzipTo(zipPath, targetPath string) error {
 	}
 
 	for _, entry := range r.File {
-		if err := extractEntry(entry, destDir); err != nil {
+		name := entry.Name
+		if isFile {
+			name = filepath.Base(targetPath)
+		}
+		if err := extractEntryAs(entry, destDir, name); err != nil {
 			return err
 		}
 	}

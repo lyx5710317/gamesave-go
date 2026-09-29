@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -45,6 +46,7 @@ type Endpoints struct {
 	DropboxToken   string // https://api.dropbox.com/oauth2/token
 	Graph          string // https://graph.microsoft.com
 	MicrosoftToken string // https://login.microsoftonline.com/common/oauth2/v2.0/token
+	JianguoyunDAV  string // https://dav.jianguoyun.com/dav/ (override only in tests)
 }
 
 // DefaultEndpoints returns the production provider hosts.
@@ -59,6 +61,7 @@ func DefaultEndpoints() Endpoints {
 		DropboxToken:   "https://api.dropbox.com/oauth2/token",
 		Graph:          "https://graph.microsoft.com",
 		MicrosoftToken: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+		JianguoyunDAV:  store.JianguoyunBaseURL,
 	}
 }
 
@@ -69,19 +72,40 @@ type Service struct {
 	Endpoints Endpoints
 	HTTP      *http.Client
 
-	driveFolderMu sync.Mutex
-	driveFolderID string // cached id of the auto-managed "OpenSave" Drive folder
+	providersMu         sync.RWMutex
+	providers           map[string]Provider
+	uploadsMu           sync.Mutex
+	uploads             []UploadRecord
+	nextUploadID        uint64
+	driveFolderMu       sync.Mutex
+	jianguoyunMu        sync.Mutex
+	jianguoyunNext      time.Time
+	jianguoyunProbeMu   sync.Mutex
+	jianguoyunProbeOK   bool
+	jianguoyunProbeKey  [32]byte
+	jianguoyunProbeMode jianguoyunCreateMode
 }
 
 // New creates a production Service.
 func New(s *store.Store, logf func(level, msg string)) *Service {
-	return &Service{
+	svc := &Service{
 		Store:     s,
 		Log:       logf,
 		Endpoints: DefaultEndpoints(),
 		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}
+	// Existing providers retain their implementation while new adapters can
+	// be registered behind the same call boundary.
+	legacy := legacyProvider{service: svc}
+	svc.providers = map[string]Provider{
+		"local": legacy, "webdav": legacy, "jianguoyun": legacy, "webhook": legacy,
+		"google_drive": legacy, "dropbox": legacy, "onedrive": legacy,
+	}
+	return svc
 }
+
+// ErrCloudDisabled distinguishes the local switch from a provider outage.
+var ErrCloudDisabled = errors.New("cloud sync is not enabled")
 
 // IsNotConfigured reports whether err just means cloud backup isn't set up
 // (disabled, no destination, or not signed in) — callers like the snapshot
@@ -94,6 +118,7 @@ func IsNotConfigured(err error) bool {
 	return strings.Contains(msg, "not enabled") ||
 		strings.Contains(msg, "destination configured") ||
 		strings.Contains(msg, "destination URL configured") ||
+		strings.Contains(msg, "application password is not configured") ||
 		strings.Contains(msg, "not authenticated")
 }
 
@@ -103,40 +128,45 @@ func (s *Service) config() (store.CloudConfig, error) {
 		return store.CloudConfig{}, err
 	}
 	if !cfg.Enabled {
-		return store.CloudConfig{}, fmt.Errorf("cloud sync is not enabled")
+		return store.CloudConfig{}, ErrCloudDisabled
+	}
+	if cfg.Provider == "jianguoyun" {
+		if cfg.URL != store.JianguoyunBaseURL {
+			return store.CloudConfig{}, fmt.Errorf("Jianguoyun preset requires its official WebDAV address")
+		}
+		cfg.URL = joinURL(s.Endpoints.JianguoyunDAV, "GameSaveGo/")
+	}
+	if cfg.Provider == "webdav" && store.IsJianguoyunHost(cfg.URL) {
+		return store.CloudConfig{}, fmt.Errorf("Jianguoyun WebDAV backups require the dedicated Jianguoyun preset")
+	}
+	if cfg.Provider == "jianguoyun" || cfg.Provider == "webdav" {
+		cfg.Password, err = s.Store.LoadCloudPassword(cfg)
+		if err != nil {
+			return store.CloudConfig{}, fmt.Errorf("Jianguoyun application password is not configured or unavailable: %w", err)
+		}
 	}
 	return cfg, nil
 }
 
 // driveFolder returns the Drive folder snapshots live in: the user's
 // configured folder ID if set, otherwise a folder named "OpenSave" in the
-// Drive root — found or created on first use and cached for the process
-// lifetime. Keeps snapshots out of the user's Drive root.
+// Drive root. A name is not a unique identity in Drive, so never choose the
+// first match or keep a process-lifetime cache that hides a later duplicate.
 func (s *Service) driveFolder(cfg store.CloudConfig, token string) (string, error) {
 	if cfg.FolderID != "" {
 		return cfg.FolderID, nil
 	}
 	s.driveFolderMu.Lock()
 	defer s.driveFolderMu.Unlock()
-	if s.driveFolderID != "" {
-		return s.driveFolderID, nil
+	ids, err := s.listAutoDriveFolderIDs(token)
+	if err != nil {
+		return "", err
 	}
-
-	query := "name = 'OpenSave' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents"
-	listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id)")
-	req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	var out struct {
-		Files []struct {
-			ID string `json:"id"`
-		} `json:"files"`
+	if len(ids) == 1 {
+		return ids[0], nil
 	}
-	if err := s.doJSON(req, &out); err != nil {
-		return "", googleDriveErr(err)
-	}
-	if len(out.Files) > 0 {
-		s.driveFolderID = out.Files[0].ID
-		return s.driveFolderID, nil
+	if len(ids) > 1 {
+		return "", fmt.Errorf("Google Drive has multiple OpenSave folders; configure an explicit folder ID before backup")
 	}
 
 	meta, _ := json.Marshal(map[string]any{
@@ -152,9 +182,65 @@ func (s *Service) driveFolder(cfg store.CloudConfig, token string) (string, erro
 	if err := s.doJSON(creq, &created); err != nil {
 		return "", googleDriveErr(err)
 	}
+	if created.ID == "" {
+		return "", fmt.Errorf("Google Drive created a folder without an ID; verify the destination before retrying")
+	}
+	ids, err = s.listAutoDriveFolderIDs(token)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) != 1 || ids[0] != created.ID {
+		return "", fmt.Errorf("Google Drive folder creation is ambiguous; configure an explicit folder ID before backup")
+	}
 	s.Log("info", `cloud: created "OpenSave" folder in Google Drive`)
-	s.driveFolderID = created.ID
 	return created.ID, nil
+}
+
+func (s *Service) listAutoDriveFolderIDs(token string) ([]string, error) {
+	query := "name = 'OpenSave' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents"
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", "nextPageToken,incompleteSearch,files(id)")
+	params.Set("pageSize", "1000")
+	ids := []string{}
+	seenIDs := map[string]bool{}
+	seenTokens := map[string]bool{}
+	for page := 0; page < 1000; page++ {
+		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		var out struct {
+			NextPageToken    string `json:"nextPageToken"`
+			IncompleteSearch bool   `json:"incompleteSearch"`
+			Files            []struct {
+				ID string `json:"id"`
+			} `json:"files"`
+		}
+		if err := s.doJSON(req, &out); err != nil {
+			return nil, googleDriveErr(err)
+		}
+		if out.IncompleteSearch {
+			return nil, fmt.Errorf("Google Drive folder listing was incomplete; configure an explicit folder ID")
+		}
+		for _, f := range out.Files {
+			if f.ID == "" || seenIDs[f.ID] {
+				return nil, fmt.Errorf("Google Drive folder listing is ambiguous; configure an explicit folder ID")
+			}
+			seenIDs[f.ID] = true
+			ids = append(ids, f.ID)
+			if len(ids) > 1 {
+				return ids, nil
+			}
+		}
+		if out.NextPageToken == "" {
+			return ids, nil
+		}
+		if seenTokens[out.NextPageToken] {
+			return nil, fmt.Errorf("Google Drive folder listing repeated a page token")
+		}
+		seenTokens[out.NextPageToken] = true
+		params.Set("pageToken", out.NextPageToken)
+	}
+	return nil, fmt.Errorf("Google Drive folder listing exceeded 1000 pages")
 }
 
 // ── large-file transfer plumbing ─────────────────────────────────────────
@@ -169,7 +255,7 @@ var (
 	driveChunkSize          int64 = 16 << 20  // resumable upload chunk (multiple of 256 KiB)
 	dropboxSessionThreshold int64 = 128 << 20 // singles are allowed to 150 MB; stay under
 	dropboxChunkSize        int64 = 48 << 20
-	onedriveSimpleLimit     int64 = 4 << 20 // Graph recommends sessions above 4 MB
+	onedriveSimpleLimit     int64 = 4 << 20  // Graph recommends sessions above 4 MB
 	onedriveChunkSize       int64 = 10 << 20 // multiple of 320 KiB
 )
 
@@ -241,9 +327,9 @@ func (s *Service) fetchToFile(req *http.Request, localPath string) error {
 	return out.Close()
 }
 
-// Upload sends a snapshot zip to the configured provider. Errors are
-// returned (the snapshot hook logs them without failing the snapshot).
-func (s *Service) Upload(filePath, fileName string) error {
+// uploadLegacy contains the existing provider implementations until they are
+// migrated into independent adapters.
+func (s *Service) uploadLegacy(filePath, fileName string) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err
@@ -269,19 +355,26 @@ func (s *Service) Upload(filePath, fileName string) error {
 		if err := os.MkdirAll(cfg.URL, 0o777); err != nil {
 			return err
 		}
-		out, err := os.Create(filepath.Join(cfg.URL, fileName))
+		// O_EXCL prevents another local process from replacing an existing
+		// snapshot between the listing preflight and this write.
+		out, err := os.OpenFile(filepath.Join(cfg.URL, fileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
 		if err != nil {
 			return err
 		}
 		if _, err := io.Copy(out, f); err != nil {
 			out.Close()
+			os.Remove(filepath.Join(cfg.URL, fileName))
 			return err
 		}
 		if err := out.Close(); err != nil {
+			os.Remove(filepath.Join(cfg.URL, fileName))
 			return err
 		}
 
-	case "webdav":
+	case "webdav", "jianguoyun":
+		if cfg.Provider == "jianguoyun" {
+			return s.uploadJianguoyun(cfg, f, fileName, size)
+		}
 		if cfg.URL == "" {
 			return fmt.Errorf("no destination URL configured")
 		}
@@ -293,12 +386,19 @@ func (s *Service) Upload(filePath, fileName string) error {
 		req.ContentLength = size
 		req.Header.Set("Content-Type", "application/zip")
 		applyCustomHeaders(req, cfg.HeadersJSON)
+		// A compliant WebDAV origin rejects an existing object with 412.
+		// Set this after user headers so a custom header cannot disable it.
+		// Keep the listing guard too; some servers do not honor conditions.
+		req.Header.Set("If-None-Match", "*")
 		applyBasicAuth(req, cfg.Username, cfg.Password)
 		resp, err := s.doTransfer(req)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusPreconditionFailed {
+			return ErrRemoteSnapshotConflict
+		}
 		if err := transferOK(resp); err != nil {
 			return err
 		}
@@ -361,8 +461,29 @@ func (s *Service) Upload(filePath, fileName string) error {
 		if err != nil {
 			return err
 		}
-		if err := s.uploadDriveResumable(token, folderID, fileName, f, size); err != nil {
+		fileID, err := s.uploadDriveResumable(token, folderID, fileName, f, size)
+		if err != nil {
 			return googleDriveErr(err)
+		}
+		// Drive permits duplicate names. This readback detects an ambiguous
+		// result; it is not an atomic create-only guarantee across devices.
+		files, err := s.listGoogleDriveFiles(token, folderID)
+		if err != nil {
+			return err
+		}
+		var match *CloudFile
+		for _, remote := range files {
+			if remote.Name != fileName {
+				continue
+			}
+			if match != nil {
+				return fmt.Errorf("Google Drive upload has duplicate snapshot names; inspect the destination before retrying: %w", ErrRemoteSnapshotAmbiguous)
+			}
+			copy := remote
+			match = &copy
+		}
+		if match == nil || match.ID != fileID || match.SizeBytes != size {
+			return fmt.Errorf("Google Drive upload identity or size is unverified; inspect the remote snapshot before retrying")
 		}
 
 	case "dropbox":
@@ -404,14 +525,17 @@ func (s *Service) Upload(filePath, fileName string) error {
 // uploadDriveResumable uses Drive's resumable protocol for every size:
 // one code path, streaming chunks, and no request carries more than
 // driveChunkSize bytes (multipart uploads are capped at 5 MB by the API).
-func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) error {
+func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) (string, error) {
+	if size <= 0 || driveChunkSize <= 0 {
+		return "", fmt.Errorf("Google Drive snapshot has no uploadable content")
+	}
 	meta, _ := json.Marshal(map[string]any{
 		"name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
 	})
 	initReq, err := http.NewRequest(http.MethodPost,
-		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable", bytes.NewReader(meta))
+		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,parents", bytes.NewReader(meta))
 	if err != nil {
-		return err
+		return "", err
 	}
 	initReq.Header.Set("Authorization", "Bearer "+token)
 	initReq.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -420,19 +544,20 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 
 	resp, err := s.doTransfer(initReq)
 	if err != nil {
-		return err
+		return "", err
 	}
 	session := resp.Header.Get("Location")
 	err = transferOK(resp)
 	resp.Body.Close()
 	if err != nil {
-		return fmt.Errorf("start resumable upload: %w", err)
+		return "", fmt.Errorf("start resumable upload: %w", err)
 	}
 	if session == "" {
-		return fmt.Errorf("resumable upload: no session URL returned")
+		return "", fmt.Errorf("resumable upload: no session URL returned")
 	}
 
-	for offset := int64(0); offset < size || size == 0; {
+	uncertain := 0
+	for offset := int64(0); offset < size; {
 		n := driveChunkSize
 		if remaining := size - offset; remaining < n {
 			n = remaining
@@ -452,29 +577,107 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 			if resp != nil {
 				resp.Body.Close()
 			}
-			// One retry per chunk — resumable sessions exist for this.
-			if resp, err = putChunk(); err != nil {
-				return err
+			// An interrupted PUT may already have committed bytes. Ask the
+			// session for its offset instead of blindly replaying the chunk.
+			uncertain++
+			if uncertain > 3 {
+				return "", fmt.Errorf("Google Drive upload remains uncertain after three status checks; inspect the remote snapshot")
 			}
+			next, fileID, statusErr := s.driveUploadStatus(session, size, fileName, folderID)
+			if statusErr != nil {
+				return "", statusErr
+			}
+			if fileID != "" {
+				return fileID, nil
+			}
+			if next < offset {
+				return "", fmt.Errorf("Google Drive upload session moved backwards; inspect the remote snapshot")
+			}
+			offset = next
+			continue
 		}
 		status := resp.StatusCode
-		if status != http.StatusOK && status != http.StatusCreated && status != 308 {
-			err := transferOK(resp)
+		if status == http.StatusOK || status == http.StatusCreated {
+			fileID, resultErr := driveUploadResult(resp.Body, fileName, folderID, size)
 			resp.Body.Close()
-			return fmt.Errorf("upload chunk at %d: %w", offset, err)
+			return fileID, resultErr
 		}
+		if status != 308 {
+			resp.Body.Close()
+			return "", fmt.Errorf("Google Drive upload chunk returned HTTP %d; inspect the remote snapshot before retrying", status)
+		}
+		next, rangeErr := driveUploadedOffset(resp.Header.Get("Range"), size)
 		resp.Body.Close()
-		offset += n
-		if size == 0 {
-			break
+		if rangeErr != nil || next <= offset || next > offset+n {
+			return "", fmt.Errorf("Google Drive upload session reported invalid progress; inspect the remote snapshot")
 		}
+		offset = next
+		uncertain = 0
 	}
-	return nil
+	return "", fmt.Errorf("Google Drive upload ended without a completion response; inspect the remote snapshot")
+}
+
+func (s *Service) driveUploadStatus(session string, size int64, fileName, folderID string) (int64, string, error) {
+	req, err := http.NewRequest(http.MethodPut, session, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+	resp, err := s.doTransfer(req)
+	if err != nil {
+		return 0, "", fmt.Errorf("Google Drive upload status is unavailable; inspect the remote snapshot")
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		fileID, err := driveUploadResult(resp.Body, fileName, folderID, size)
+		return size, fileID, err
+	case 308:
+		next, err := driveUploadedOffset(resp.Header.Get("Range"), size)
+		return next, "", err
+	default:
+		return 0, "", fmt.Errorf("Google Drive upload status returned HTTP %d; inspect the remote snapshot", resp.StatusCode)
+	}
+}
+
+func driveUploadedOffset(header string, size int64) (int64, error) {
+	if header == "" {
+		return 0, nil
+	}
+	if !strings.HasPrefix(header, "bytes=0-") {
+		return 0, fmt.Errorf("invalid Google Drive upload range")
+	}
+	last, err := strconv.ParseInt(strings.TrimPrefix(header, "bytes=0-"), 10, 64)
+	if err != nil || last < 0 || last >= size {
+		return 0, fmt.Errorf("invalid Google Drive upload range")
+	}
+	return last + 1, nil
+}
+
+func driveUploadResult(body io.Reader, fileName, folderID string, size int64) (string, error) {
+	var result struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Size    string   `json:"size"`
+		Parents []string `json:"parents"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 4096)).Decode(&result); err != nil {
+		return "", fmt.Errorf("Google Drive did not return verifiable upload metadata")
+	}
+	gotSize, err := strconv.ParseInt(result.Size, 10, 64)
+	if err != nil || result.ID == "" || result.Name != fileName || gotSize != size ||
+		len(result.Parents) != 1 || result.Parents[0] != folderID {
+		return "", fmt.Errorf("Google Drive returned an unverified uploaded object; inspect the destination before retrying")
+	}
+	return result.ID, nil
 }
 
 // uploadDropboxSimple streams one request (≤150 MB per Dropbox's API).
 func (s *Service) uploadDropboxSimple(token, fileName string, f *os.File, size int64) error {
-	args, _ := json.Marshal(map[string]any{"path": "/OpenSave/" + fileName, "mode": "overwrite", "mute": true})
+	args, _ := json.Marshal(map[string]any{
+		"path": "/OpenSave/" + fileName, "mode": "add", "autorename": false,
+		"strict_conflict": true, "mute": true,
+	})
 	req, err := http.NewRequest(http.MethodPost, s.Endpoints.DropboxContent+"/2/files/upload", f)
 	if err != nil {
 		return err
@@ -488,7 +691,7 @@ func (s *Service) uploadDropboxSimple(token, fileName string, f *os.File, size i
 		return err
 	}
 	defer resp.Body.Close()
-	return transferOK(resp)
+	return dropboxUploadResult(resp)
 }
 
 // uploadDropboxSession uses upload sessions for big files: start, append
@@ -509,7 +712,7 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 			return nil, err
 		}
 		defer resp.Body.Close()
-		if err := transferOK(resp); err != nil {
+		if err := dropboxUploadResult(resp); err != nil {
 			return nil, err
 		}
 		var out map[string]any
@@ -549,7 +752,10 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 
 	_, err = call("/2/files/upload_session/finish", map[string]any{
 		"cursor": map[string]any{"session_id": sessionID, "offset": offset},
-		"commit": map[string]any{"path": "/OpenSave/" + fileName, "mode": "overwrite", "mute": true},
+		"commit": map[string]any{
+			"path": "/OpenSave/" + fileName, "mode": "add", "autorename": false,
+			"strict_conflict": true, "mute": true,
+		},
 	}, nil, 0)
 	if err != nil {
 		return fmt.Errorf("session finish: %w", err)
@@ -557,9 +763,23 @@ func (s *Service) uploadDropboxSession(token, fileName string, f *os.File, size 
 	return nil
 }
 
+func dropboxUploadResult(resp *http.Response) error {
+	if resp.StatusCode == http.StatusConflict {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		var out struct {
+			ErrorSummary string `json:"error_summary"`
+		}
+		if json.Unmarshal(raw, &out) == nil && strings.HasPrefix(out.ErrorSummary, "path/conflict/") {
+			return ErrRemoteSnapshotConflict
+		}
+		return fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return transferOK(resp)
+}
+
 // uploadOneDriveSimple streams one PUT (fine below ~4 MB).
 func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size int64) error {
-	uploadURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/content"
+	uploadURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/content?@microsoft.graph.conflictBehavior=fail"
 	req, err := http.NewRequest(http.MethodPut, uploadURL, f)
 	if err != nil {
 		return err
@@ -572,7 +792,7 @@ func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size 
 		return err
 	}
 	defer resp.Body.Close()
-	return transferOK(resp)
+	return onedriveUploadResult(resp)
 }
 
 // uploadOneDriveSession uses Graph upload sessions: chunks must be
@@ -580,7 +800,7 @@ func (s *Service) uploadOneDriveSimple(token, fileName string, f *os.File, size 
 func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size int64) error {
 	createURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot:/" + url.PathEscape(fileName) + ":/createUploadSession"
 	body, _ := json.Marshal(map[string]any{
-		"item": map[string]any{"@microsoft.graph.conflictBehavior": "replace"},
+		"item": map[string]any{"@microsoft.graph.conflictBehavior": "fail"},
 	})
 	req, err := http.NewRequest(http.MethodPost, createURL, bytes.NewReader(body))
 	if err != nil {
@@ -595,7 +815,7 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 	var session struct {
 		UploadURL string `json:"uploadUrl"`
 	}
-	if err := transferOK(resp); err != nil {
+	if err := onedriveUploadResult(resp); err != nil {
 		resp.Body.Close()
 		return fmt.Errorf("create upload session: %w", err)
 	}
@@ -622,7 +842,7 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 		}
 		if resp.StatusCode != http.StatusAccepted &&
 			resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			err := transferOK(resp)
+			err := onedriveUploadResult(resp)
 			resp.Body.Close()
 			return fmt.Errorf("upload chunk at %d: %w", offset, err)
 		}
@@ -632,8 +852,24 @@ func (s *Service) uploadOneDriveSession(token, fileName string, f *os.File, size
 	return nil
 }
 
+func onedriveUploadResult(resp *http.Response) error {
+	if resp.StatusCode == http.StatusConflict {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		var out struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &out) == nil && out.Error.Code == "nameAlreadyExists" {
+			return ErrRemoteSnapshotConflict
+		}
+		return fmt.Errorf("OneDrive: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return transferOK(resp)
+}
+
 // List returns the provider's snapshot zips.
-func (s *Service) List() ([]CloudFile, error) {
+func (s *Service) listLegacy() ([]CloudFile, error) {
 	cfg, err := s.config()
 	if err != nil {
 		return nil, err
@@ -642,11 +878,14 @@ func (s *Service) List() ([]CloudFile, error) {
 	switch cfg.Provider {
 	case "local":
 		if cfg.URL == "" {
-			return []CloudFile{}, nil
+			return nil, fmt.Errorf("no local folder destination configured")
 		}
 		entries, err := os.ReadDir(cfg.URL)
 		if err != nil {
-			return []CloudFile{}, nil
+			if errors.Is(err, os.ErrNotExist) {
+				return []CloudFile{}, nil
+			}
+			return nil, err
 		}
 		var files []CloudFile
 		for _, e := range entries {
@@ -664,7 +903,7 @@ func (s *Service) List() ([]CloudFile, error) {
 		}
 		return files, nil
 
-	case "webdav":
+	case "webdav", "jianguoyun":
 		return s.listWebDAV(cfg)
 
 	case "google_drive":
@@ -676,13 +915,163 @@ func (s *Service) List() ([]CloudFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		query := fmt.Sprintf("trashed = false and mimeType = 'application/zip' and '%s' in parents", folderID)
-		listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id,name,size,createdTime)")
-		req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
+		return s.listGoogleDriveFiles(token, folderID)
 
+	case "dropbox":
+		token, err := s.getOrRefreshAccessToken("dropbox")
+		if err != nil {
+			return nil, err
+		}
+		files := []CloudFile{}
+		cursor := ""
+		seenCursors := map[string]bool{}
+		for page := 0; page < 1000; page++ {
+			endpoint := s.Endpoints.DropboxAPI + "/2/files/list_folder"
+			args := map[string]string{"path": "/OpenSave"}
+			if page > 0 {
+				endpoint += "/continue"
+				args = map[string]string{"cursor": cursor}
+			}
+			body, _ := json.Marshal(args)
+			req, _ := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := s.httpClient().Do(req)
+			if err != nil {
+				return nil, err
+			}
+			if resp.StatusCode == http.StatusConflict && page == 0 {
+				var notFound struct {
+					ErrorSummary string `json:"error_summary"`
+				}
+				_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&notFound)
+				resp.Body.Close()
+				if strings.HasPrefix(notFound.ErrorSummary, "path/not_found/") {
+					return files, nil // /OpenSave has not been created yet.
+				}
+				return nil, fmt.Errorf("Dropbox: list folder conflict: %s", notFound.ErrorSummary)
+			}
+			if resp.StatusCode >= 400 {
+				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				return nil, fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, raw)
+			}
+			var out struct {
+				Cursor  string `json:"cursor"`
+				HasMore *bool  `json:"has_more"`
+				Entries []struct {
+					Tag            string `json:".tag"`
+					Name           string `json:"name"`
+					Size           int64  `json:"size"`
+					ClientModified string `json:"client_modified"`
+				} `json:"entries"`
+			}
+			err = json.NewDecoder(resp.Body).Decode(&out)
+			resp.Body.Close()
+			if err != nil {
+				return nil, err
+			}
+			if out.HasMore == nil {
+				return nil, fmt.Errorf("Dropbox file listing omitted has_more")
+			}
+			if out.Entries == nil {
+				return nil, fmt.Errorf("Dropbox file listing omitted entries")
+			}
+			for _, e := range out.Entries {
+				if e.Tag == "file" && strings.HasSuffix(e.Name, ".zip") {
+					files = append(files, CloudFile{Name: e.Name, SizeBytes: e.Size, CreatedTime: e.ClientModified})
+				}
+			}
+			if !*out.HasMore {
+				return files, nil
+			}
+			if out.Cursor == "" || seenCursors[out.Cursor] {
+				return nil, fmt.Errorf("Dropbox file listing has a missing or repeated cursor")
+			}
+			seenCursors[out.Cursor] = true
+			cursor = out.Cursor
+		}
+		return nil, fmt.Errorf("Dropbox file listing exceeded 1000 pages")
+
+	case "onedrive":
+		token, err := s.getOrRefreshAccessToken("onedrive")
+		if err != nil {
+			return nil, err
+		}
+		firstURL := s.Endpoints.Graph + "/v1.0/me/drive/special/approot/children"
+		origin, err := url.Parse(firstURL)
+		if err != nil {
+			return nil, err
+		}
+		nextURL := firstURL
+		seenURLs := map[string]bool{}
+		files := []CloudFile{}
+		for page := 0; page < 1000; page++ {
+			if seenURLs[nextURL] {
+				return nil, fmt.Errorf("OneDrive file listing repeated a page URL")
+			}
+			seenURLs[nextURL] = true
+			req, err := http.NewRequest(http.MethodGet, nextURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			var out struct {
+				NextLink string `json:"@odata.nextLink"`
+				Value    []struct {
+					Name            string          `json:"name"`
+					Size            int64           `json:"size"`
+					CreatedDateTime string          `json:"createdDateTime"`
+					File            json.RawMessage `json:"file"`
+				} `json:"value"`
+			}
+			if err := s.doJSON(req, &out); err != nil {
+				return nil, fmt.Errorf("OneDrive: %w", err)
+			}
+			if out.Value == nil {
+				return nil, fmt.Errorf("OneDrive file listing omitted value")
+			}
+			for _, f := range out.Value {
+				if f.File != nil && strings.HasSuffix(f.Name, ".zip") {
+					files = append(files, CloudFile{Name: f.Name, SizeBytes: f.Size, CreatedTime: f.CreatedDateTime})
+				}
+			}
+			if out.NextLink == "" {
+				return files, nil
+			}
+			// The nextLink is supplied by the server. Never send the bearer token
+			// to a different origin or a different Graph resource.
+			next, err := url.Parse(out.NextLink)
+			if err != nil || next.User != nil || next.Fragment != "" ||
+				next.Scheme != origin.Scheme || next.Host != origin.Host || next.EscapedPath() != origin.EscapedPath() {
+				return nil, fmt.Errorf("OneDrive file listing returned an unsafe next page URL")
+			}
+			nextURL = next.String()
+		}
+		return nil, fmt.Errorf("OneDrive file listing exceeded 1000 pages")
+
+	default:
+		return []CloudFile{}, nil
+	}
+}
+
+// listGoogleDriveFiles returns the full snapshot inventory in one folder.
+// Both upload preflight and restore must reject incomplete pagination.
+func (s *Service) listGoogleDriveFiles(token, folderID string) ([]CloudFile, error) {
+	query := fmt.Sprintf("trashed = false and mimeType = 'application/zip' and '%s' in parents", folderID)
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", "nextPageToken,incompleteSearch,files(id,name,size,createdTime)")
+	params.Set("pageSize", "1000")
+	files := []CloudFile{}
+	seenTokens := map[string]bool{}
+	for page := 0; page < 1000; page++ {
+		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files?"+params.Encode(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
 		var out struct {
-			Files []struct {
+			NextPageToken    string `json:"nextPageToken"`
+			IncompleteSearch bool   `json:"incompleteSearch"`
+			Files            []struct {
 				ID          string `json:"id"`
 				Name        string `json:"name"`
 				Size        string `json:"size"`
@@ -692,87 +1081,27 @@ func (s *Service) List() ([]CloudFile, error) {
 		if err := s.doJSON(req, &out); err != nil {
 			return nil, googleDriveErr(err)
 		}
-		files := make([]CloudFile, len(out.Files))
-		for i, f := range out.Files {
+		if out.IncompleteSearch {
+			return nil, fmt.Errorf("Google Drive file listing was incomplete")
+		}
+		for _, f := range out.Files {
 			size, _ := strconv.ParseInt(f.Size, 10, 64)
-			files[i] = CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime}
+			files = append(files, CloudFile{ID: f.ID, Name: f.Name, SizeBytes: size, CreatedTime: f.CreatedTime})
 		}
-		return files, nil
-
-	case "dropbox":
-		token, err := s.getOrRefreshAccessToken("dropbox")
-		if err != nil {
-			return nil, err
+		if out.NextPageToken == "" {
+			return files, nil
 		}
-		body, _ := json.Marshal(map[string]string{"path": "/OpenSave"})
-		req, _ := http.NewRequest(http.MethodPost, s.Endpoints.DropboxAPI+"/2/files/list_folder", bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := s.httpClient().Do(req)
-		if err != nil {
-			return nil, err
+		if seenTokens[out.NextPageToken] {
+			return nil, fmt.Errorf("Google Drive file listing repeated a page token")
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusConflict {
-			return []CloudFile{}, nil // /OpenSave folder doesn't exist yet
-		}
-		if resp.StatusCode >= 400 {
-			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			return nil, fmt.Errorf("Dropbox: HTTP %d - %s", resp.StatusCode, raw)
-		}
-		var out struct {
-			Entries []struct {
-				Tag            string `json:".tag"`
-				Name           string `json:"name"`
-				Size           int64  `json:"size"`
-				ClientModified string `json:"client_modified"`
-			} `json:"entries"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return nil, err
-		}
-		var files []CloudFile
-		for _, e := range out.Entries {
-			if e.Tag == "file" && strings.HasSuffix(e.Name, ".zip") {
-				files = append(files, CloudFile{Name: e.Name, SizeBytes: e.Size, CreatedTime: e.ClientModified})
-			}
-		}
-		return files, nil
-
-	case "onedrive":
-		token, err := s.getOrRefreshAccessToken("onedrive")
-		if err != nil {
-			return nil, err
-		}
-		req, _ := http.NewRequest(http.MethodGet, s.Endpoints.Graph+"/v1.0/me/drive/special/approot/children", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		var out struct {
-			Value []struct {
-				Name            string          `json:"name"`
-				Size            int64           `json:"size"`
-				CreatedDateTime string          `json:"createdDateTime"`
-				File            json.RawMessage `json:"file"`
-			} `json:"value"`
-		}
-		if err := s.doJSON(req, &out); err != nil {
-			return nil, fmt.Errorf("OneDrive: %w", err)
-		}
-		var files []CloudFile
-		for _, f := range out.Value {
-			if f.File != nil && strings.HasSuffix(f.Name, ".zip") {
-				files = append(files, CloudFile{Name: f.Name, SizeBytes: f.Size, CreatedTime: f.CreatedDateTime})
-			}
-		}
-		return files, nil
-
-	default:
-		return []CloudFile{}, nil
+		seenTokens[out.NextPageToken] = true
+		params.Set("pageToken", out.NextPageToken)
 	}
+	return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages")
 }
 
 // Download fetches a remote snapshot to localPath.
-func (s *Service) Download(fileName, localPath string) error {
+func (s *Service) downloadLegacy(fileName, localPath string) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err
@@ -802,12 +1131,17 @@ func (s *Service) Download(fileName, localPath string) error {
 		}
 		return out.Close()
 
-	case "webdav":
+	case "webdav", "jianguoyun":
+		// Downloads, including read-only verification, never create a remote
+		// directory. A deleted/missing destination must remain a read failure.
 		req, err := http.NewRequest(http.MethodGet, joinURL(cfg.URL, url.PathEscape(fileName)), nil)
 		if err != nil {
 			return err
 		}
 		applyBasicAuth(req, cfg.Username, cfg.Password)
+		if cfg.Provider == "jianguoyun" {
+			return s.fetchJianguoyunToFile(req, localPath)
+		}
 		if err := s.fetchToFile(req, localPath); err != nil {
 			return fmt.Errorf("WebDAV: %w", err)
 		}
@@ -822,23 +1156,29 @@ func (s *Service) Download(fileName, localPath string) error {
 		if err != nil {
 			return err
 		}
-		query := fmt.Sprintf("name = '%s' and trashed = false and '%s' in parents",
-			strings.ReplaceAll(fileName, "'", `\'`), folderID)
-		listURL := s.Endpoints.GoogleAPI + "/drive/v3/files?q=" + url.QueryEscape(query) + "&fields=" + url.QueryEscape("files(id)")
-		req, _ := http.NewRequest(http.MethodGet, listURL, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		var out struct {
-			Files []struct {
-				ID string `json:"id"`
-			} `json:"files"`
+		files, err := s.listGoogleDriveFiles(token, folderID)
+		if err != nil {
+			return err
 		}
-		if err := s.doJSON(req, &out); err != nil {
-			return googleDriveErr(err)
+		var fileID string
+		matches := 0
+		for _, file := range files {
+			if file.Name != fileName {
+				continue
+			}
+			matches++
+			if matches > 1 {
+				return ErrRemoteSnapshotAmbiguous
+			}
+			fileID = file.ID
 		}
-		if len(out.Files) == 0 {
+		if matches == 0 {
 			return fmt.Errorf("file %q not found on Google Drive", fileName)
 		}
-		dlReq, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files/"+out.Files[0].ID+"?alt=media", nil)
+		if fileID == "" {
+			return fmt.Errorf("Google Drive file %q has no ID; refusing to download", fileName)
+		}
+		dlReq, _ := http.NewRequest(http.MethodGet, s.Endpoints.GoogleAPI+"/drive/v3/files/"+url.PathEscape(fileID)+"?alt=media", nil)
 		dlReq.Header.Set("Authorization", "Bearer "+token)
 		if err := s.fetchToFile(dlReq, localPath); err != nil {
 			return googleDriveErr(err)
@@ -882,6 +1222,11 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("no destination URL configured")
 	}
+	if cfg.Provider == "jianguoyun" {
+		if err := s.ensureJianguoyunFolder(cfg); err != nil {
+			return nil, err
+		}
+	}
 	req, err := http.NewRequest("PROPFIND", cfg.URL, nil)
 	if err != nil {
 		return nil, err
@@ -890,16 +1235,32 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 	req.Header.Set("Content-Type", "text/xml")
 	applyBasicAuth(req, cfg.Username, cfg.Password)
 
-	resp, err := s.httpClient().Do(req)
+	var resp *http.Response
+	if cfg.Provider == "jianguoyun" {
+		resp, err = s.jianguoyunDo(req, false)
+	} else {
+		resp, err = s.httpClient().Do(req)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if cfg.Provider == "jianguoyun" && resp.StatusCode != http.StatusMultiStatus {
+		return nil, jianguoyunStatusError("list", resp.StatusCode)
+	}
+	if cfg.Provider == "jianguoyun" {
+		for _, key := range []string{"Link", "Next-Page", "X-Next-Page", "X-Page-Token", "X-Has-More"} {
+			if resp.Header.Get(key) != "" {
+				return nil, fmt.Errorf("%w：服务端返回未识别的分页响应头", ErrJianguoyunIncomplete)
+			}
+		}
+	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("WebDAV list returned HTTP %d", resp.StatusCode)
 	}
 
 	var ms struct {
+		XMLName   xml.Name `xml:"multistatus"`
 		Responses []struct {
 			Href  string `xml:"href"`
 			Props []struct {
@@ -908,17 +1269,65 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 			} `xml:"propstat"`
 		} `xml:"response"`
 	}
-	raw, err := io.ReadAll(resp.Body)
+	reader := io.Reader(resp.Body)
+	if cfg.Provider == "jianguoyun" {
+		reader = io.LimitReader(resp.Body, 8<<20)
+	}
+	raw, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Provider == "jianguoyun" && len(raw) >= 8<<20 {
+		return nil, fmt.Errorf("%w：目录响应过大", ErrJianguoyunIncomplete)
+	}
+	if cfg.Provider == "jianguoyun" {
+		depth := 0
+		decoder := xml.NewDecoder(bytes.NewReader(raw))
+		for {
+			token, decodeErr := decoder.Token()
+			if decodeErr == io.EOF {
+				break
+			}
+			if decodeErr != nil {
+				return nil, fmt.Errorf("%w：目录 XML 损坏", ErrJianguoyunIncomplete)
+			}
+			switch v := token.(type) {
+			case xml.StartElement:
+				depth++
+				local := strings.ToLower(v.Name.Local)
+				if strings.Contains(local, "cursor") || strings.Contains(local, "next") || strings.Contains(local, "hasmore") || strings.Contains(local, "page") {
+					return nil, fmt.Errorf("%w：未识别的分页字段", ErrJianguoyunIncomplete)
+				}
+				if depth == 2 && v.Name.Local != "response" {
+					return nil, fmt.Errorf("%w：未识别的分页或扩展字段", ErrJianguoyunIncomplete)
+				}
+			case xml.EndElement:
+				depth--
+			}
+		}
+	}
 	if err := xml.Unmarshal(raw, &ms); err != nil {
+		if cfg.Provider == "jianguoyun" {
+			return nil, fmt.Errorf("%w：目录 XML 损坏", ErrJianguoyunIncomplete)
+		}
 		return nil, fmt.Errorf("parse WebDAV multistatus: %w", err)
+	}
+	if cfg.Provider == "jianguoyun" && len(ms.Responses) >= 750 {
+		return nil, fmt.Errorf("%w：单次目录请求达到 750 项，官方分页协议尚未验证；请减少该目录对象数", ErrJianguoyunIncomplete)
+	}
+	if cfg.Provider == "jianguoyun" && len(ms.Responses) == 0 {
+		return nil, fmt.Errorf("%w：缺少目录响应", ErrJianguoyunIncomplete)
 	}
 
 	baseName := path.Base(strings.TrimSuffix(cfg.URL, "/"))
 	var files []CloudFile
+	seenNames := map[string]bool{}
 	for _, r := range ms.Responses {
+		if cfg.Provider == "jianguoyun" {
+			if err := validateJianguoyunHref(cfg.URL, r.Href); err != nil {
+				return nil, fmt.Errorf("%w：异常对象地址", ErrJianguoyunIncomplete)
+			}
+		}
 		href, err := url.PathUnescape(strings.TrimSpace(r.Href))
 		if err != nil {
 			href = r.Href
@@ -927,16 +1336,31 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 		if name == "" || name == baseName {
 			continue
 		}
+		if cfg.Provider == "jianguoyun" {
+			if seenNames[name] || !strings.HasSuffix(name, ".zip") {
+				return nil, fmt.Errorf("%w：重复或异常对象", ErrJianguoyunIncomplete)
+			}
+			seenNames[name] = true
+		}
 		f := CloudFile{Name: name, CreatedTime: time.Now().UTC().Format(time.RFC3339)}
+		foundLength := false
 		for _, p := range r.Props {
 			if p.Length != "" {
-				f.SizeBytes, _ = strconv.ParseInt(strings.TrimSpace(p.Length), 10, 64)
+				parsed, parseErr := strconv.ParseInt(strings.TrimSpace(p.Length), 10, 64)
+				if cfg.Provider == "jianguoyun" && (parseErr != nil || parsed < 0) {
+					return nil, fmt.Errorf("%w：无效文件大小", ErrJianguoyunIncomplete)
+				}
+				f.SizeBytes = parsed
+				foundLength = true
 			}
 			if p.Modified != "" {
 				if t, err := time.Parse(time.RFC1123, strings.TrimSpace(p.Modified)); err == nil {
 					f.CreatedTime = t.UTC().Format(time.RFC3339)
 				}
 			}
+		}
+		if cfg.Provider == "jianguoyun" && !foundLength {
+			return nil, fmt.Errorf("%w：缺少文件大小", ErrJianguoyunIncomplete)
 		}
 		files = append(files, f)
 	}
@@ -945,7 +1369,7 @@ func (s *Service) listWebDAV(cfg store.CloudConfig) ([]CloudFile, error) {
 
 // Delete removes one remote snapshot. Webhook destinations are fire-and-
 // forget and don't support deletion.
-func (s *Service) Delete(f CloudFile) error {
+func (s *Service) deleteLegacy(f CloudFile) error {
 	cfg, err := s.config()
 	if err != nil {
 		return err
@@ -958,13 +1382,24 @@ func (s *Service) Delete(f CloudFile) error {
 		}
 		return os.Remove(filepath.Join(cfg.URL, f.Name))
 
-	case "webdav":
+	case "webdav", "jianguoyun":
 		req, err := http.NewRequest(http.MethodDelete, joinURL(cfg.URL, url.PathEscape(f.Name)), nil)
 		if err != nil {
 			return err
 		}
 		applyCustomHeaders(req, cfg.HeadersJSON)
 		applyBasicAuth(req, cfg.Username, cfg.Password)
+		if cfg.Provider == "jianguoyun" {
+			resp, err := s.jianguoyunDo(req, false)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return jianguoyunStatusError("delete", resp.StatusCode)
+			}
+			return nil
+		}
 		return s.doOK(req)
 
 	case "google_drive":

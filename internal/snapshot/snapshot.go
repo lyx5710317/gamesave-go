@@ -461,10 +461,10 @@ func (m *Manager) DeleteBranch(gameID, branch string) (removed int, freed int64)
 	return removed, freed
 }
 
-// Restore extracts the given snapshot over the game's save path, taking a
-// safety snapshot of the current state first (when there is anything to
-// save). The snapshot may live on any branch, matching the JS behavior of
-// searching all branches.
+// Restore extracts the given snapshot over the game's save paths. When any
+// current location has content, a verified safety snapshot is a hard gate:
+// if it cannot be created, no current file is replaced. The snapshot may live
+// on any branch, matching the JS behavior of searching all branches.
 func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	game, err := m.Store.GetGame(gameID)
 	if err != nil {
@@ -479,22 +479,48 @@ func (m *Manager) Restore(gameID, snapshotID string) (store.Snapshot, error) {
 	// game is at its snapshot limit and this is the oldest snapshot — would
 	// delete this very snapshot's archive before we extract it. Restore from
 	// a temporary copy so the content survives that pruning.
-	restoreZip := snap.ZipPath
-	if savePathHasContent(game.SavePath) {
-		if tmp, err := copyToTempZip(snap.ZipPath); err == nil {
-			restoreZip = tmp
-			defer os.Remove(tmp)
-		}
-		safetyComment := fmt.Sprintf("Pre-rollback safety restore point (before restoring %s)", snapshotID)
-		if _, err := m.Create(gameID, safetyComment, true); err != nil {
-			// Non-fatal, same as JS: warn and continue the restore.
-			fmt.Fprintf(os.Stderr, "[snapshot] safety snapshot before restore failed: %v\n", err)
-		}
+	// Always use a private copy: validate the exact bytes we will extract,
+	// including when the current directory is empty. Retention may prune the
+	// original while creating the safety snapshot.
+	restoreZip, err := copyToTempZip(snap.ZipPath)
+	if err != nil {
+		return store.Snapshot{}, ErrRestoreArchive
+	}
+	defer os.Remove(restoreZip)
+	restoreRoots, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
+		return store.Snapshot{}, err
+	}
+	safetyComment := fmt.Sprintf("Pre-rollback safety restore point (before restoring %s)", snapshotID)
+	before, err := m.captureVerifiedCurrent(gameID, game.SavePath, restoreRoots, safetyComment)
+	if err != nil {
+		return store.Snapshot{}, err
 	}
 
-	restoreRoots, rootsErr := m.Store.GameRootPaths(gameID)
-	if rootsErr != nil {
-		restoreRoots = nil
+	// Recheck mappings/kinds after the safety hook, before any clearing. This
+	// is not a filesystem lock against external concurrent writers.
+	currentRoots, err := m.Store.GameRootPaths(gameID)
+	if err != nil || len(currentRoots) != len(restoreRoots) {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	currentGame, err := m.Store.GetGame(gameID)
+	if err != nil || currentGame.SavePath != game.SavePath {
+		return store.Snapshot{}, ErrRestoreLocation
+	}
+	for name, path := range restoreRoots {
+		if currentRoots[name] != path {
+			return store.Snapshot{}, ErrRestoreLocation
+		}
+	}
+	if err := preflightRestore(restoreZip, game.SavePath, restoreRoots); err != nil {
+		return store.Snapshot{}, err
+	}
+	after, err := readRestoreCurrentState(game.SavePath, restoreRoots)
+	if err != nil || !sameRestoreCurrentState(before, after) {
+		return store.Snapshot{}, ErrRestoreChanged
 	}
 	unplaced, err := UnzipRoots(restoreZip, game.SavePath, restoreRoots)
 	for _, name := range unplaced {
@@ -590,10 +616,8 @@ func gameOf(m *Manager, gameID string) store.Game {
 	return g
 }
 
-// SwitchBranch moves a game to another branch: auto-snapshot the current
-// save state onto the outgoing branch, clear the save location, flip the
-// active branch pointer, then restore the target branch's latest snapshot
-// (if it has one — switching to a fresh branch leaves the save cleared).
+// SwitchBranch restores an incoming snapshot through the verified whole-restore
+// gate. An intentionally empty branch still needs a verified outgoing capture.
 func (m *Manager) SwitchBranch(gameID, targetBranch string) error {
 	game, err := m.Store.GetGame(gameID)
 	if err != nil {
@@ -617,46 +641,73 @@ func (m *Manager) SwitchBranch(gameID, targetBranch string) error {
 	if !found {
 		return fmt.Errorf("branch %q does not exist", targetBranch)
 	}
-
-	// Back the outgoing state up before anything is cleared — and refuse to
-	// continue if that fails.
-	//
-	// This used to log the failure and carry on, which meant the one case
-	// where the backup mattered most was the one where it was skipped: a full
-	// disk, a locked file, a database error, and the save folder was emptied
-	// anyway with nothing to go back to. A switch that cannot be undone is not
-	// a switch worth making automatically.
-	hasContent := savePathHasContent(game.SavePath)
-	if !hasContent {
-		// A game whose main save is empty may still have a settings or mods
-		// folder full of work, and the switch below clears those too. Backing
-		// up only when the main folder has something in it would skip the
-		// backup in exactly the case where it is the only copy.
-		if paths, err := m.Store.GameRootPaths(gameID); err == nil {
-			for _, p := range paths {
-				if savePathHasContent(p) {
-					hasContent = true
-					break
-				}
+	targetSnaps, err := m.Store.ListSnapshots(gameID, targetBranch)
+	if err != nil {
+		return err
+	}
+	if len(targetSnaps) > 0 {
+		// A branch is a complete state of the game's configured locations.
+		// A snapshot made before a new location was added must not leave that
+		// location holding the outgoing branch's files after the switch.
+		mapped, err := m.Store.GameRootPaths(gameID)
+		if err != nil {
+			return ErrRestoreLocation
+		}
+		archived, err := ArchivedRoots(targetSnaps[0].ZipPath)
+		if err != nil {
+			return ErrRestoreArchive
+		}
+		seen := make(map[string]bool, len(archived))
+		for _, name := range archived {
+			seen[name] = true
+		}
+		for name := range mapped {
+			if !seen[name] {
+				return ErrRestoreLocation
 			}
 		}
-	}
-	if hasContent {
-		comment := fmt.Sprintf("Auto backup before switching to branch %q", targetBranch)
-		if _, err := m.Create(gameID, comment, true); err != nil {
-			return fmt.Errorf("could not back up the current save before switching, so nothing was changed: %w", err)
+		if _, err := m.Restore(gameID, targetSnaps[0].ID); err != nil {
+			return err
 		}
+		return m.Store.SwitchActiveBranch(gameID, targetBranch)
 	}
 
-	// Every one of the game's folders, not just the main save. A branch
-	// deliberately started empty is meant to be empty: leaving the settings
-	// and mods folders as the previous branch left them makes a "fresh run"
-	// that quietly is not one, and nothing on screen would say so. Switching
-	// to a branch that HAS a snapshot re-clears each location on the way in
-	// anyway, so this only ever adds correctness.
-	switchPaths, pathsErr := m.Store.GameRootPaths(gameID)
-	if pathsErr != nil {
-		return fmt.Errorf("read the game's save locations: %w", pathsErr)
+	// With no incoming snapshot this is a deliberately empty branch. The
+	// outgoing state still needs complete protection before any clearing.
+	switchPaths, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return ErrRestoreLocation
+	}
+	paths := []string{game.SavePath}
+	for _, path := range switchPaths {
+		for _, other := range paths {
+			if restorePathsOverlap(path, other) {
+				return ErrRestoreLocation
+			}
+		}
+		paths = append(paths, path)
+	}
+	comment := fmt.Sprintf("Auto backup before switching to branch %q", targetBranch)
+	before, err := m.captureVerifiedCurrent(gameID, game.SavePath, switchPaths, comment)
+	if err != nil {
+		return err
+	}
+	current, err := m.Store.GetGame(gameID)
+	if err != nil || current.SavePath != game.SavePath || current.ActiveBranch != game.ActiveBranch {
+		return ErrRestoreLocation
+	}
+	currentPaths, err := m.Store.GameRootPaths(gameID)
+	if err != nil || len(currentPaths) != len(switchPaths) {
+		return ErrRestoreLocation
+	}
+	for name, path := range switchPaths {
+		if currentPaths[name] != path {
+			return ErrRestoreLocation
+		}
+	}
+	after, err := readRestoreCurrentState(game.SavePath, switchPaths)
+	if err != nil || !sameRestoreCurrentState(before, after) {
+		return ErrRestoreChanged
 	}
 	if err := clearSavePath(game.SavePath); err != nil {
 		return fmt.Errorf("clear save path: %w", err)
@@ -667,30 +718,7 @@ func (m *Manager) SwitchBranch(gameID, targetBranch string) error {
 		}
 	}
 
-	if err := m.Store.SwitchActiveBranch(gameID, targetBranch); err != nil {
-		return err
-	}
-
-	// A branch with no snapshots is one deliberately started empty (see
-	// CreateBranch): there is nothing to restore, and the cleared folder is
-	// the point.
-	targetSnaps, err := m.Store.ListSnapshots(gameID, targetBranch)
-	if err != nil {
-		return err
-	}
-	if len(targetSnaps) > 0 {
-		latest := targetSnaps[0] // ListSnapshots returns newest first
-		switchRoots, rootsErr := m.Store.GameRootPaths(gameID)
-		if rootsErr != nil {
-			switchRoots = nil
-		}
-		if _, err := UnzipRoots(latest.ZipPath, game.SavePath, switchRoots); err != nil {
-			// Same as JS: a failed restore of the incoming branch is logged
-			// but the switch itself stands (branch pointer already moved).
-			fmt.Fprintf(os.Stderr, "[snapshot] failed to restore branch snapshot: %v\n", err)
-		}
-	}
-	return nil
+	return m.Store.SwitchActiveBranch(gameID, targetBranch)
 }
 
 // LatestSnapshot returns the most recent snapshot on a branch (or the
@@ -729,15 +757,53 @@ func ensureSavePathExists(savePath string) error {
 // savePathHasContent reports whether there is anything at the save path
 // worth safety-snapshotting: an existing file, or a non-empty directory.
 func savePathHasContent(savePath string) bool {
+	hasContent, _ := savePathContentStatus(savePath)
+	return hasContent
+}
+
+// savePathContentStatus is the error-reporting form used by destructive
+// operations. Treating an unreadable folder as empty would let a restore or
+// branch switch clear it without first protecting what is inside.
+func savePathContentStatus(savePath string) (bool, error) {
 	info, err := os.Stat(savePath)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
 	}
 	if !info.IsDir() {
-		return true
+		return true, nil
 	}
 	entries, err := os.ReadDir(savePath)
-	return err == nil && len(entries) > 0
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
+// gameHasSaveContent checks the primary save and every named location. A
+// restore clears all of them, so content in a config/mods location needs the
+// same safety snapshot even when the primary folder is empty.
+func (m *Manager) gameHasSaveContent(gameID, primaryPath string) (bool, error) {
+	hasContent, err := savePathContentStatus(primaryPath)
+	if err != nil || hasContent {
+		return hasContent, err
+	}
+	roots, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return false, err
+	}
+	for name, path := range roots {
+		hasContent, err := savePathContentStatus(path)
+		if err != nil {
+			return false, fmt.Errorf("inspect the %q save location: %w", name, err)
+		}
+		if hasContent {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // clearSavePath removes a single save file, or empties a save directory

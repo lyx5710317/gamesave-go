@@ -1,486 +1,117 @@
 <div align="center">
 
-<img src="cmd/opensave-app/build/appicon.png" alt="OpenSave" width="120" />
+<img src="cmd/opensave-app/build/appicon.png" alt="GameSave Go 图标" width="112" />
 
-# OpenSave
+# GameSave Go
 
-### Steam Cloud for every game you own.
-
-**OpenSave** syncs your game saves between devices, peer-to-peer — no Steam required, no accounts, no subscriptions. Point it at a folder, pair your devices, and your saves follow you everywhere.
-
-[![Release](https://img.shields.io/github/v/release/Liquid-co/OpenSave?sort=semver)](https://github.com/Liquid-co/OpenSave/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/hvBv92DZvn)
-[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Steam%20Deck-lightgrey)
-
-*A complete Go rewrite of the original Node.js/Electron app: one small native binary, no runtime to install, and wire-compatible with existing peers.*
-
-[Install](#install) · [Quick start](#quick-start) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [CLI](#command-line) · [Self-host the relay](#self-hosting-the-relay) · [FAQ](#faq) · [**Discord**](https://discord.gg/hvBv92DZvn)
-
-<br>
-
-<img src="docs/screenshots/home-library.png" alt="OpenSave library — tracked games with cover art, branches, and snapshot counts" width="850" />
+本地优先的游戏存档备份与设备同步工具，以 Windows 桌面体验为开发重点。
 
 </div>
 
----
+> **当前状态：开发中。** 桌面版当前版本号为 1.1.1，尚未发布正式安装包。现有 GitHub Actions 构建是测试候选包，不是面向公众的正式下载。未来唯一的官方下载渠道是本仓库的 [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases)。
 
-## Why OpenSave
+GameSave Go 基于开源项目 OpenSave 开发。它不要求注册 GameSave Go 账户；游戏存档保存在本机、你选择的云存储，或与你配对的设备上。使用坚果云、Google Drive 等服务时，仍需拥有相应服务的账户。
 
-Steam Cloud only covers games bought on Steam — and only when the developer opts in. Everything else (emulators, GOG, Epic, single-player games with no cloud support) is on you: manually copying save folders between your desktop, laptop, and Steam Deck, and hoping you grabbed the newest one.
+## 目前可以做什么
 
-OpenSave gives **every** game the Steam Cloud experience:
+- **管理存档位置**：自动扫描常见游戏和模拟器的存档，也能手动添加一个文件或文件夹。一个游戏有多个存档位置时，可在游戏详情中分别配置。
+- **保存本地历史**：监测已跟踪存档的变化并创建快照，也可以手动创建。可查看快照、恢复整个存档或其中的文件，并用分支保留不同游玩进度。
+- **在设备间同步**：两台设备可在局域网发现、配对并同步；不同网络可使用房间码和中继。发生不确定的冲突时需要选择保留本机、对方或双方版本，不应按修改时间自动覆盖。
+- **备份到自己的存储**：可选择坚果云、Google Drive、本地文件夹、其他 WebDAV 或 HTTP Webhook。云端快照可以浏览、只读验证；支持读取的目标可在确认后恢复。各提供商的能力和限制见下文。
+- **查看运行状态**：游戏、云备份、活动和设置页面分别用于管理存档、查看传输结果及调整同步行为。界面支持简体中文和英语。
 
-- **You own it.** Saves sync directly between *your* devices. No account to create, nothing stored on someone else's server.
-- **It's automatic.** Auto-detects hundreds of games, watches for changes, and syncs the moment a save is written.
-- **It's safe.** Every change is snapshotted and reversible. Conflicts are detected and resolved without silently clobbering a playthrough.
+这些是当前软件中已有的功能，不代表所有云服务都已通过真实账户和并发场景的发布验证。特别是**云备份不等于安全的云端双向同步**。
 
-## Features
+## 从软件界面开始
 
-- **Auto-detection** — scans for saves from Steam, emulators (RetroArch, Dolphin, Ryujinx, Yuzu, Citra, PCSX2, RPCS3, PPSSPP, Cemu, Xenia), Steam-emulator repacks (Goldberg/GSE, CODEX, RUNE, Tenoke, EMPRESS, Online-Fix, CPY, SKIDROW, 3DM, …), Epic, GOG, Unity `LocalLow`, and Unreal Engine conventions — plus the community-maintained [Ludusavi manifest](https://github.com/mtkennerly/ludusavi-manifest) covering save paths for tens of thousands of games, whatever store (or no store) they came from.
-- **Track anything** — any folder or single save file, watched live with block-level change detection (SHA-256, 64 KB–2 MB adaptive blocks). Only the blocks that changed are ever transferred.
-- **One tile per game, not one per folder** — a scan finds the same game in several places as a matter of course, and every result shows its file count, size and last-written date so you can tell the save you play from the one an old install left behind. Folders holding no files are hidden. Where a game's save is genuinely split across sibling folders, they are offered together as one game.
-- **A save split across folders is one game** — some titles keep progress in one place and settings or mods in another. Add each folder as a **save location** and all of them sync, snapshot and restore together.
-- **Files that shouldn't sync** — device-specific settings living beside the save can be excluded per game, written like a `.gitignore`, or picked from a list of what is actually in the folder. Excluded files are still captured in every snapshot, so a rule can never be the thing that loses one.
-- **P2P sync** — automatic over LAN (zero-config discovery) or across the internet through a relay **room code** — no port forwarding. A paired-device model means every connection is explicitly approved.
-- **Snapshot history** — every change creates a versioned snapshot. Roll back a whole save or a single file; branches keep parallel playthroughs (and conflict resolutions) safe.
-- **Smart conflict handling** — diverged saves are detected by **sync lineage**, not wall-clock timestamps. Keep yours, keep theirs, or keep both on a new branch.
-- **Cloud backup** — optional mirroring to Google Drive, Dropbox, OneDrive, WebDAV, a webhook, or a local/NAS folder. Any OAuth provider can use your own app credentials instead of the built-in ones — required for OneDrive, and the fix for Google Drive's weekly re-login.
-- **Cross-device game matching** — the same title tracked under different names on two machines (a Steam install here, a differently-named folder there) can be matched by Steam App ID or linked by hand. App-ID matching is opt-in, so two separate copies of a game are never merged without asking.
-- **A full command line** — `opensave` does everything the app does, for a Steam Deck in Game Mode or a headless server. See [Command line](#command-line).
-- **In-app updates** — one-click update from GitHub releases, pull a newer build straight from a paired device, or `opensave update` from the terminal.
-- **Privacy-first** — no accounts, no telemetry. The relay only routes WebSocket frames and writes no save to disk; the hop to it is encrypted, and you can self-host it so nobody else is on the path at all.
+1. 在首页点击“自动扫描”，核对找到的存档位置；如果没有找到，点击“添加文件夹”手动选择。测试时请先使用不含真实游戏进度的文件。
+2. 打开游戏详情，可手动创建快照、查看本地快照列表、设置额外存档位置和排除规则。恢复前先关闭游戏，确认所选快照确实含有需要的文件。
+3. 要备份到云端，进入“云备份”，选择目标，填写配置，打开“启用云备份，并自动镜像新快照”，然后点击“保存设置”。这个开关同时控制云端浏览、上传、恢复和新快照的自动上传；关闭不会删除已有配置或备份。
+4. 云端已有快照时，从“云备份 → 浏览云端”选择“验证”或“恢复”。游戏详情里的**本地快照列表不会自动下载云端文件**。只读验证会下载快照并消耗云盘流量，但不会恢复或覆盖存档。
+5. 要连接另一台电脑，点击首页的“添加设备”，在“设备”页面配对。局域网设备可自动发现，也可按 IP 添加；跨网络使用房间码。另一台设备的存档路径可能不同，需在本机核对并配置映射，不要把真实存档指向测试目录。
 
-## Screenshots
+替换当前存档前，程序会尝试创建并验证安全快照；如果无法证明备份成功，应停止恢复。安全检查可以降低误操作风险，但不构成对断电、磁盘故障或同时写入的绝对保证。
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="docs/screenshots/auto-scan.png" alt="Auto-scan results — detected saves as a cover-art grid" /><br>
-      <sub><b>Auto-scan</b> — 158 saves found on this PC, shown as cover art. Games, emulators, and repacks, one click to track.</sub>
-    </td>
-    <td align="center">
-      <img src="docs/screenshots/cloud-backup.png" alt="Cloud Backup — provider selection with Google Drive connected" /><br>
-      <sub><b>Cloud backup</b> — mirror snapshots to Drive, Dropbox, OneDrive, WebDAV, or a NAS folder. Optional; P2P needs no cloud.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="docs/screenshots/devices-pairing.png" alt="Devices — internet pairing with a relay room code" /><br>
-      <sub><b>Internet sync</b> — pair devices anywhere with a room code. No port forwarding, and the relay never stores saves.</sub>
-    </td>
-    <td align="center">
-      <img src="docs/screenshots/home-library.png" alt="Home — tracked library with snapshots per game" /><br>
-      <sub><b>Your library</b> — every tracked game with its branch and snapshot history, one Sync all button away.</sub>
-    </td>
-  </tr>
-</table>
+## 云备份现状
 
-## Install
+| 目标 | 当前用途与限制 |
+| --- | --- |
+| **坚果云（推荐）** | 使用官方 WebDAV 地址，快照放在独立的 `GameSaveGo/` 目录。当前按谨慎备份模式使用：上传、浏览、验证和恢复已有测试记录；远端存档库加入、祖先关系和强条件写入尚未完成。 |
+| **Google Drive** | 可选择并授权，当前同样只按备份模式使用。Google Drive 允许同名对象，并发上传后的唯一性仍需人工和真实账户验证；不能把它当作已经完成的云端双向同步。 |
+| **本地文件夹** | 可选择本机目录或已挂载的 NAS 目录作为备份目标。目标盘不可用、权限不足或空间不足时，备份仍可能失败。 |
+| **其他 WebDAV** | 保留为高级选项；服务端对不覆盖写入等条件的支持需要按实际提供商验证。 |
+| **HTTP Webhook** | 向用户指定的地址上传快照；它不是通用的可浏览、可恢复云盘，也不提供已验证的无覆盖保证。 |
+| **百度网盘、OneDrive、Dropbox** | 新配置入口暂时隐藏，已有代码和已保存配置未删除。百度网盘仍需公开应用审批及安全接入，不能作为当前可连接的正式方案。 |
+| **夸克网盘** | 暂不评估或实现。 |
 
-| Platform | Download | Run |
-|---|---|---|
-| **Windows** | `OpenSave.Setup.exe` (installer) or portable `OpenSave.exe` | Double-click |
-| **Linux** | `opensave-linux-amd64.tar.gz` | extract, then `./opensave` |
-| **Steam Deck / SteamOS** | `OpenSave.flatpak` | see [Steam Deck install](#steam-deck-install) |
+### 使用坚果云
 
-Grab the latest from the [**Releases**](https://github.com/Liquid-co/OpenSave/releases) page.
+在“云备份”选择“坚果云（推荐）”，填写**坚果云注册邮箱**和在坚果云“第三方应用管理”中单独生成的**第三方应用密码**，不要填写坚果云登录密码。官方基础地址会自动填写为 `https://dav.jianguoyun.com/dav/`，程序使用独立的 `GameSaveGo/` 远端目录。保存设置并启用云备份后，新快照会尝试自动上传；既有快照可在游戏详情中手动上传。
 
-### Steam Deck install
+Windows 版将坚果云应用密码保存在当前用户的 Windows 凭据管理器中，设置页面只显示“已配置”，不会回显密码。每台设备都需要自行配置可用凭据。免费账户有流量和请求次数限制；程序按默认 **500 MB 单文件上限**预检上传。坚果云目录一次返回 **750 项**或出现不明分页状态时，当前实现会停止使用可能不完整的清单，不会假装远端为空或继续无冲突上传。详见[坚果云设计与发布门槛](docs/JIANGUOYUN_PROVIDER.md)。
 
-> **Use `OpenSave.flatpak`, not `opensave-linux-amd64.tar.gz`.** The tarball's
-> desktop app will not start on a stock Deck: SteamOS ships no WebKitGTK, which
-> it needs to draw its window. This trips people up because the tarball's name
-> reads like the Steam Deck build.
+### 云端恢复与设备同步不是一回事
 
-The Flatpak is the build that works on a stock Deck — SteamOS ships no
-WebKitGTK and wipes manually-installed system packages on OS updates; the
-Flatpak bundles everything and survives updates.
+“浏览云端”“验证”和“恢复”用于人工查看或取回备份。只读验证检查下载的 ZIP、清单大小，并在本机存在同名快照时比较字节；它**不能证明两台设备的存档历史相同**。恢复前仍须通过本机安全快照检查。
 
-1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
-2. Download `OpenSave.flatpak` from the [Releases](https://github.com/Liquid-co/OpenSave/releases) page.
-3. Double-click it to install via Discover, or run
-   `flatpak install --user OpenSave.flatpak` in Konsole.
-4. Launch OpenSave from the application menu. Optional: add it to Steam
-   (right-click → *Add to Steam*) to open it from Game Mode.
+当前没有开放基于远端 `vault.json` 的生产级设备加入与多设备写入，也没有完成云端祖先判断和冲突解决。两台设备分别上传到同一云目录时，不要把“能看到文件”理解为可自动合并的同步状态。使用设备间实时同步，请走“添加设备”配对流程；跨互联网的中继连接加密只覆盖到中继，**不是端到端加密**，中继运营者可能读取传输内容。
 
-If you only want background syncing and no window, the **command line has no
-such constraint** — it needs no WebKitGTK and runs anywhere:
+## 当前尚未完成的部分
 
-```bash
-curl -fsSL https://opensave.org/install.sh | sh
-opensave scan && opensave service install
-sudo loginctl enable-linger $USER
-```
+- 坚果云真实账户上的完整分页、并发同名写入、可靠 ETag/CAS 等协议验证；目录清单不完整时继续故障关闭。
+- 云端 Vault 的安全加入、可证明的祖先关系、跨设备云写入与持久化重试队列。
+- 某些极端情况下的多存档位置原子恢复、并发写入及旧格式路径别名处理。导入 `.sscb` 备份时，**未跟踪游戏的覆盖恢复暂时禁用**；请先把本机目标存档添加为已跟踪游戏，再导入。
+- 通用 WebDAV 密码和部分高级提供商凭据的统一安全存储审查；不要把坚果云密码已受保护理解为所有提供商凭据都已完成加固。
+- 正式发布前的最终候选包检查、构建依赖安全审查，以及标签发布流程验证。Linux、Steam Deck 和命令行基础保留在仓库中，但不是当前已经验证的 GameSave Go 桌面发行包。
 
-Saves on the SD card are found automatically (`/run/media` is visible to
-the app), and Proton game saves are detected inside their `compatdata`
-prefixes. The plain Linux tarball also works on the Deck if you install
-`webkit2gtk-4.1` yourself, but SteamOS updates can remove it — the
-Flatpak is the supported path. A Decky plugin for Game Mode lives in
-[`opensave-decky-plugin/`](opensave-decky-plugin/).
+进度与证据分别记录在[任务表](TASKS.md)和[1.1 发布准备记录](docs/RELEASE_V1_1.md)；计划项不应被视为已发布功能。
 
-**Other handhelds / Arch-based distros (CachyOS, Bazzite-likes):** if
-your distro is *not* immutable (CachyOS isn't), the plain Linux tarball
-with your distro's `webkit2gtk-4.1` package is the best install — it
-survives updates and uses your native graphics stack. The Flatpak is
-for immutable systems like stock SteamOS.
+## 下载、校验与从源码构建
 
-**Troubleshooting:**
-- *"runtime org.gnome.Platform … not found"* during install — your
-  flatpak user installation doesn't have Flathub configured yet:
-  `flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
-  then install the bundle again.
-- The app must be launched in **Desktop Mode** (or added to Steam to run
-  from Game Mode) — running it from a bare terminal session shows no
-  window.
+**目前没有正式下载。** 发布后请只从本仓库的 [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases) 获取 GameSave Go。上游 OpenSave 网站、安装脚本及其发布页提供的不是 GameSave Go；GitHub Actions 候选文件仅供测试，不是正式安装包。
 
-> **Upgrading from the original (JS) OpenSave?** Your data migrates automatically on first launch — tracked games, snapshots, pairings, and cloud settings are imported from `~/.opensave/opensave-db.json` (kept as a backup, never deleted). Go and JS devices can pair and sync with each other during the transition.
+由于个人开源项目暂未购买商业代码签名证书，**Windows 可能出现 SmartScreen 提示**。未签名安装包没有 Windows 已验证发布者身份；如果设备策略阻止运行，不要关闭安全防护强行安装。正式发布时计划同时提供每个安装文件的 `SHA256SUMS` 和 GitHub Artifact Attestations。散列用于核对下载文件，来源证明用于核对构建仓库和提交；两者都不能保证软件没有漏洞，也不能替代 Windows 代码签名。
 
-## Quick start
-
-1. **Launch OpenSave** on your first device. It scans for installed games and shows one cover-art tile per game, with what each folder holds and when it was last written.
-2. **Track a game** — click a tile, or add any folder / save file manually. A game found in several places says **found in N folders**; open that to see which is which.
-3. **Pair a second device.** On the same network, the other device appears automatically under **Devices** — approve the request. Remote? One device creates a **room code** under **Internet Sync**; the other joins with it.
-4. **Play.** When a save changes, OpenSave snapshots it and syncs it to every paired device. There's nothing else to do.
-
-Need to undo something? Open a game's **history** and roll back a snapshot — the whole save or a single file.
-
-**New to this?** The [Getting Started guide](GETTING_STARTED.md) walks through the whole thing from a fresh install, in plain language, with what to do when something looks wrong.
-
-## How it works
-
-```
-   Device A                        Device B
- ┌──────────┐   LAN (auto-discovery)   ┌──────────┐
- │ watcher  │◀───────────────────────▶│ watcher  │
- │ snapshot │                          │ snapshot │
- │  delta   │   WAN via relay room     │  delta   │
- └────┬─────┘   (TLS to the relay)     └────┬─────┘
-      │            ┌───────────┐            │
-      └───────────▶│   relay   │◀───────────┘
-                   │ (routes,  │
-                   │  no data) │
-                   └───────────┘
-```
-
-1. **Watch** — a filesystem watcher notices a save was written (safe-write and file-lock aware, so it never grabs a half-flushed file).
-2. **Delta** — the save is chunked into content-defined blocks and SHA-256 hashed. A manifest diff finds exactly which blocks changed.
-3. **Snapshot** — the new state is recorded as an immutable, versioned snapshot on a branch.
-4. **Sync** — only the changed blocks travel to paired peers, over LAN when possible or through a stateless relay room otherwise. Lineage metadata lets the receiver detect a genuine conflict versus a fast-forward.
-
-## Command line
-
-`opensave` is a complete client, not a companion to the app: auto-detect saves,
-pair devices, sync, resolve conflicts, manage snapshots and branches, back up
-to the cloud, and run as a background service. A headless box — a NAS, a home
-server, or a Steam Deck that lives in Game Mode — never needs the desktop app.
-
-No account, no token, no server to sign up to.
-
-<p align="center">
-  <img src="docs/screenshots/cli-status.png" width="820"
-       alt="The OpenSave CLI status panel: the OpenSave wordmark in white and purple, then the version, whether the daemon is running, the device name, tracked games, paired devices and relay status, followed by suggested next commands.">
-</p>
-
-Run `opensave` on its own and it tells you what is happening right now, and what
-to do next.
-
-**[→ Full CLI guide](docs/CLI.md)** — the daemon model, which machine each
-command belongs on, and worked sequences for pairing, internet sync, running
-headless, snapshots, split saves and scripting. The tables below are the
-summary; that is the walkthrough. There is also one on the
-[website](https://open-save.vercel.app/cli.html).
-
-### Install
-
-**Linux & Steam Deck**
-
-```bash
-curl -fsSL https://opensave.org/install.sh | sh
-```
-
-**Windows** (PowerShell)
+需要自行构建当前源码时，在 Windows 上准备 Go **1.26.4 或更新版本**、Node.js **22** 和 Wails **2.12.0**。在仓库根目录运行：
 
 ```powershell
-irm https://opensave.org/install.ps1 | iex
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+$env:Path += ";$(go env GOPATH)\bin"
+Set-Location cmd/opensave-app/frontend
+npm ci
+Set-Location ..
+wails build
 ```
 
-Installs to your user folder — no root, no admin — puts it on your `PATH`, and
-shows the status panel when it is done. Downloads are verified against the
-`SHA256SUMS` published with each release; piping a script into a shell is enough
-trust on its own.
+开发构建输出位于 `cmd/opensave-app/build/bin/GameSaveGo.exe`。它不是经过正式发布流程验证的安装包。需要制作本地 NSIS 测试安装器时还要安装 NSIS，再运行 `wails build -nsis`。
 
-Three names, one program: **`opensave`**, **`os`** as a short alias, and
-`opensave-cli` (the name the Steam Deck plugin and the Linux packages use
-internally). If something on your system already answers to `os`, the installer
-leaves it alone and says so.
+发布后，可将下载文件的散列与同一 Release 中的 `SHA256SUMS` 对照，并核验构建来源，例如：
 
-To choose where it lands or pin a version:
-
-```bash
-OPENSAVE_INSTALL_DIR=/usr/local/bin OPENSAVE_VERSION=v2.2.0 sh install.sh
+```powershell
+Get-FileHash -Algorithm SHA256 '.\GameSaveGo.Setup.exe'
+gh attestation verify '.\GameSaveGo.Setup.exe' -R lyx5710317/gamesave-go
 ```
 
-Or build it: `go build -o opensave ./cmd/opensave-cli`
+## 数据、隐私与兼容性
 
-### Keeping it current
+- 默认数据目录是当前用户的 `~/.opensave/`，在 Windows 通常位于 `%USERPROFILE%\.opensave\`。其中的 `opensave.db` 保存游戏与设置，快照和安全备份位于配置的存储目录；可在“设置 → 存储”查看或调整。迁移自旧版 OpenSave 的内部目录、数据库、协议和命令行名称继续保留，以免破坏已有数据和设备配对。
+- GameSave Go 不提供自己的存档账户或托管存档服务器。启用云备份后，快照会传到你选定的目标；设备间同步也会传输存档内容。不要把测试凭据、真实存档或云服务密钥提交到仓库或问题报告中。
+- Windows 桌面版的语言可在“设置 → 常规”选择简体中文或英语。安装器的语言在安装时单独选择。
+- 继承的命令行程序名为 `opensave`。其旧版 `opensave update` 命令仍面向上游 OpenSave，**不要用它更新 GameSave Go**。仓库中的旧版网页文档也不是 GameSave Go 的官方下载站。
 
-```bash
-opensave update            # replace this binary with the latest release
-opensave update --check    # just report whether a newer one exists
+## 开发与文档
+
+提交代码前，请先阅读 [AGENTS.md](AGENTS.md)、[产品规格](SPEC_V2.md)与[任务表](TASKS.md)。本地验证命令：
+
+```powershell
+go test ./...
+Set-Location cmd/opensave-app/frontend
+npm test
+npm run build
+Set-Location ..
+wails build
 ```
 
-Pre-releases are never offered automatically — install those yourself from the
-releases page.
+更多边界与安全说明：[云端归档安全](docs/CLOUD_ARCHIVE_SAFETY.md)、[坚果云 WebDAV](docs/JIANGUOYUN_PROVIDER.md)、[远端 Vault 身份设计](docs/VAULT_IDENTITY_V2.md)、[发布准备](docs/RELEASE_V1_1.md)。
 
-### Getting started
-
-```bash
-opensave scan                          # what is on this machine
-opensave add "Elden Ring" ~/.local/share/EldenRing
-opensave daemon start &                # the sync service
-opensave pair 192.168.1.42             # pair another device on the LAN
-opensave sync --all
-```
-
-Different networks instead of a LAN? Run `opensave relay join <code>` with the
-same made-up code on both devices — no port forwarding, and the relay only
-passes encrypted data through without storing it.
-
-### Run it permanently
-
-```bash
-opensave service install
-systemctl --user enable --now opensave-daemon
-sudo loginctl enable-linger $USER     # Steam Deck: survive Game Mode switches
-```
-
-That last line matters on a Deck. Without it SteamOS stops your background
-services the moment you switch to Game Mode — which is exactly when you want
-syncing to be happening.
-
-### Command reference
-
-Every command accepts `--json` for scripting.
-
-**Games**
-
-| Command | What it does |
-| --- | --- |
-| `scan [--all]` | Auto-detect saves: Steam libraries, Proton and Wine prefixes, emulators, 20k+ titles via the Ludusavi manifest. Grouped one game at a time, with each folder's size and last-written date. Empty folders are hidden; `--all` shows them |
-| `add <name> <path>` | Track a save folder or file |
-| `add <number>` | Track the nth result from the last scan |
-| `remove <gameId>` | Stop tracking. Save files and snapshots stay on disk |
-| `untrack-all --yes` | Stop tracking everything (snapshots are kept) |
-| `game <gameId> set <key> <value>` | Per-game settings: `path`, `app-id`, `exe-path`, `cover-url`, `auto-sync`, `max-snapshots` |
-| `locations <gameId> [add\|remove]` | A game's extra save folders, for a save split across more than one place |
-| `ignore <gameId> [add\|remove\|clear\|test]` | Files that shouldn't sync, written like a `.gitignore`. `test` answers "would this sync?" |
-| `launch <gameId>` | Start the game |
-| `status` | Tracked games, branches, peers |
-
-**Sync & devices**
-
-| Command | What it does |
-| --- | --- |
-| `sync [<gameId>\|--all]` | Sync now; everything by default |
-| `peers` | Paired devices, devices found on this network, pending requests |
-| `pair <host[:port]>` | Ask a device on the LAN to pair |
-| `pair requests` | Show incoming requests, and which device sent them |
-| `pair approve\|reject <peerId>` | Answer one |
-| `unpair <peerId>` | Drop a paired device |
-| `probe <host[:port]>` | Check whether a device answers — works before pairing |
-| `forget <peerId>` | Remove a stale device record |
-| `relay join <code>` | Sync across networks — same code on each device |
-| `relay status\|leave` | Show or leave the relay room |
-| `conflicts` | Saves that diverged and are waiting on a decision |
-| `resolve <gameId> <choice>` | `keep-both` (safest), `keep-local`, `keep-remote` |
-
-**History**
-
-| Command | What it does |
-| --- | --- |
-| `snapshot <gameId> [comment]` | Snapshot the current save |
-| `snapshots <gameId>` | List snapshots, newest first |
-| `rollback <gameId> <snapId>` | Restore a snapshot |
-| `branch <gameId> <name>` | Create a branch for a parallel playthrough |
-| `checkout <gameId> <name>` | Switch branch |
-| `branch-delete <gameId> <name>` | Delete a branch and its snapshots |
-| `snapshot-delete <gameId> <snapId>` | Delete one snapshot |
-| `prune [--apply-default]` | Apply snapshot retention limits now |
-| `files <gameId> <snapId> [path]` | List a snapshot's contents, or restore a single file from it |
-| `export <gameId> <dir>` | Copy the save out exactly as the game wrote it — no archive, no wrapper |
-| `backup export\|import <file.sscb>` | Portable backup archive |
-
-**Cloud backup**
-
-| Command | What it does |
-| --- | --- |
-| `cloud status` | Provider and connection state |
-| `cloud browse` | Everything stored in the cloud |
-| `cloud list <gameId>` | Cloud snapshots for one game |
-| `cloud push <gameId>` | Upload local snapshots |
-| `cloud restore <gameId> <file>` | Pull one back |
-| `cloud delete <gameId> --yes` | Remove a game's cloud copies |
-
-Google Drive, Dropbox and OneDrive need a browser to grant consent, so those are
-connected once in the desktop app. WebDAV, webhook and local/NAS providers work
-entirely from the terminal.
-
-**Configuration**
-
-| Command | What it does |
-| --- | --- |
-| `config [list]` | Show settings |
-| `config set <key> <value>` | `device-name`, `match-by-app-id`, `snapshot-limit`, `relay-url` |
-| `scanpath list\|add\|remove <path>` | Extra folders for auto-scan to check |
-| `exclude list\|add\|remove <path>` | Folders auto-scan should skip |
-| `link <gameId> <otherId>` | Treat two tracked games as the same game |
-| `unlink <aliasId>` / `links <gameId>` | Undo a link / show linked ids |
-
-**Service**
-
-| Command | What it does |
-| --- | --- |
-| `daemon start [--port N]` | Run the daemon in the foreground |
-| `daemon status` / `daemon stop` | Check on, or stop, a daemon started by the CLI |
-| `service install\|uninstall\|status` | Manage the `systemd --user` unit (Linux) |
-| `completion bash\|zsh\|fish` | Shell completion script |
-| `upnp <port> [--delete]` | Forward a router port via UPnP |
-| `update [--check]` | Update this binary from the latest release |
-| `version` | Print the version |
-
-### Scripting
-
-```bash
-opensave daemon status --json | jq .gameCount
-opensave snapshots elden-ring --json | jq -r '.[0].id'
-opensave conflicts --json | jq 'keys'
-
-# Scan results carry what is in each folder and which rows are one game.
-# Everything found in more than one place:
-opensave scan --json | jq -r 'group_by(.groupId)[] | select(length > 1) | .[0].name'
-# Track the freshest folder of every game found, by its listed number:
-opensave scan --json | jq -r 'to_entries[] | select(.value.role=="primary") | .key + 1'
-```
-
-`scan --json` lists results in the same order the printed listing numbers them,
-so index *n* is what `add n` tracks. Each row carries `fileCount`,
-`totalBytes`, `latestMtime` and `measured`, plus `groupId` and `role`
-(`primary`, `location`, `alternative`, `inside`, `only`) saying which rows are
-one game and what each folder is. `measured: false` means the folder could not
-be read — not that it is empty.
-
-Failures exit non-zero and, with `--json`, print `{"error": "..."}`.
-
-Full details: `man opensave` (shipped in the Linux tarball), or
-[`packaging/man/opensave.1`](packaging/man/opensave.1).
-
-The daemon exposes a local REST + WebSocket API (P2P on port `8383`) that the
-desktop UI, the CLI and the Steam Deck plugin all drive, so anything the app
-can do is scriptable.
-
-## Build from source
-
-```bash
-# Desktop app (needs Go 1.26+, Node 18+, and the Wails CLI)
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-cd cmd/opensave-app && wails build
-
-# Headless daemon + CLI
-go build ./cmd/opensave-cli
-
-# Relay server (self-host)
-go build ./cmd/opensave-relay
-```
-
-Run the test suite:
-
-```bash
-go test ./...          # unit tests
-go test ./e2e/...      # end-to-end pairing & sync tests
-```
-
-## Self-hosting the relay
-
-The relay is stateless — it brokers room codes and proxies OAuth, and writes no save to disk. What it forwards is encrypted in transit, but that encryption ends at the relay rather than at your other device, so a relay operator could read what passes through. Ours is `wss://relay.opensave.org`; run your own so that nobody but you is on the path:
-
-```bash
-./opensave-relay                     # listens on :8386
-PORT=10000 ./opensave-relay          # custom port
-docker build -f relay/Dockerfile .   # or as a container
-```
-
-Point **Internet Sync → Relay server (self-hostable)** at your instance, on each device, then join the same room code on all of them. `opensave upnp 8386` forwards the port on UPnP-capable routers.
-
-**The relay itself never joins a room** — it has no such command, and nothing to configure beyond the port. Rooms come into existence when your devices ask for them. Full walkthrough, including TLS and the reverse-proxy settings WebSockets need: **[docs/RELAY.md](docs/RELAY.md)**.
-
-## Architecture
-
-```
-cmd/opensave-app       Wails desktop app (daemon embedded + Svelte UI)
-cmd/opensave-cli       Headless daemon & CLI
-cmd/opensave-relay     Stateless WAN relay (room broker + OAuth proxy)
-internal/
-  store                SQLite persistence + legacy JSON import
-  delta                Block hashing, manifest diff, patching
-  snapshot             ZIP snapshots, branches, retention
-  watcher              Save-change detection (safe-write aware, lock guard)
-  p2p                  Discovery, pairing, sync engine, LAN/WAN transports
-  cloud                Backup providers + PKCE OAuth
-  presets              Game / emulator / store save-location detection
-  api                  Local REST + WebSocket dashboard API
-  daemon               Long-running service orchestration
-  sysintegration       Tray, notifications, autostart
-opensave-decky-plugin  Steam Deck Game Mode plugin (Decky Loader)
-```
-
-The daemon speaks the same REST/WebSocket API and P2P wire protocol as the original JS app, so old and new versions interoperate during a rollout.
-
-## Data & privacy
-
-Everything lives under `~/.opensave/`:
-
-| Path | What |
-|---|---|
-| `opensave.db` | SQLite store — tracked games, snapshots, pairings, settings |
-| `snapshots/` | Versioned save snapshots |
-| `opensave.log` | Activity log for diagnostics |
-| `opensave-db.json` | Legacy JS database (kept as an import backup) |
-
-No accounts, no telemetry, no analytics. See [PRIVACY.md](PRIVACY.md) for the full statement.
-
-## FAQ
-
-**Do I need a server or an account?**
-No. Devices sync directly. The optional relay only matters for syncing across the internet, and you can self-host it.
-
-**Is my data encrypted in transit?**
-Yes, to the relay — the connection is TLS, and the relay writes no save to disk. But that encryption ends at the relay rather than at your other device, so saves are not sealed end-to-end yet and a relay operator could read what passes through. LAN sync is direct and involves no relay; self-hosting the relay puts the whole WAN path under your control too.
-
-**What if two devices change the same save while offline?**
-OpenSave detects the divergence by sync lineage and asks you to keep yours, theirs, or both (on a new branch). It never silently overwrites.
-
-**Does it work with non-Steam or emulated games?**
-Yes. If it writes a save to disk, OpenSave can track it — Steam, emulators, GOG, Epic, and repacks are auto-detected; anything else you can add by path.
-
-**Can old (JS) and new (Go) versions talk to each other?**
-Yes, during the transition. They share the same wire protocol and your data migrates automatically.
-
-## Contributing
-
-Issues and pull requests are welcome. Please run `go test ./...` before opening a PR, and keep changes focused. For larger features, open an issue first so we can align on approach.
-
-## Documentation
-
-- [Getting Started](GETTING_STARTED.md) — start here if OpenSave is new to you. The whole thing from a fresh install, in plain language
-- [User Guide](USER_GUIDE.md) — the reference: every feature, what each setting does, troubleshooting
-- [Command line](docs/CLI.md) — the CLI end to end: the daemon model, which machine each command runs on, task-by-task sequences, scripting
-- [Running your own relay](docs/RELAY.md) — self-hosting, TLS, and the reverse-proxy settings WebSockets need
-- [Changelog](CHANGELOG.md) — release notes
-- [Privacy](PRIVACY.md) — what OpenSave does and doesn't do with your data
-
-## License
-
-[MIT](LICENSE) — retains the original author's copyright and credits the Go rewrite.
+项目采用 [MIT 许可证](LICENSE)，保留原 OpenSave 作者、Go 重写及后续贡献者的版权信息；第三方说明见 [NOTICE.md](NOTICE.md)。

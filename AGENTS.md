@@ -42,4 +42,4 @@ Record PASS, FAIL, or SKIPPED with the real reason. Never substitute an assumpti
 
 ## Product constraints
 
-The project is Windows-first, open-source, local-first, bring-your-own-cloud, and accountless. Preserve upstream cross-platform foundations. Follow `SPEC_V2.md` for product behavior and keep `TASKS.md` current. Baidu is the planned mainland-China primary provider; Quark remains a candidate until official third-party native-client support is verified.
+The project is Windows-first, open-source, local-first, bring-your-own-cloud, and accountless. Preserve upstream cross-platform foundations. Follow `SPEC_V2.md` for product behavior and keep `TASKS.md` current. Jianguoyun through official WebDAV is the near-term mainland-China recommendation; Baidu remains the later large-capacity strategy pending public-app approval and safe integration. Quark remains a candidate until official third-party native-client support is verified.

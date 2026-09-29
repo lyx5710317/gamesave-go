@@ -14,6 +14,7 @@ import (
 
 	"github.com/opensave/opensave/internal/daemon"
 	"github.com/opensave/opensave/internal/presets"
+	"github.com/opensave/opensave/internal/store"
 )
 
 type testServer struct {
@@ -21,6 +22,21 @@ type testServer struct {
 	daemon  *daemon.Daemon
 	server  *Server
 	saveDir string
+}
+
+func TestPeerPayloadDoesNotOfferSyncVersionAsDesktopUpdate(t *testing.T) {
+	ts := startTestServer(t)
+	if err := ts.daemon.Store.UpsertPeer(store.Peer{ID: "legacy-peer", Name: "Original peer", Status: "online"}); err != nil {
+		t.Fatal(err)
+	}
+	peerMap := ts.server.peersPayload()["peers"].(map[string]any)
+	raw, err := json.Marshal(peerMap["legacy-peer"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("hasNewerBuild")) {
+		t.Fatalf("peer sync build was exposed as a desktop update offer: %s", raw)
+	}
 }
 
 func startTestServer(t *testing.T) *testServer {

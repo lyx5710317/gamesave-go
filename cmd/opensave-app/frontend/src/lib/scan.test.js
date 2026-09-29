@@ -138,6 +138,23 @@ describe('contentsLabel', () => {
     expect(label).toContain('1 file ');
     expect(label).not.toContain('1 files');
   });
+
+  it('uses the supplied translator for every user-visible fragment', () => {
+    const messages = {
+      'home.scan.contents.files': '{count}{plus} 个文件',
+      'home.scan.contents.details': '{files} · {size} · {age}',
+      'home.scan.age.justNow': '刚刚'
+    };
+    const translate = (key, params = {}) =>
+      messages[key].replace(/\{(\w+)\}/g, (_, name) => String(params[name]));
+    const label = contentsLabel(
+      { measured: true, fileCount: 3, totalBytes: 1024, latestMtime: now / 1000, truncated: true },
+      now,
+      translate
+    );
+
+    expect(label).toBe('3+ 个文件 · 1.0 KB · 刚刚');
+  });
 });
 
 describe('fmtAge', () => {
