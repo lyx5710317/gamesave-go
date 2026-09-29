@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,11 +31,19 @@ type Server struct {
 
 	httpServer *http.Server
 	listener   net.Listener
+	// Conflict resolutions run after their HTTP request completes. Stop must
+	// cancel and drain them before the daemon closes its snapshot store.
+	backgroundMu     sync.Mutex
+	backgroundJobs   sync.WaitGroup
+	backgroundCtx    context.Context
+	cancelBackground context.CancelFunc
+	stopping         bool
 }
 
 // New assembles the router and hub around a daemon.
 func New(d *daemon.Daemon) *Server {
-	s := &Server{Daemon: d, Hub: NewHub()}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{Daemon: d, Hub: NewHub(), backgroundCtx: ctx, cancelBackground: cancel}
 	s.Hub.InitPayload = s.initPayload
 
 	// Live-forward activity log entries to connected dashboards.
@@ -224,6 +233,10 @@ func (s *Server) writeAddrFile(addr string) {
 
 // Stop shuts the HTTP server down gracefully.
 func (s *Server) Stop() {
+	s.backgroundMu.Lock()
+	s.stopping = true
+	s.cancelBackground()
+	s.backgroundMu.Unlock()
 	// Remove the published address first: a stale file points clients at a
 	// port nothing is listening on.
 	_ = os.Remove(s.addrFilePath())
@@ -232,6 +245,20 @@ func (s *Server) Stop() {
 		defer cancel()
 		_ = s.httpServer.Shutdown(ctx)
 	}
+	// Add cannot race Wait: setting stopping under the same mutex closes the
+	// admission gate before waiting. A pending safety snapshot must finish
+	// before Daemon.Stop closes SQLite and its backup directory.
+	s.backgroundJobs.Wait()
+}
+
+func (s *Server) beginBackgroundTask() (context.Context, bool) {
+	s.backgroundMu.Lock()
+	defer s.backgroundMu.Unlock()
+	if s.stopping {
+		return nil, false
+	}
+	s.backgroundJobs.Add(1)
+	return s.backgroundCtx, true
 }
 
 // corsLocalhost adds permissive CORS headers for local requests and
