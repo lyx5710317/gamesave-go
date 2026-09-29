@@ -2,9 +2,11 @@ package p2p
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/opensave/opensave/internal/delta"
 	"github.com/opensave/opensave/internal/store"
 )
 
@@ -94,6 +96,27 @@ func TestEnsureManifestGameKeepsExistingSameMachineTemporaryPath(t *testing.T) {
 		Name: "Missing Temporary Test", SavePath: missing,
 	}); err == nil {
 		t.Fatal("a missing temporary destination must require an explicit path")
+	}
+}
+
+func TestEnsureManifestGameKeepsExistingCurrentTempWithProfileAlias(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows profile aliases are required for this case")
+	}
+	e, _ := newMatchTestEngine(t)
+	savePath := t.TempDir()
+	t.Setenv("USERPROFILE", filepath.Join(t.TempDir(), "different-profile"))
+	if strings.EqualFold(filepath.Clean(delta.TranslatePathToLocal(savePath, nil)), filepath.Clean(savePath)) {
+		t.Skip("temporary path is not under a translated Windows user profile")
+	}
+	game, err := e.ensureManifestGame("current-temp-alias", manifestGameQuery{
+		Name: "Current Temp Alias", SavePath: savePath,
+	})
+	if err != nil {
+		t.Fatalf("an existing path under this process's temp root must not be guessed away: %v", err)
+	}
+	if !strings.EqualFold(filepath.Clean(game.SavePath), filepath.Clean(savePath)) {
+		t.Errorf("save path = %q, want existing path %q", game.SavePath, savePath)
 	}
 }
 

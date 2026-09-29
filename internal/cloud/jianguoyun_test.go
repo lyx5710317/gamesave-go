@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -603,10 +604,11 @@ func TestJianguoyunSameNameConcurrentUploadKeepsFirst(t *testing.T) {
 		}(i, filePath)
 	}
 	wg.Wait()
-	successes, conflicts := 0, 0
-	for _, err := range errs {
+	successes, conflicts, winner := 0, 0, -1
+	for i, err := range errs {
 		if err == nil {
 			successes++
+			winner = i
 		} else if errors.Is(err, ErrRemoteSnapshotConflict) {
 			conflicts++
 		} else {
@@ -615,7 +617,17 @@ func TestJianguoyunSameNameConcurrentUploadKeepsFirst(t *testing.T) {
 	}
 	fixture.Lock()
 	defer fixture.Unlock()
-	if successes != 1 || conflicts != 1 || fixture.realPuts != 1 || len(fixture.objects[name]) == 0 {
+	if winner < 0 {
+		t.Fatalf("concurrent upload had no winner: results=%v", errs)
+	}
+	// Both clients may pass the empty-list preflight and send a PUT; the
+	// fixture counts attempted PUTs before rejecting the second with 412.
+	// The invariant is exactly one accepted upload and unchanged winner bytes.
+	want, err := os.ReadFile(paths[winner])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if successes != 1 || conflicts != 1 || fixture.realPuts < 1 || fixture.realPuts > 2 || !bytes.Equal(fixture.objects[name], want) {
 		t.Fatalf("concurrent upload was not create-only: success=%d conflict=%d realPUTs=%d", successes, conflicts, fixture.realPuts)
 	}
 }

@@ -453,6 +453,16 @@ func (e *Engine) ensureManifestGame(gameID string, q manifestGameQuery) (store.G
 	// path that already exists *unchanged* on this machine is not a guess.
 	if (temporaryAutoTrackPath(q.SavePath) || temporaryAutoTrackPath(localPath)) &&
 		!hasExplicitPathTranslation(q.SavePath, rules) {
+		// On Windows the runner (and some user profiles) can spell the same
+		// temporary directory through a different profile/home alias. Prefer
+		// the original path only when it is already inside THIS process's temp
+		// root and exists; never create a guessed translated temp folder.
+		if rel, err := filepath.Rel(os.TempDir(), q.SavePath); err == nil &&
+			rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			if _, err := os.Stat(q.SavePath); err == nil {
+				localPath = q.SavePath
+			}
+		}
 		_, statErr := os.Stat(localPath)
 		if !strings.EqualFold(filepath.Clean(q.SavePath), filepath.Clean(localPath)) || statErr != nil {
 			return store.Game{}, fmt.Errorf("cannot auto-track %q from an unmapped temporary save path — set the save path on this device manually or add a path translation rule", q.Name)
