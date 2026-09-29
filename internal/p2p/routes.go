@@ -675,7 +675,18 @@ func (e *Engine) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 // removePeerRequestedPath is idempotent for a path already absent, but never
 // reports a locked file or non-empty directory as successfully deleted.
 func removePeerRequestedPath(full string) error {
-	_ = os.Chmod(full, 0o666)
+	info, statErr := os.Lstat(full)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	}
+	if statErr != nil {
+		return statErr
+	}
+	// Removing the execute bit from a Unix directory makes its contents
+	// inaccessible; only a regular Windows read-only file may need chmod.
+	if info.Mode().IsRegular() {
+		_ = os.Chmod(full, 0o666)
+	}
 	err := os.Remove(full)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
