@@ -267,8 +267,28 @@ still-unrun Linux/Flatpak/SHA256SUMS publication path. A local attempt to
 download the candidate artifact for independent Windows inspection stalled on
 this host; no local executable hash or guest test is claimed for this run.
 
+A second branch candidate at commit `127e1c5` passed
+[run 36546639311](https://github.com/lyx5710317/gamesave-go/actions/runs/36546639311)
+on 2026-09-29. The separate verification job passed again and logged these
+SHA-256 values for its downloaded Windows files (candidate-only, not Release
+assets):
+
+| File | SHA-256 |
+| --- | --- |
+| `GameSaveGo.Setup.exe` | `e8ce3b55acda3d6b643a0745cfdbf69d458a7270f411ef23d40b8bbe903d5aed` |
+| `GameSaveGo.exe` | `cffad438a5c266c8aeea71b8a1d3a64b467ab6c837ac0b0983332b2188aa3daa` |
+| `opensave-cli.exe` | `5362e786de5f40996d6fdeea276d846c512c811e3d758811cf5fe5c367a08270` |
+| `opensave-relay.exe` | `b3475f708260b2e5ac06ce2fa7e97234959f6824e9a6e1cc36d6aa0a204cd79c` |
+
+Local final checks for this policy change: focused release-workflow Go test
+PASS; `go test ./...` PASS; frontend `npm test` PASS (114 tests); frontend
+`npm run build` PASS; `wails build` PASS. The public tag/release workflow and
+release manifest attestation remain **SKIPPED** because no tag was created and
+the explicit publication gate is not enabled. This candidate has not been
+installed or independently downloaded to the local Windows VM.
+
 Do not publish a formal installer or public test download yet. The remaining
-dependency/security findings, attestation rehearsal and clean-VM matrix must be
+dependency/security findings, tagged-path attestation rehearsal and clean-VM matrix must be
 verified on the same candidate first:
 
 1. From a known clean VM snapshot, install a prior reviewed installer as a
