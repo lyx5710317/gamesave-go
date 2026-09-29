@@ -311,7 +311,8 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		verifyScript.WriteString(step.Run)
 	}
 	if !strings.Contains(verifyScript.String(), "gh attestation verify") ||
-		!strings.Contains(verifyScript.String(), "--source-digest") {
+		!strings.Contains(verifyScript.String(), "--source-digest") ||
+		!strings.Contains(verifyScript.String(), "sha256sum") {
 		t.Fatal("candidate does not verify provenance against its exact commit")
 	}
 	release, ok := workflow.Jobs["release"]
@@ -361,6 +362,10 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 	if !strings.Contains(string(readme), "Windows 可能出现 SmartScreen 提示") ||
 		!strings.Contains(string(readme), "github.com/lyx5710317/gamesave-go/releases") {
 		t.Fatal("official download channel or unsigned Windows warning is missing")
+	}
+	if strings.Contains(string(readme), "https://opensave.org/install") ||
+		strings.Contains(string(readme), "github.com/Liquid-co/OpenSave/releases") {
+		t.Fatal("README must not offer upstream downloads as GameSave Go packages")
 	}
 }
 

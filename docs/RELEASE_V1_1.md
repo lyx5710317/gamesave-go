@@ -255,6 +255,18 @@ the lockfile refresh passed, but its installer is unsigned. Do not represent
 either historical candidate as a formal release; both predate the new
 attestation gate.
 
+The unsigned, attested Windows candidate at commit `77ef534` passed the
+[branch-only GitHub run 36543874720](https://github.com/lyx5710317/gamesave-go/actions/runs/36543874720)
+on 2026-09-29. Its Windows job produced and attested the final installer,
+portable app, CLI and relay executables. A separate Ubuntu job downloaded the
+artifact and verified all four bytes against the expected repository, workflow,
+branch ref and commit. Preflight passed; Linux, Flatpak, relay Docker and public
+release jobs were skipped as designed. This demonstrates Windows candidate
+provenance only, not a public release, a Windows publisher signature, or the
+still-unrun Linux/Flatpak/SHA256SUMS publication path. A local attempt to
+download the candidate artifact for independent Windows inspection stalled on
+this host; no local executable hash or guest test is claimed for this run.
+
 Do not publish a formal installer or public test download yet. The remaining
 dependency/security findings, attestation rehearsal and clean-VM matrix must be
 verified on the same candidate first:

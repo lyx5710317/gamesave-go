@@ -80,65 +80,27 @@ gh attestation verify '.\GameSaveGo.Setup.exe' -R lyx5710317/gamesave-go
 ```
 
 将第一条命令的结果与同一 Release 的 `SHA256SUMS` 中对应文件名比较。
-以下 Steam Deck 内容仅介绍继承的**上游 OpenSave** 兼容分发，不是 GameSave Go 的官方下载。
+本仓库保留了上游 OpenSave 的跨平台代码，但上游网站、安装脚本和下载页不分发 GameSave Go。
 
-### Steam Deck install
+### Steam Deck status
 
-> **Use `OpenSave.flatpak`, not `opensave-linux-amd64.tar.gz`.** The tarball's
-> desktop app will not start on a stock Deck: SteamOS ships no WebKitGTK, which
-> it needs to draw its window. This trips people up because the tarball's name
-> reads like the Steam Deck build.
-
-The Flatpak is the build that works on a stock Deck — SteamOS ships no
-WebKitGTK and wipes manually-installed system packages on OS updates; the
-Flatpak bundles everything and survives updates.
-
-1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
-2. Download `OpenSave.flatpak` from the [Releases](https://github.com/Liquid-co/OpenSave/releases) page.
-3. For an upstream OpenSave Flatpak, double-click it to install via Discover, or run
-   `flatpak install --user OpenSave.flatpak` in Konsole.
-4. Launch OpenSave from the application menu. Optional: add it to Steam
-   (right-click → *Add to Steam*) to open it from Game Mode.
-
-If you only want background syncing and no window, the **command line has no
-such constraint** — it needs no WebKitGTK and runs anywhere:
-
-```bash
-curl -fsSL https://opensave.org/install.sh | sh
-opensave scan && opensave service install
-sudo loginctl enable-linger $USER
-```
-
-Saves on the SD card are found automatically (`/run/media` is visible to
-the app), and Proton game saves are detected inside their `compatdata`
-prefixes. The plain Linux tarball also works on the Deck if you install
-`webkit2gtk-4.1` yourself, but SteamOS updates can remove it — the
-Flatpak is the supported path. A Decky plugin for Game Mode lives in
-[`opensave-decky-plugin/`](opensave-decky-plugin/).
-
-**Other handhelds / Arch-based distros (CachyOS, Bazzite-likes):** if
-your distro is *not* immutable (CachyOS isn't), the plain Linux tarball
-with your distro's `webkit2gtk-4.1` package is the best install — it
-survives updates and uses your native graphics stack. The Flatpak is
-for immutable systems like stock SteamOS.
-
-**Troubleshooting:**
-- *"runtime org.gnome.Platform … not found"* during install — your
-  flatpak user installation doesn't have Flathub configured yet:
-  `flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
-  then install the bundle again.
-- The app must be launched in **Desktop Mode** (or added to Steam to run
-  from Game Mode) — running it from a bare terminal session shows no
-  window.
+The inherited Linux/Steam Deck code remains in this repository, but a GameSave
+Go Flatpak has not yet passed release validation. Do not download an upstream
+OpenSave package or run an upstream installation script expecting GameSave Go.
+If a GameSave Go Steam Deck package is published, obtain it only from this
+repository's GitHub Releases and check its SHA-256 and provenance first.
+The inherited Decky plugin source remains in
+[`opensave-decky-plugin/`](opensave-decky-plugin/); it is not currently a
+validated GameSave Go download.
 
 > **Upgrading from the original (JS) OpenSave?** Your data migrates automatically on first launch — tracked games, snapshots, pairings, and cloud settings are imported from `~/.opensave/opensave-db.json` (kept as a backup, never deleted). Go and JS devices can pair and sync with each other during the transition.
 
 ## Quick start
 
-1. **Launch OpenSave** on your first device. It scans for installed games and shows one cover-art tile per game, with what each folder holds and when it was last written.
+1. **Launch GameSave Go** on your first device. It scans for installed games and shows one cover-art tile per game, with what each folder holds and when it was last written.
 2. **Track a game** — click a tile, or add any folder / save file manually. A game found in several places says **found in N folders**; open that to see which is which.
 3. **Pair a second device.** On the same network, the other device appears automatically under **Devices** — approve the request. Remote? One device creates a **room code** under **Internet Sync**; the other joins with it.
-4. **Play.** When a save changes, OpenSave snapshots it and syncs it to every paired device. There's nothing else to do.
+4. **Play.** When a save changes, GameSave Go snapshots it and syncs it to every paired device. There's nothing else to do.
 
 Need to undo something? Open a game's **history** and roll back a snapshot — the whole save or a single file.
 
@@ -189,45 +151,22 @@ summary; that is the walkthrough.
 
 ### Install
 
-**Linux & Steam Deck**
-
-```bash
-curl -fsSL https://opensave.org/install.sh | sh
-```
-
-**Windows** (PowerShell)
-
-```powershell
-irm https://opensave.org/install.ps1 | iex
-```
-
-Installs to your user folder — no root, no admin — puts it on your `PATH`, and
-shows the status panel when it is done. Downloads are verified against the
-`SHA256SUMS` published with each release; piping a script into a shell is enough
-trust on its own.
+GameSave Go CLI packages are not yet published. Build this fork's CLI from
+source (`go build -o opensave ./cmd/opensave-cli`), or wait for a checked
+package on this repository's GitHub Releases. Upstream OpenSave installation
+scripts install a different product and are not a GameSave Go download path.
 
 Three names, one program: **`opensave`**, **`os`** as a short alias, and
 `opensave-cli` (the name the Steam Deck plugin and the Linux packages use
 internally). If something on your system already answers to `os`, the installer
 leaves it alone and says so.
 
-To choose where it lands or pin a version:
-
-```bash
-OPENSAVE_INSTALL_DIR=/usr/local/bin OPENSAVE_VERSION=v2.2.0 sh install.sh
-```
-
-Or build it: `go build -o opensave ./cmd/opensave-cli`
-
 ### Keeping it current
 
-```bash
-opensave update            # replace this binary with the latest release
-opensave update --check    # just report whether a newer one exists
-```
-
-Pre-releases are never offered automatically — install those yourself from the
-releases page.
+The inherited `opensave update` CLI command targets upstream OpenSave. Do not
+use it to update GameSave Go: it could replace a fork build with an upstream
+binary. Once GameSave Go publishes CLI binaries, update from this repository's
+GitHub Releases after checking `SHA256SUMS` and Artifact Attestations.
 
 ### Getting started
 
