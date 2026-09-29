@@ -123,8 +123,13 @@ safety snapshot, rechecks observed changes/mappings, and only then clears
 the configured locations. Corrupt or unmapped incoming snapshots must not be
 reported as a successful switch. An I/O failure during multi-root clearing,
 or a database pointer failure after filesystem replacement, is not yet an
-atomic rollback guarantee. The separate untracked backup-import path still
-requires equivalent preflight and capture validation.
+atomic rollback guarantee. Untracked games in a v2 backup-file import are now
+skipped in both snapshot and overwrite modes: the archive's recorded path is
+never used as a live restore destination. The user must first track the game
+with its local save folder, then re-import so the existing tracked-game
+restore safeguards apply. This temporary fail-closed policy is not an
+implementation of safe untracked restore or transactional multi-root
+publication.
 
 Cloud downloads and read-only verification now reject ambiguous ZIP extraction
 paths before publishing/importing an archive: duplicate paths, non-canonical
@@ -188,6 +193,8 @@ single-file restore exercise. Record this as owner-reported PASS only; no exact
 two-device executable hashes or independently measured file tree were supplied.
 
 Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The next proposed stable tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for the remaining publication gates.
+
+Desktop update notices must come only from verified GameSave Go releases in the project's GitHub repository. A peer's inherited core version (for example `2.3.1`) is sync compatibility metadata, never a desktop update offer; peer binary installation remains disabled until a separate verified product-identity design is approved. The Windows tray follows the selected desktop UI language, while the installer asks for its own English/简体中文 language because the UI preference is not available before installation.
 
 ## Security and data ownership
 
