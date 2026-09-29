@@ -21,7 +21,6 @@ import (
 	"github.com/opensave/opensave/internal/logging"
 	"github.com/opensave/opensave/internal/p2p/syncengine"
 	"github.com/opensave/opensave/internal/store"
-	"github.com/opensave/opensave/internal/version"
 )
 
 // Server hosts the REST API and dashboard WebSocket for one daemon.
@@ -65,18 +64,17 @@ func (s *Server) peersPayload() map[string]any {
 	builds := s.Daemon.P2P.PeerBuilds()
 	peerMap := map[string]any{}
 	for _, p := range peers {
-		// Attach the peer's live app build info so the UI can offer
-		// "update from this device" when a peer runs a newer build.
+		// Preserve the inherited peer build metadata for protocol clients, but
+		// never treat its 2.x sync-component version as a GameSave Go desktop
+		// release. Product updates come only from this fork's release feed.
 		entry := struct {
 			store.Peer
-			AppVersion    string `json:"appVersion,omitempty"`
-			BuildTimeMs   int64  `json:"buildTimeMs,omitempty"`
-			HasNewerBuild bool   `json:"hasNewerBuild,omitempty"`
+			AppVersion  string `json:"appVersion,omitempty"`
+			BuildTimeMs int64  `json:"buildTimeMs,omitempty"`
 		}{Peer: p}
 		if b, ok := builds[p.ID]; ok {
 			entry.AppVersion = b.AppVersion
 			entry.BuildTimeMs = b.BuildTimeMs
-			entry.HasNewerBuild = version.NewerThanLocal(b.AppVersion, b.BuildTimeMs)
 		}
 		peerMap[p.ID] = entry
 	}

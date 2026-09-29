@@ -10,6 +10,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	opensave "github.com/opensave/opensave"
@@ -38,18 +39,31 @@ const productName = "GameSave Go"
 // App is the Wails-bound bridge between the webview frontend and the
 // embedded daemon. Methods on it are callable from JS.
 type App struct {
-	ctx         context.Context
-	daemon      *daemon.Daemon
-	server      *api.Server
-	addr        string
-	bootErr     string
-	reallyQuit  bool
-	updatedFrom string // previous version when this run is the first on a new build
+	ctx               context.Context
+	daemon            *daemon.Daemon
+	server            *api.Server
+	addr              string
+	bootErr           string
+	reallyQuit        bool
+	updatedFrom       string // previous version when this run is the first on a new build
+	trayChinese       atomic.Bool
+	trayLocaleChanged chan struct{}
 }
 
 // NewApp creates the App shell (daemon boots in startup).
 func NewApp() *App {
-	return &App{}
+	return &App{trayLocaleChanged: make(chan struct{}, 1)}
+}
+
+// SetTrayLocale follows the device-local UI preference. The frontend keeps
+// opensave.locale in localStorage; the tray needs this explicit native bridge
+// because it cannot read WebView storage. Unknown languages fall back to en.
+func (a *App) SetTrayLocale(language string) {
+	a.trayChinese.Store(language == "zh-CN")
+	select {
+	case a.trayLocaleChanged <- struct{}{}:
+	default:
+	}
 }
 
 // startup boots the daemon + local API server once the webview exists.
@@ -70,8 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	// Detect "first run after an update" so the UI can greet with the
-	// changelog — this is how users see what's new after a peer-to-peer
-	// update, which carries no release notes of its own. A rebuild of the
+	// changelog. A rebuild of the
 	// same version (build timestamp changed, version didn't) is not an
 	// update worth announcing.
 	a.updatedFrom = stampVersionFile(d.Paths.HomeDir)

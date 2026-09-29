@@ -34,6 +34,35 @@ var trayIconPNG []byte
 // trayReady is true once the tray icon is actually up.
 var trayReady atomic.Bool
 
+type trayLabels struct {
+	title, tooltip, open, openHint, sync, syncHint, quit, quitHint string
+}
+
+func labelsForTray(chinese bool) trayLabels {
+	if chinese {
+		return trayLabels{
+			title:    productName + " · 游戏存档",
+			tooltip:  productName + " — 游戏存档备份与同步",
+			open:     "打开 " + productName,
+			openHint: "显示 " + productName + " 窗口",
+			sync:     "同步所有游戏",
+			syncHint: "立即同步所有已添加的游戏",
+			quit:     "退出",
+			quitHint: "停止同步并退出程序",
+		}
+	}
+	return trayLabels{
+		title:    productName,
+		tooltip:  productName + " — game save backup and sync",
+		open:     "Open " + productName,
+		openHint: "Show the " + productName + " window",
+		sync:     "Sync all games",
+		syncHint: "Sync every tracked game now",
+		quit:     "Quit",
+		quitHint: "Stop syncing and exit",
+	}
+}
+
 func trayIconBytes() []byte {
 	if runtime.GOOS == "windows" {
 		return trayIconICO // Windows wants ICO
@@ -45,19 +74,30 @@ func trayIconBytes() []byte {
 func (a *App) startTray() {
 	go systray.Run(func() {
 		systray.SetIcon(trayIconBytes())
-		systray.SetTitle(productName)
-		systray.SetTooltip(productName + " — game save backup and sync")
+		labels := labelsForTray(a.trayChinese.Load())
+		systray.SetTitle(labels.title)
+		systray.SetTooltip(labels.tooltip)
 
-		openItem := systray.AddMenuItem("Open "+productName, "Show the "+productName+" window")
-		syncItem := systray.AddMenuItem("Sync all games", "Sync every tracked game now")
+		openItem := systray.AddMenuItem(labels.open, labels.openHint)
+		syncItem := systray.AddMenuItem(labels.sync, labels.syncHint)
 		systray.AddSeparator()
-		quitItem := systray.AddMenuItem("Quit", "Stop syncing and exit")
+		quitItem := systray.AddMenuItem(labels.quit, labels.quitHint)
 
 		trayReady.Store(true)
 
 		go func() {
 			for {
 				select {
+				case <-a.trayLocaleChanged:
+					labels := labelsForTray(a.trayChinese.Load())
+					systray.SetTitle(labels.title)
+					systray.SetTooltip(labels.tooltip)
+					openItem.SetTitle(labels.open)
+					openItem.SetTooltip(labels.openHint)
+					syncItem.SetTitle(labels.sync)
+					syncItem.SetTooltip(labels.syncHint)
+					quitItem.SetTitle(labels.quit)
+					quitItem.SetTooltip(labels.quitHint)
 				case <-openItem.ClickedCh:
 					a.showWindow()
 				case <-syncItem.ClickedCh:

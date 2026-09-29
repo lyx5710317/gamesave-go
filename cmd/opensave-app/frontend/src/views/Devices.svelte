@@ -1,6 +1,6 @@
 <script>
-  import { peers, discoveredPeers, wanRoom, appUpdate, toast, askConfirm } from '../lib/stores.js';
-  import { api, native } from '../lib/api.js';
+  import { peers, discoveredPeers, wanRoom, toast, askConfirm } from '../lib/stores.js';
+  import { api } from '../lib/api.js';
   import InternetSync from './InternetSync.svelte';
   import { locale, t } from '../lib/i18n.js';
 
@@ -39,18 +39,6 @@
     run(() => api.del(`/api/peers/${peer.id}`), $t('devices.unpaired', { name: peer.name }));
   };
 
-  // Peer-to-peer app update: pull the newer build the peer is running and
-  // install it here — no manually copying the exe between machines.
-  const updateFromPeer = async (peer) => {
-    const ok = await askConfirm(
-      $t('devices.updateConfirm', { name: peer.name, version: peer.appVersion }),
-      { title: $t('devices.updateTitle'), confirmText: $t('devices.updateAction') }
-    );
-    if (!ok) return;
-    const err = await native.installFromPeer(peer.id);
-    if (err) toast($locale === 'zh-CN' ? $t('devices.operationFailed') : err, 'error');
-  };
-
   const fmtTime = (time) => (time ? new Date(time).toLocaleString($locale) : $t('devices.never'));
 </script>
 
@@ -79,14 +67,8 @@
           <div class="peer-meta">
             {peer.address === 'relay' ? $t('devices.internetRelay') : `🖧 ${peer.address}:${peer.port}`}
             · {$t('devices.lastSynced', { time: fmtTime(peer.lastSynced) })}
-            {#if peer.appVersion}· {$t('devices.syncBuild', { version: peer.appVersion })}{/if}
           </div>
         </div>
-        {#if peer.hasNewerBuild && peer.status === 'online'}
-          <button class="btn small primary" disabled={busy || !!$appUpdate} on:click={() => updateFromPeer(peer)}>
-            ⬆ {$t('devices.updateFromPeer')}
-          </button>
-        {/if}
         <button class="btn small danger" disabled={busy} on:click={() => unpair(peer)}>{$t('devices.unpair')}</button>
       </div>
     {/each}

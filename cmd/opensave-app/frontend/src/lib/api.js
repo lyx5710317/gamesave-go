@@ -134,8 +134,8 @@ export const native = {
   changelogReleases: () => app()?.ChangelogReleases?.() ?? Promise.resolve([]),
   whatsNew: () => app()?.WhatsNew?.() ?? Promise.resolve([]),
   updateGreeting: () => app()?.UpdateGreeting?.() ?? Promise.resolve({}),
-  installFromPeer: (peerId) => app()?.InstallUpdateFromPeer?.(peerId) ?? Promise.resolve('not available in browser preview'),
   installFromUrl: (url) => app()?.InstallUpdateFromURL?.(url) ?? Promise.resolve('not available in browser preview'),
+  setTrayLocale: (language) => app()?.SetTrayLocale?.(language) ?? Promise.resolve(),
   selectDirectory: (title) => app()?.SelectDirectory(title ?? '') ?? Promise.resolve(''),
   // Reveals a folder in the system file manager. Resolves to '' on success,
   // or a message explaining why it couldn't be opened.

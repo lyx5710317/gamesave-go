@@ -199,6 +199,13 @@ func TestUpdateRepositoryUsesGameSaveGoFork(t *testing.T) {
 	}
 }
 
+func TestPeerBuildCannotInstallAsDesktopUpdate(t *testing.T) {
+	got := NewApp().InstallUpdateFromPeer("old-opensave-peer")
+	if !strings.Contains(got, "unavailable") || !strings.Contains(got, "GameSave Go") {
+		t.Fatalf("peer update was not rejected with product-specific guidance: %q", got)
+	}
+}
+
 func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {

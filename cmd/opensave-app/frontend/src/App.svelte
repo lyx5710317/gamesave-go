@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { initApi, connectWS, native } from './lib/api.js';
   import { applyMessage, wsConnected, view, appUpdate, toast, showAbout } from './lib/stores.js';
-  import { locale, t } from './lib/i18n.js';
+  import { bindNativeLocale, locale, t } from './lib/i18n.js';
   import { PRODUCT_NAME } from './lib/branding.js';
 
   import logoUrl from './assets/logo.png';
@@ -65,10 +65,11 @@
     updatedTo = '';
   }
 
+  onMount(() => bindNativeLocale(locale, native.setTrayLocale));
+
   onMount(async () => {
     await boot();
-    // First launch after an update (including peer-to-peer, which carries
-    // no release notes): announce it and offer the embedded changelog.
+    // First launch after an update: announce it and offer the changelog.
     try {
       const g = await native.updateGreeting();
       if (g?.updatedFrom) {

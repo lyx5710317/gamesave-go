@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import {
   DEFAULT_LOCALE,
   STORAGE_KEY,
+  bindNativeLocale,
   createLocaleStore,
   locale,
   messages,
@@ -89,5 +90,18 @@ describe('locale selection', () => {
     const storage = memoryStorage({ [STORAGE_KEY]: 'ja-JP' });
     const store = createLocaleStore({ storage, navigatorLanguage: 'zh-CN' });
     expect(currentValue(store)).toBe('zh-CN');
+  });
+
+  it('sends the restored language and later changes to native surfaces', () => {
+    const store = createLocaleStore({
+      storage: memoryStorage({ [STORAGE_KEY]: 'zh-CN' }),
+      navigatorLanguage: 'en-US'
+    });
+    const received = [];
+    const unsubscribe = bindNativeLocale(store, (language) => received.push(language));
+    store.set('en');
+    unsubscribe();
+    store.set('zh-CN');
+    expect(received).toEqual(['zh-CN', 'en']);
   });
 });

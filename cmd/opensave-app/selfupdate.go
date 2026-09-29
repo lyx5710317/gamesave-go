@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,7 +10,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/opensave/opensave/internal/selfupdate"
 	"github.com/opensave/opensave/internal/version"
@@ -47,51 +45,14 @@ func runningInFlatpak() bool {
 	return err == nil
 }
 
-const flatpakUpdateMsg = productName + " is installed through the OpenSave-compatible Flatpak, which updates through Flatpak itself — " +
-	"run \"flatpak update\", or install the newer OpenSave.flatpak from the GitHub release page."
+const flatpakUpdateMsg = productName + " is installed through Flatpak; use your package source's Flatpak update mechanism."
 
-// InstallUpdateFromPeer downloads the newer build a paired peer is running
-// and installs it. Returns immediately; progress and the final outcome
-// arrive over the "app-update" WS broadcast (the app restarts on success).
-func (a *App) InstallUpdateFromPeer(peerID string) string {
-	if a.daemon == nil {
-		return "app is not fully started"
-	}
-	if runningInFlatpak() {
-		return flatpakUpdateMsg
-	}
-	go func() {
-		exe, err := os.Executable()
-		if err != nil {
-			a.updateEvent("error", 0, err.Error())
-			return
-		}
-		if !selfupdate.CanStageUpdate(exe) {
-			a.updateEvent("error", 0,
-				productName+" is installed in a protected folder (like Program Files), which peer updates can't replace. "+
-					"Use the update banner to install from GitHub instead — that path runs the installer with the proper permissions.")
-			return
-		}
-		dest := exe + ".new"
-		defer os.Remove(dest)
-
-		a.updateEvent("downloading", 0, "")
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-
-		build, err := a.daemon.P2P.DownloadPeerBinary(ctx, peerID, dest, func(done, total int64) {
-			if total > 0 {
-				a.updateEvent("downloading", int(done*100/total), "")
-			}
-		})
-		if err != nil {
-			a.updateEvent("error", 0, "download from peer failed: "+err.Error())
-			return
-		}
-		a.daemon.Log.Log("info", fmt.Sprintf("downloaded %s %s (build %d) from peer; installing", productName, build.AppVersion, build.BuildTimeMs))
-		a.finishInstall(dest)
-	}()
-	return ""
+// InstallUpdateFromPeer remains as a binding for older frontend assets, but
+// peer announcements carry the inherited sync-component version, not a
+// verified GameSave Go desktop release identity. Never install that binary
+// as a product update. P2P save synchronization itself remains available.
+func (a *App) InstallUpdateFromPeer(_ string) string {
+	return "Device binary updates are unavailable; install a verified GameSave Go release from this project's GitHub page."
 }
 
 // InstallUpdateFromURL downloads a release asset (the .exe from a GitHub

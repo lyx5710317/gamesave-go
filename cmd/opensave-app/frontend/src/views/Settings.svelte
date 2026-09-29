@@ -240,6 +240,7 @@
           {$t('settings.updates.hint')}
         {/if}
       </p>
+      <p class="hint">{$t('settings.updates.source')}</p>
     </div>
 
   {:else if tab === 'sync'}

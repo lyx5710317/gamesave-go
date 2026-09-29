@@ -33,10 +33,12 @@ describe('Windows-first primary navigation', () => {
     expect(translate('en', 'home.addDevice')).toBe('Add device');
   });
 
-  it('labels the peer build separately from the desktop product version', () => {
+  it('does not offer upstream sync-component builds as GameSave Go updates', () => {
     const devices = readFileSync(new URL('../views/Devices.svelte', import.meta.url), 'utf8');
-    expect(devices).toContain("$t('devices.syncBuild', { version: peer.appVersion })");
-    expect(translate('zh-CN', 'devices.syncBuild', { version: '2.3.1' })).toBe('同步组件 2.3.1');
-    expect(translate('en', 'devices.syncBuild', { version: '2.3.1' })).toBe('Sync component 2.3.1');
+    expect(devices).not.toContain('peer.hasNewerBuild');
+    expect(devices).not.toContain('peer.appVersion');
+    expect(devices).not.toContain('installFromPeer');
+    expect(translate('zh-CN', 'settings.updates.source')).toContain('GameSave Go');
+    expect(translate('en', 'settings.updates.source')).toContain('GameSave Go');
   });
 });
