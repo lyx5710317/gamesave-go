@@ -367,6 +367,14 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		strings.Contains(string(readme), "github.com/Liquid-co/OpenSave/releases") {
 		t.Fatal("README must not offer upstream downloads as GameSave Go packages")
 	}
+	gettingStarted, err := os.ReadFile(filepath.Join("..", "..", "GETTING_STARTED.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(gettingStarted), "github.com/Liquid-co/OpenSave/releases") ||
+		strings.Contains(string(gettingStarted), "Run anyway") {
+		t.Fatal("linked getting-started guide must not point users to upstream packages or bypass security warnings")
+	}
 }
 
 func TestExtractAppBinary(t *testing.T) {

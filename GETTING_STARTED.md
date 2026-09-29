@@ -1,5 +1,12 @@
 # Getting Started with OpenSave
 
+> **GameSave Go note:** This inherited guide explains compatible core features,
+> but screenshots and some labels may differ from the current desktop app.
+> Install GameSave Go only from this repository's GitHub Releases after a public
+> release is announced. There is no official GameSave Go download yet; see
+> [README installation status](README.md#install). Upstream OpenSave downloads
+> are a different product.
+
 This guide assumes you have never used OpenSave and starts from nothing. It
 explains what each thing means as it comes up. If you want the short version,
 the [README](README.md) has a four-step quick start; if you want the reference,
@@ -54,21 +61,13 @@ emulators.
 
 ## 2. Installing it
 
-Download the latest build from the
-[releases page](https://github.com/Liquid-co/OpenSave/releases).
-
-**Windows** — download `OpenSave.exe` and run it. There is no installer and
-nothing goes in the registry.
-
-> Windows SmartScreen may warn you because the build is not code-signed
-> (signing certificates cost money this project does not have). Click **More
-> info → Run anyway** if you are comfortable with that.
-
-**Linux** — download the tarball, extract it, and run `./OpenSave`.
-
-**Steam Deck** — see [section 11](#11-steam-deck).
-
-Do this on **each device** you want to sync. They all need the app.
+GameSave Go has no public release yet. When one is announced, obtain it only
+from this repository's [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases),
+and check its `SHA256SUMS` and Artifact Attestation as described in the
+[README](README.md#install). The unsigned Windows installer may show a
+SmartScreen warning or be blocked by device policy; do not disable security
+protections to force installation. Linux and Steam Deck packages from this
+fork are not yet validated for public distribution.
 
 ## 3. First run: finding your saves
 
