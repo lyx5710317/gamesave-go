@@ -78,14 +78,40 @@ suites and one Windows suite passed. The other Windows race suite **FAILED**:
 constraint failure, then `TestMultiFileSync_DeepTreeIntegrityAndIdempotence`
 timed out after 45 minutes while watcher shutdown waited for an in-progress
 Windows fsnotify recursive add. These failures are not evidence of the UI
-startup bug, but they remain release blockers until diagnosed and rerun.
+startup bug. An unchanged rerun of the failed Windows job passed on attempt
+2. The E2E setup for Sync All and the multi-file conflict cases now tracks
+both peers before pairing, so auto-sync-on-track cannot race an explicit
+test-only tracking request. This does not modify application sync behavior
+or establish that the watcher timeout can never recur. Focused scenarios,
+30 additional local Sync All repetitions, the full local Go suite
+(`go test ./... -p 2 -timeout 2700s`, E2E 589.745 s), 118 frontend tests,
+frontend build and Wails build passed after this test-only change. The new
+Windows race CI checks split: one passed in 24m14s, the other failed because
+`TestSoak_AddingAndDeletingFilesNeverConflicts` did not see the fourth added
+file reach the peer. This is a release blocker, not explained by the earlier
+test-setup collision. The failure did not report the sync status or daemon
+errors, so a separate test-only change now records bounded status/busy/error
+context on this exact failure; it does not change the sync engine or count as
+a fix. Its focused non-race run and new full local Go suite
+(`go test ./... -p 2 -timeout 2700s`, E2E 578.203 s) passed. Frontend
+tests (118), frontend build and Wails build also passed on the current
+application source. The diagnostic commit's two Linux CI suites passed;
+its Windows race suites were still running when this record was updated.
 
 On 2026-09-30 the owner reported **PASS** for opening the homepage and for
 Chinese tray text on the replacement candidate in the VM. The owner had
 previously removed the old program, so this is an owner-observed reinstall
-smoke test, **not** an upgrade/rollback or save/credential-retention result.
-The guest installer hash was not independently reported. No public release
-or tag was created.
+smoke test, **not** an upgrade/rollback result. The owner also reports the
+previous synthetic test games and local snapshots are still visible after
+reinstall. This is a UI-level retention PASS, not a byte-hash check, restore
+check. The owner also reports the Jianguoyun third-party application password
+still shows configured and the VM can browse the cloud after reinstall. This
+is a real-account credential-read PASS, not a checked upload/restore or an
+upgrade/rollback result. The guest installer hash was not independently
+reported. No public release or tag was created. A new attempt
+to install the official `govulncheck` tool remained BLOCKED because this
+host could not connect to `proxy.golang.org`; no Go vulnerability-scan PASS
+is claimed.
 
 ## Version identities
 
