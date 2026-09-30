@@ -73,9 +73,19 @@ regression test first failed on the old constructor call and passed after
 the `mount` change. Local checks: frontend `npm test` PASS (20 files,
 118 tests); frontend `npm run build` PASS; `go test ./... -p 2 -timeout 2700s`
 PASS; `wails build` PASS. On the pushed commit, two frontend and Linux CI
-suites and one Windows suite passed; the second Windows CI suite was pending
-when this record was written. **Installed VM startup, Chinese tray behavior,
-and user-data retention for this replacement candidate remain unverified.**
+suites and one Windows suite passed. The other Windows race suite **FAILED**:
+`TestSyncAll_SyncsEveryTrackedGame` received a concurrent `games.id` unique
+constraint failure, then `TestMultiFileSync_DeepTreeIntegrityAndIdempotence`
+timed out after 45 minutes while watcher shutdown waited for an in-progress
+Windows fsnotify recursive add. These failures are not evidence of the UI
+startup bug, but they remain release blockers until diagnosed and rerun.
+
+On 2026-09-30 the owner reported **PASS** for opening the homepage and for
+Chinese tray text on the replacement candidate in the VM. The owner had
+previously removed the old program, so this is an owner-observed reinstall
+smoke test, **not** an upgrade/rollback or save/credential-retention result.
+The guest installer hash was not independently reported. No public release
+or tag was created.
 
 ## Version identities
 
