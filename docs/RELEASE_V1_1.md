@@ -103,7 +103,10 @@ Those passes do not establish the cause of the earlier intermittent
 four-round relay-soak failure or prove that it is fixed; the diagnostic did
 not exercise its failure branch in these runs. Keep the risk open until a
 reproduced failure can be explained or a stronger repeated two-device check
-is completed.
+is completed. An additional local Windows non-race run of
+`TestSoak_AddingAndDeletingFilesNeverConflicts -count=10` passed (219.516 s),
+but does not reproduce Windows CI's race-detector load or explain the
+earlier missing file.
 
 On 2026-09-30 the owner reported **PASS** for opening the homepage and for
 Chinese tray text on the replacement candidate in the VM. The owner had
@@ -119,6 +122,22 @@ reported. No public release or tag was created. A new attempt
 to install the official `govulncheck` tool remained BLOCKED because this
 host could not connect to `proxy.golang.org`; no Go vulnerability-scan PASS
 is claimed.
+
+After creating a VMware safety snapshot of the running 1.1.1 test profile,
+the owner followed the in-place binary-only rollback instructions with the
+local 1.1.0 comparison installer and reported **PASS** for the displayed
+1.1 version, existing synthetic game/file and local snapshots, protected
+Jianguoyun password still configured, and successful cloud browsing. Without
+restoring that VMware snapshot, the owner then reinstalled the 1.1.1
+candidate and reported the same checks **PASS** again, including the 1.1.1
+displayed version. This extends the earlier offline rollback exercise with
+owner-reported live credential-read checks. It does not independently prove
+the exact guest installer hashes, byte-level save equality, cloud upload or
+restore, or behavior on a fresh profile. The comparison installer on the
+host is 12,424,105 bytes, SHA-256
+`957728DA16A70BCEB3D593D8017944321DD39E3E3BDD40F50C87A76EA06BB8DF`;
+the candidate's host/download hash is recorded above. Neither guest file
+hash was supplied.
 
 ## Version identities
 
@@ -323,7 +342,7 @@ Executed checks on this working tree:
 | Frontend `npm run build` | PASS |
 | `wails build -o GameSaveGo-preflight.exe` and `wails build -nsis` | PASS — unsigned portable and 1.1.1 NSIS installer built locally |
 | Historical 1.1.0 comparison installer | PASS — built from isolated commit `21fc0c0`; not an official prior release |
-| Clean VM install/upgrade/rollback and save/credential retention | PARTIAL — earlier owner-reported 1.1.0 → 1.1.1 → 1.1.0 → 1.1.1 retained snapshots, test file and the offline protected-password configured indicator, but that VM had existing user data. A later new-VM Chinese install/tray/uninstall check passed per the owner; clean-VM upgrade/rollback, independent guest hashes and live credential usability remain unverified |
+| Clean VM install/upgrade/rollback and save/credential retention | PARTIAL — earlier owner-reported 1.1.0 → 1.1.1 → 1.1.0 → 1.1.1 retained snapshots, test file and the offline protected-password configured indicator, but that VM had existing user data. A later new-VM Chinese install/tray/uninstall check passed per the owner. The 2026-09-30 in-place rollback/re-upgrade also retained live Jianguoyun browsing per the owner; independent guest hashes, byte-level save checks and a pristine-profile upgrade matrix remain unverified. |
 | `npm audit --omit=dev` / full `npm audit` | PASS — zero production-classified findings / FAIL — 12 development-build findings |
 | Go dependency vulnerability scan | BLOCKED — official module proxy connection failed before the scanner could run |
 
