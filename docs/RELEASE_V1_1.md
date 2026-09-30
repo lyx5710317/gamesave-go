@@ -1,9 +1,30 @@
-# GameSave Go 1.1 release preparation
+# GameSave Go 1.1 release record
 
-Status: preparation only. No public installer, attested Release, or validated
-clean-machine upgrade is claimed by this document. Untracked v2 backup-file
-imports now fail closed rather than overwriting a path supplied by the archive;
-tracked-game imports still use the verified restore path.
+Status: [Windows v1.1.1](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.1.1)
+was publicly released on 2026-09-30 from merged `main` commit
+`2bd0647e425fcb7c716a66ea786dc1530e9642d0`. The
+[tag workflow](https://github.com/lyx5710317/gamesave-go/actions/runs/36686914171)
+passed preflight, Windows build, asset publication, Linux/Flatpak build jobs,
+and provenance checks. Only the two Windows desktop executables and
+`SHA256SUMS` are offered as official downloads; the other build jobs did not
+publish their packages. The installer is unsigned. Untracked v2 backup-file
+imports fail closed rather than overwriting an archive-supplied path; tracked
+games continue through the verified restore path.
+
+Independent downloads of all three Release assets matched the published
+`SHA256SUMS` and GitHub asset digests. `gh attestation verify` passed for each
+file with repository, tag ref, exact commit and release-workflow constraints:
+
+| Asset | SHA-256 |
+| --- | --- |
+| `GameSaveGo.Setup.exe` | `9fc35be12e09d6cab52125ed2af951e9f2c275ac76e1f0016ff9abb70a2ffb8f` |
+| `GameSaveGo.exe` | `ee0a04c152d746e83ba0356bd8a3169e92f94732433cc78fd81d4479e9d93d78` |
+| `SHA256SUMS` | `9f83fcb093ff5d4cdba5e3f090a4141b0833a4aee30962f9b8594c01f2a38b5c` |
+
+No claim is made that the published bytes have received a separate installed
+VM test; the owner-tested candidate predates tag stamping. The release was
+made with explicitly disclosed residual risk, not with all backlog items
+marked complete.
 
 On 2026-09-30 the owner explicitly chose a prompt Windows v1.1.1 public
 release despite remaining verification work, accepting disclosed residual
@@ -14,8 +35,8 @@ two-device relay-soak failure has not been explained and the official Go
 vulnerability scan is BLOCKED by network access. Continue those tasks after
 release, without weakening runtime backup, conflict, credential, cloud
 inventory or restore protections. This is a release policy decision, not a
-claim that either risk was resolved. The publication gate remains off until
-the intended commit is merged and the tag workflow is ready.
+claim that either risk was resolved. The publication gate was set to `true`
+for the intended tag run and returned to `false` after the release job passed.
 
 On 2026-09-29, a release-finalization branch added Windows protected storage
 for generic WebDAV passwords, custom OAuth client secrets, and custom request

@@ -192,7 +192,7 @@ The owner subsequently reports `game2` succeeded after the candidate's optional
 single-file restore exercise. Record this as owner-reported PASS only; no exact
 two-device executable hashes or independently measured file tree were supplied.
 
-Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The planned Windows release tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for verified results and disclosed remaining risks.
+Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The first Windows release tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for verified results and disclosed remaining risks.
 
 Desktop update notices must come only from verified GameSave Go releases in the project's GitHub repository. A peer's inherited core version (for example `2.3.1`) is sync compatibility metadata, never a desktop update offer; peer binary installation remains disabled until a separate verified product-identity design is approved. The Windows tray follows the selected desktop UI language, while the installer asks for its own English/简体中文 language because the UI preference is not available before installation.
 

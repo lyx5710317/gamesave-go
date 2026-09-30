@@ -8,7 +8,7 @@
 
 </div>
 
-> **当前状态：开发中。** 桌面版当前版本号为 1.1.1，尚未发布正式安装包。现有 GitHub Actions 构建是测试候选包，不是面向公众的正式下载。未来唯一的官方下载渠道是本仓库的 [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases)。
+> **Windows 正式版：v1.1.1。** 请从本仓库的 [GitHub Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.1.1) 下载。GitHub Actions 的候选构建不是正式安装包；本次没有发布经过同等验证的 Linux 或 Steam Deck 安装包。
 
 GameSave Go 基于开源项目 OpenSave 开发。它不要求注册 GameSave Go 账户；游戏存档保存在本机、你选择的云存储，或与你配对的设备上。使用坚果云、Google Drive 等服务时，仍需拥有相应服务的账户。
 
@@ -62,15 +62,15 @@ Windows 版将坚果云应用密码保存在当前用户的 Windows 凭据管理
 - 云端 Vault 的安全加入、可证明的祖先关系、跨设备云写入与持久化重试队列。
 - 某些极端情况下的多存档位置原子恢复、并发写入及旧格式路径别名处理。导入 `.sscb` 备份时，**未跟踪游戏的覆盖恢复暂时禁用**；请先把本机目标存档添加为已跟踪游戏，再导入。
 - Windows 版已将通用 WebDAV 密码、自定义 OAuth 客户端密钥和自定义请求头移入当前用户的 Windows 凭据管理器；非 Windows 平台的相应存储行为、旧凭据清理与其他提供商仍需审查，不能把 Windows 的保护结论推广到所有平台。
-- 正式发布前的最终候选包检查、构建依赖安全审查，以及标签发布流程验证。Linux、Steam Deck 和命令行基础保留在仓库中，但不是当前已经验证的 GameSave Go 桌面发行包。
+- 后续仍需查明一次偶发的双设备文件未到达测试失败；后续重复测试通过，不代表原因已经查明。Go 依赖漏洞扫描因无法连接官方服务而未完成。Linux、Steam Deck 和命令行基础保留在仓库中，但不是本次已经验证的 GameSave Go 正式下载。
 
 进度与证据分别记录在[任务表](TASKS.md)和[1.1 发布准备记录](docs/RELEASE_V1_1.md)；计划项不应被视为已发布功能。
 
 ## 下载、校验与从源码构建
 
-**目前没有正式下载。** 发布后请只从本仓库的 [GitHub Releases](https://github.com/lyx5710317/gamesave-go/releases) 获取 GameSave Go。上游 OpenSave 网站、安装脚本及其发布页提供的不是 GameSave Go；GitHub Actions 候选文件仅供测试，不是正式安装包。
+**正式下载：**在 [GameSave Go v1.1.1 Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.1.1) 下载 `GameSaveGo.Setup.exe`（Windows 安装包）或 `GameSaveGo.exe`（便携版），并下载同页的 `SHA256SUMS` 核对文件。上游 OpenSave 网站、安装脚本及其发布页提供的不是 GameSave Go；GitHub Actions 候选文件仅供测试，不是正式安装包。
 
-由于个人开源项目暂未购买商业代码签名证书，**Windows 可能出现 SmartScreen 提示**。未签名安装包没有 Windows 已验证发布者身份；如果设备策略阻止运行，不要关闭安全防护强行安装。正式发布时计划同时提供每个安装文件的 `SHA256SUMS` 和 GitHub Artifact Attestations。散列用于核对下载文件，来源证明用于核对构建仓库和提交；两者都不能保证软件没有漏洞，也不能替代 Windows 代码签名。
+由于个人开源项目暂未购买商业代码签名证书，**Windows 可能出现 SmartScreen 提示**。未签名安装包没有 Windows 已验证发布者身份；如果设备策略阻止运行，不要关闭安全防护强行安装。本次发布提供每个安装文件的 `SHA256SUMS` 和 GitHub Artifact Attestations。散列用于核对下载文件，来源证明用于核对构建仓库和提交；两者都不能保证软件没有漏洞，也不能替代 Windows 代码签名。
 
 需要自行构建当前源码时，在 Windows 上准备 Go **1.26.4 或更新版本**、Node.js **22.12 或更新版本**和 Wails **2.12.0**。在仓库根目录运行：
 
@@ -85,7 +85,7 @@ wails build
 
 开发构建输出位于 `cmd/opensave-app/build/bin/GameSaveGo.exe`。它不是经过正式发布流程验证的安装包。需要制作本地 NSIS 测试安装器时还要安装 NSIS，再运行 `wails build -nsis`。
 
-发布后，可将下载文件的散列与同一 Release 中的 `SHA256SUMS` 对照，并核验构建来源，例如：
+下载后，可将文件散列与同一 Release 中的 `SHA256SUMS` 对照，并核验构建来源，例如：
 
 ```powershell
 Get-FileHash -Algorithm SHA256 '.\GameSaveGo.Setup.exe'
