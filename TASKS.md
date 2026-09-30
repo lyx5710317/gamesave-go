@@ -143,6 +143,7 @@ Current priority (2026-09-25): Jianguoyun official-WebDAV backup safety after th
 
 ## Phase 6 — Windows Packaging / Release
 
+- [x] Record the owner's 2026-09-30 decision to ship the Windows v1.1.1 release promptly with disclosed residual risk. Publish only the Windows desktop installer and portable app; retain Linux, Steam Deck, CLI and relay source/build jobs without presenting their current packages as validated official downloads. Keep all unfinished verification tasks below open for updates after release, especially the intermittent two-device soak failure and blocked Go vulnerability scan. Do not weaken runtime data-safety checks to meet the date.
 - [ ] Define versioning, attested/checksummed artifacts, installer, upgrade, rollback, and release channels.
   - [x] Record the separate desktop/core version identities, stable-only candidate policy, publish gate, and Windows validation checklist in `docs/RELEASE_V1_1.md`.
   - [x] Keep the GitHub Release job behind an explicit repository variable and use GameSave Go Windows installer/metadata branding without renaming compatibility paths. The owner chose a disclosed unsigned-release policy instead of paid Windows signing; the gate remains off while other checks are open.

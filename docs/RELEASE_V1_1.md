@@ -5,6 +5,18 @@ clean-machine upgrade is claimed by this document. Untracked v2 backup-file
 imports now fail closed rather than overwriting a path supplied by the archive;
 tracked-game imports still use the verified restore path.
 
+On 2026-09-30 the owner explicitly chose a prompt Windows v1.1.1 public
+release despite remaining verification work, accepting disclosed residual
+risk for this personal open-source project. Publish only the attested Windows
+installer and portable app with `SHA256SUMS`; do not present Linux, Steam Deck,
+CLI or relay packages as validated v1.1.1 downloads. The intermittent
+two-device relay-soak failure has not been explained and the official Go
+vulnerability scan is BLOCKED by network access. Continue those tasks after
+release, without weakening runtime backup, conflict, credential, cloud
+inventory or restore protections. This is a release policy decision, not a
+claim that either risk was resolved. The publication gate remains off until
+the intended commit is merged and the tag workflow is ready.
+
 On 2026-09-29, a release-finalization branch added Windows protected storage
 for generic WebDAV passwords, custom OAuth client secrets, and custom request
 headers. Existing plaintext SQLite values migrate with rollback on failure;
