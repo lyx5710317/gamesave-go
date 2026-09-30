@@ -97,7 +97,8 @@ func TestSoak_AddingAndDeletingFilesNeverConflicts(t *testing.T) {
 		testutil.SettleSync(t, gameID, a, b)
 		time.Sleep(syncSettleWindow)
 		a.WriteSave(name, "added by A")
-		if status, _ := syncTo(a, gameID, b.NodeID()); status == "conflict" {
+		status, _ := syncTo(a, gameID, b.NodeID())
+		if status == "conflict" {
 			ca, _ := conflictOn(a, gameID)
 			// Capture why. A one-sided add can only be read as a divergence
 			// if the merge-base is behind BOTH sides, so the bases are the
@@ -114,7 +115,9 @@ func TestSoak_AddingAndDeletingFilesNeverConflicts(t *testing.T) {
 				name, a.ReadSave(name), name, b.ReadSave(name))
 		}
 		if !testutil.WaitFor(60*time.Second, func() bool { return b.ReadSave(name) == "added by A" }) {
-			t.Fatalf("round %d: %s never reached B", round, name)
+			t.Fatalf("round %d: %s never reached B (sync status=%q, A busy=%t, B busy=%t, A recent warnings/errors=%q, B recent warnings/errors=%q)",
+				round, name, status, a.Daemon.P2P.Sync.SyncBusy(gameID), b.Daemon.P2P.Sync.SyncBusy(gameID),
+				recentSyncProblems(a), recentSyncProblems(b))
 		}
 
 		// B removes it again; a deletion must propagate rather than being
@@ -134,4 +137,18 @@ func TestSoak_AddingAndDeletingFilesNeverConflicts(t *testing.T) {
 	if a.ReadSave("keep.sav") != "constant" || b.ReadSave("keep.sav") != "constant" {
 		t.Error("the untouched file did not survive the add/delete rounds")
 	}
+}
+
+// Keep CI failure output bounded and limited to synthetic test-daemon logs.
+func recentSyncProblems(td *testutil.TestDaemon) []string {
+	var problems []string
+	for _, entry := range td.Daemon.Log.History() {
+		if entry.Level == "error" || entry.Level == "warn" {
+			problems = append(problems, entry.Message)
+		}
+	}
+	if len(problems) > 8 {
+		return problems[len(problems)-8:]
+	}
+	return problems
 }
