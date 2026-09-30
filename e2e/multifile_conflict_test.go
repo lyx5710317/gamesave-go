@@ -89,13 +89,16 @@ func pairAndTrack(t *testing.T, name string, files map[string]string) (*testutil
 	t.Helper()
 	a := testutil.NewTestDaemon(t, name+"-A")
 	b := testutil.NewTestDaemon(t, name+"-B")
-	a.PairWith(b)
 
 	for rel, content := range files {
 		a.WriteSave(rel, content)
 	}
 	gameID := a.TrackGame(name)
 	b.API(http.MethodPost, "/api/games", map[string]string{"name": name, "savePath": b.SaveDir}, nil)
+	// Pair only after both tracked rows exist. Otherwise A's automatic
+	// sync-on-track can auto-create B's row while this setup POST is running,
+	// making a conflict/idempotence test fail before it reaches its subject.
+	a.PairWith(b)
 	a.API(http.MethodPost, "/api/games/"+gameID+"/sync", nil, nil)
 
 	if !testutil.WaitFor(45*time.Second, func() bool {
