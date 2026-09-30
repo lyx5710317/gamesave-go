@@ -12,14 +12,14 @@ Windows-first means the Windows experience, packaging, and Chinese cloud-provide
 
 The MVP preserves and extends OpenSave rather than replacing it:
 
-- keep Go, Wails 2, Svelte 4, Vite, and SQLite;
+- keep Go, Wails 2, the current Svelte 5/Vite frontend, and SQLite;
 - reuse game discovery, Ludusavi Manifest resolution, recursive file watching, snapshots, branches, restore, conflicts, cloud sync, P2P, and CLI;
 - add a small internationalization layer, starting with English and Simplified Chinese;
 - reshape the later Windows UI around Games, Cloud Backup, Activity, and Settings without deleting advanced device-sync features;
 - design, verify, and then add mainland-China cloud providers as isolated integrations;
 - retain upstream-compatible internal names such as `OpenSave`, `.opensave`, database names, and protocol identifiers until a separate migration is designed.
 
-Not in the current phase: Baidu or Quark implementation, a new snapshot engine, a new account system, global rebranding, or broad UI restructuring. Phase 6 now permits release **preparation** (version separation, workflow safety, packaging checks), but not a public installer or release until the safety and compatibility gates in `TASKS.md` and `docs/RELEASE_V1_1.md` are verified.
+Not in the current phase: Baidu or Quark implementation, a new snapshot engine, a new account system, global rebranding, or broad UI restructuring. On 2026-09-30 the owner chose to publish a Windows-first v1.1.1 release with the remaining non-critical verification work disclosed and tracked, rather than wait for every release-preparation task. This decision does not relax fail-closed restore, credential protection, cloud inventory, conflict or overwrite safeguards. Linux and Steam Deck foundations remain in source, but their packages are not part of this Windows release.
 
 ## Architecture boundaries
 
@@ -192,11 +192,11 @@ The owner subsequently reports `game2` succeeded after the candidate's optional
 single-file restore exercise. Record this as owner-reported PASS only; no exact
 two-device executable hashes or independently measured file tree were supplied.
 
-Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The next proposed stable tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for the remaining publication gates.
+Desktop product releases use their own semantic version and stamped release-tag identity, distinct from the inherited core/peer version. The planned Windows release tag is `v1.1.1`: this is numerically newer than manually distributed `1.1` development builds, while a source-built `1.1.1` copy is distinguished from the official tagged binary by an empty release marker. Neither identity changes the peer protocol. See `docs/RELEASE_V1_1.md` for verified results and disclosed remaining risks.
 
 Desktop update notices must come only from verified GameSave Go releases in the project's GitHub repository. A peer's inherited core version (for example `2.3.1`) is sync compatibility metadata, never a desktop update offer; peer binary installation remains disabled until a separate verified product-identity design is approved. The Windows tray follows the selected desktop UI language, while the installer asks for its own English/简体中文 language because the UI preference is not available before installation.
 
-Official downloads are served only from this repository's GitHub Releases after the explicit publication gate and safety review. The owner has chosen not to purchase Windows Authenticode signing for this personal open-source project. Each published asset must be built by GitHub Actions, covered by a release `SHA256SUMS` entry and a verifiable GitHub Artifact Attestation bound to the expected repository, workflow, ref and commit. README and release notes must disclose that unsigned Windows installers may trigger SmartScreen or be blocked by device policy. Attestation proves build provenance, not application safety or Windows publisher identity; it does not waive the backup, credential, dependency, upgrade or restore checks.
+Official Windows downloads are served only from this repository's GitHub Releases after the explicit publication gate. The owner has chosen not to purchase Windows Authenticode signing for this personal open-source project. Each published asset must be built by GitHub Actions, covered by a release `SHA256SUMS` entry and a verifiable GitHub Artifact Attestation bound to the expected repository, workflow, ref and commit. README and release notes must disclose that unsigned Windows installers may trigger SmartScreen or be blocked by device policy, and must identify unresolved sync and dependency-scan risks. Attestation proves build provenance, not application safety or Windows publisher identity; the owner-accepted release timing does not waive runtime backup, credential, upgrade or restore safeguards.
 
 ## Security and data ownership
 

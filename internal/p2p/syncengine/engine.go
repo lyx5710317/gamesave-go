@@ -460,7 +460,9 @@ func (e *Engine) SyncWithPeer(ctx context.Context, gameID string, peer Peer) (Re
 
 	// 6. Apply deletions (locally + propagate to peer).
 	e.applyLocalDeletions(primaryRootOf(game), decision)
-	e.propagateDeletions(ctx, peer, gameID, primaryRootOf(game), decision)
+	if err := e.propagateDeletions(ctx, peer, gameID, primaryRootOf(game), decision); err != nil {
+		return Result{}, err
+	}
 
 	// 7. Create pulled directories (parents first).
 	e.createPulledDirs(game, decision.DirsToPull)
@@ -866,14 +868,14 @@ func (e *Engine) applyLocalDeletions(root syncRoot, d Decision) {
 	}
 }
 
-func (e *Engine) propagateDeletions(ctx context.Context, peer Peer, gameID string, root syncRoot, d Decision) {
+func (e *Engine) propagateDeletions(ctx context.Context, peer Peer, gameID string, root syncRoot, d Decision) error {
 	for _, relPath := range d.FilesToDeleteOnPeer {
 		if !delta.IsSafePath(root.Path, relPath) {
 			continue
 		}
 		ref := FileRef{GameID: gameID, Root: root.Name, RelPath: relPath}
 		if err := e.Transport.DeleteRemote(ctx, peer, ref); err != nil {
-			e.Log("warn", fmt.Sprintf("could not propagate deletion of %s: %v", relPath, err))
+			return fmt.Errorf("could not propagate file deletion: %w", err)
 		}
 	}
 	dirs := append([]string{}, d.DirsToDeleteOnPeer...)
@@ -884,9 +886,10 @@ func (e *Engine) propagateDeletions(ctx context.Context, peer Peer, gameID strin
 		}
 		ref := FileRef{GameID: gameID, Root: root.Name, RelPath: relDir}
 		if err := e.Transport.DeleteRemote(ctx, peer, ref); err != nil {
-			e.Log("warn", fmt.Sprintf("could not propagate dir deletion of %s: %v", relDir, err))
+			return fmt.Errorf("could not propagate directory deletion: %w", err)
 		}
 	}
+	return nil
 }
 
 func (e *Engine) createPulledDirs(game store.Game, dirsToPull []string) {

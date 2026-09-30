@@ -288,10 +288,11 @@ func TestCloud_SyncLocalFlagsATruncatedRemoteCopy(t *testing.T) {
 func TestSyncAll_SyncsEveryTrackedGame(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "SyncAll-A")
 	b := testutil.NewTestDaemon(t, "SyncAll-B")
-	a.PairWith(b)
 
 	// Each game needs its own folder: a daemon refuses to track two games
-	// against one directory.
+	// against one directory. Track both sides before pairing so the
+	// auto-sync-on-track path cannot race the explicit setup on B; this test
+	// is about Sync All, not concurrent remote auto-tracking.
 	names := []string{"Game One", "Game Two", "Game Three"}
 	for _, name := range names {
 		slug := strings.ToLower(strings.ReplaceAll(name, " ", ""))
@@ -311,6 +312,7 @@ func TestSyncAll_SyncsEveryTrackedGame(t *testing.T) {
 		b.API(http.MethodPost, "/api/games",
 			map[string]string{"name": name, "savePath": bDir}, nil)
 	}
+	a.PairWith(b)
 
 	a.API(http.MethodPost, "/api/games/sync-all", map[string]any{}, nil)
 

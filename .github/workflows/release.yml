@@ -387,9 +387,10 @@ jobs:
       - name: Build relay image
         run: docker build -f relay/Dockerfile -t opensave-relay .
 
-  # Publish a real GitHub Release with all downloadable assets on tag push.
+  # v1.1.1 is Windows-first. Keep Linux/Flatpak source and build jobs, but do
+  # not publish their packages as officially validated downloads yet.
   release:
-    needs: [windows, linux, flatpak]
+    needs: [windows]
     # Off by default. The owner enables this only after the release checklist
     # is reviewed. Unsigned Windows binaries require prominent user guidance.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.GAMESAVE_GO_PUBLIC_RELEASE_READY == 'true'
@@ -403,14 +404,6 @@ jobs:
         with:
           name: windows
           path: windows
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux
-          path: linux
-      - uses: actions/download-artifact@v4
-        with:
-          name: flatpak
-          path: flatpak
       # Verify the exact bytes downloaded from the build jobs. A matching
       # hash alone cannot identify the workflow/commit that produced them.
       - name: Verify build provenance and generate SHA256SUMS
@@ -419,12 +412,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mapfile -d '' assets < <(find windows linux flatpak -type f \
-            \( -name '*.exe' -o -name '*.msi' -o -name '*.tar.gz' \
-               -o -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \
-               -o -name '*.zip' \) -print0 | sort -z)
-          if [ "${#assets[@]}" -lt 10 ]; then
-            echo "::error::Expected all Windows/Linux/Flatpak assets, found ${#assets[@]}"
+          mapfile -d '' assets < <(find windows -type f \
+            \( -name 'GameSaveGo.Setup.exe' -o -name 'GameSaveGo.exe' \) \
+            -print0 | sort -z)
+          if [ "${#assets[@]}" -ne 2 ]; then
+            echo "::error::Expected the Windows installer and portable app, found ${#assets[@]}"
             exit 1
           fi
           declare -A seen=()
@@ -459,16 +451,16 @@ jobs:
           # block; if a tag is ever re-cut, tidy the release body by hand.
           generate_release_notes: true
           body: |
+            GameSave Go v1.1.1 是 Windows 优先的正式版。本次仅发布 Windows 安装包和便携版；Linux、Steam Deck、CLI 和中继源码仍在仓库中，但没有作为本次已验证的正式下载提供。
+
+            主要功能包括本地存档快照、手动恢复、设备配对同步，以及坚果云等自选存储的云备份。云备份不等于已完成安全的云端双向同步；远端 Vault 加入、可靠条件写入和自动冲突解决尚未完成。此前 Windows 自动测试曾偶发一次双设备文件未到达，后续重复检查通过但原因未完全查明；重要存档请保留独立备份。Go 依赖漏洞扫描因连接官方服务超时而未完成。
+
             **由于个人开源项目暂未购买商业代码签名证书，Windows 可能出现 SmartScreen 提示。**
             Windows 安装包没有经过 Authenticode 签名；GitHub 构建来源证明不能代替已验证发布者身份，也不能保证程序没有漏洞。若设备策略阻止安装，请勿关闭安全防护强行运行。
 
             请仅从本仓库的 GitHub Releases 下载。用 `SHA256SUMS` 核对每个下载文件，并用 `gh attestation verify <文件名> -R lyx5710317/gamesave-go` 验证构建来源。
           fail_on_unmatched_files: true
           files: |
-            windows/**/*.exe
-            linux/*.tar.gz
-            linux/*.deb
-            linux/*.rpm
-            linux/OpenSave-decky-plugin.zip
-            flatpak/*.flatpak
+            windows/**/GameSaveGo.Setup.exe
+            windows/**/GameSaveGo.exe
             SHA256SUMS

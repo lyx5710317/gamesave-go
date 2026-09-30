@@ -5,6 +5,152 @@ clean-machine upgrade is claimed by this document. Untracked v2 backup-file
 imports now fail closed rather than overwriting a path supplied by the archive;
 tracked-game imports still use the verified restore path.
 
+On 2026-09-30 the owner explicitly chose a prompt Windows v1.1.1 public
+release despite remaining verification work, accepting disclosed residual
+risk for this personal open-source project. Publish only the attested Windows
+installer and portable app with `SHA256SUMS`; do not present Linux, Steam Deck,
+CLI or relay packages as validated v1.1.1 downloads. The intermittent
+two-device relay-soak failure has not been explained and the official Go
+vulnerability scan is BLOCKED by network access. Continue those tasks after
+release, without weakening runtime backup, conflict, credential, cloud
+inventory or restore protections. This is a release policy decision, not a
+claim that either risk was resolved. The publication gate remains off until
+the intended commit is merged and the tag workflow is ready.
+
+On 2026-09-29, a release-finalization branch added Windows protected storage
+for generic WebDAV passwords, custom OAuth client secrets, and custom request
+headers. Existing plaintext SQLite values migrate with rollback on failure;
+the settings API returns only configured flags. This branch is not yet an
+installed VM candidate or a public release. The Linux/Steam Deck storage path
+still uses its previous behavior, so the Windows guarantee must not be
+generalized to every platform. Changing a generic WebDAV URL cannot reuse the
+old URL-bound credential, but cleanup of old credential entries remains under
+review.
+
+The first PR #2 Linux race run found a shutdown race in background conflict
+resolution and an intermittent two-device deletion-soak failure. The API
+shutdown now drains its own background conflict task before closing the daemon;
+focused tests passed locally, but a new Linux race run must verify the change.
+The deletion failure remains under investigation and blocks a public release.
+The subsequent review found and corrected a definite false-success path:
+LAN/WAN delete handlers previously ignored disk deletion errors, and the sync
+engine ignored transport deletion errors while advancing state. WAN deletion
+now also resolves the requested named save location. These corrections have
+focused tests, but whether they fully explain the intermittent soak failure
+remains unproven until repeated race and two-device runs pass.
+Candidate run 36575850861 was attested and its Windows installer independently
+downloaded and checked (SHA-256
+`5A961EFF006949FCAE83D55A9082994D0CA328CEE8DAA13F4796E621C41560C0`),
+but it predates the shutdown fix and is **superseded**. Do not use it as the
+final VM candidate.
+
+The branch candidate [run 36589803878](https://github.com/lyx5710317/gamesave-go/actions/runs/36589803878),
+built from `31f447fae570f35faac1a68884ab6b8966ab2763`. Its Windows
+build and independent verification jobs passed. The downloaded installer is
+`GameSaveGo.Setup.exe`, 12,458,199 bytes, SHA-256
+`7AE2490E1FAB297584B2EE9FAEDAE99FA97A71BE6862B4215062E30F8EB4A498`;
+the locally computed hash matches the verification job log, and local
+`gh attestation verify` with the source ref, commit and workflow constraints
+passed. Windows metadata shows GameSave Go 1.1.1 and `NotSigned` as expected.
+This is **not** a public Release or an installed-VM PASS. On 2026-09-30, the
+owner's VM screenshot showed a fully black app window and English tray text
+after launching this candidate. Treat the installed-VM startup check as FAIL
+and this candidate as **superseded**. The frontend entry point still used
+Svelte 4's `new App(...)` class API after the Svelte 5 dependency upgrade;
+Svelte 5 removed that API. A regression test reproduced the outdated entry
+point, and the entry now uses `mount(App, ...)`. The black window is consistent
+with this startup failure; the screenshot does not prove a firewall block.
+The tray only receives the selected locale from the mounted UI, so English
+on this failed launch is also consistent with the same cause. A newly built
+candidate must be installed and checked on the VM before either behavior is
+claimed fixed there.
+On this commit, two Linux and two Windows race CI jobs passed, and local
+`go test ./... -p 2 -timeout 2700s`, 117 frontend tests, frontend build,
+Wails build and full `npm audit` passed. The default-timeout `go test ./...`
+had earlier hit its 10-minute ceiling, and one earlier concurrent full run
+failed a Jianguoyun fixture credential read; the isolated case passed 20
+repetitions and the whole cloud package passed 5 repetitions. These failures
+remain in the evidence record rather than being rewritten as passes.
+
+The replacement branch candidate is [run 36663430295](https://github.com/lyx5710317/gamesave-go/actions/runs/36663430295)
+from commit `2f74f348429f21ba58a5703c3e8d0499d169a001`. Windows build,
+attestation, and independent downloaded-byte verification passed; public
+release jobs were skipped. Its 12,460,118-byte `GameSaveGo.Setup.exe` has
+SHA-256 `694F9F0D1AEACC5134C263D6B9BE66EF552780D75218A6238C6BAC1919760E0F`.
+The local download matched both the workflow's artifact ZIP digest and
+installer digest. Local GitHub attestation verification constrained to this
+repository, branch ref, commit and release workflow passed; Windows metadata
+shows GameSave Go 1.1.1 and the expected unsigned status. The source-tree
+regression test first failed on the old constructor call and passed after
+the `mount` change. Local checks: frontend `npm test` PASS (20 files,
+118 tests); frontend `npm run build` PASS; `go test ./... -p 2 -timeout 2700s`
+PASS; `wails build` PASS. On the pushed commit, two frontend and Linux CI
+suites and one Windows suite passed. The other Windows race suite **FAILED**:
+`TestSyncAll_SyncsEveryTrackedGame` received a concurrent `games.id` unique
+constraint failure, then `TestMultiFileSync_DeepTreeIntegrityAndIdempotence`
+timed out after 45 minutes while watcher shutdown waited for an in-progress
+Windows fsnotify recursive add. These failures are not evidence of the UI
+startup bug. An unchanged rerun of the failed Windows job passed on attempt
+2. The E2E setup for Sync All and the multi-file conflict cases now tracks
+both peers before pairing, so auto-sync-on-track cannot race an explicit
+test-only tracking request. This does not modify application sync behavior
+or establish that the watcher timeout can never recur. Focused scenarios,
+30 additional local Sync All repetitions, the full local Go suite
+(`go test ./... -p 2 -timeout 2700s`, E2E 589.745 s), 118 frontend tests,
+frontend build and Wails build passed after this test-only change. The new
+Windows race CI checks split: one passed in 24m14s, the other failed because
+`TestSoak_AddingAndDeletingFilesNeverConflicts` did not see the fourth added
+file reach the peer. This is a release blocker, not explained by the earlier
+test-setup collision. The failure did not report the sync status or daemon
+errors, so a separate test-only change now records bounded status/busy/error
+context on this exact failure; it does not change the sync engine or count as
+a fix. Its focused non-race run and new full local Go suite
+(`go test ./... -p 2 -timeout 2700s`, E2E 578.203 s) passed. Frontend
+tests (118), frontend build and Wails build also passed on the current
+application source. The diagnostic commit's two frontend, two Linux race,
+and two Windows race CI suites passed in
+[runs 36672716058](https://github.com/lyx5710317/gamesave-go/actions/runs/36672716058)
+and [36672719691](https://github.com/lyx5710317/gamesave-go/actions/runs/36672719691).
+Those passes do not establish the cause of the earlier intermittent
+four-round relay-soak failure or prove that it is fixed; the diagnostic did
+not exercise its failure branch in these runs. Keep the risk open until a
+reproduced failure can be explained or a stronger repeated two-device check
+is completed. An additional local Windows non-race run of
+`TestSoak_AddingAndDeletingFilesNeverConflicts -count=10` passed (219.516 s),
+but does not reproduce Windows CI's race-detector load or explain the
+earlier missing file.
+
+On 2026-09-30 the owner reported **PASS** for opening the homepage and for
+Chinese tray text on the replacement candidate in the VM. The owner had
+previously removed the old program, so this is an owner-observed reinstall
+smoke test, **not** an upgrade/rollback result. The owner also reports the
+previous synthetic test games and local snapshots are still visible after
+reinstall. This is a UI-level retention PASS, not a byte-hash check, restore
+check. The owner also reports the Jianguoyun third-party application password
+still shows configured and the VM can browse the cloud after reinstall. This
+is a real-account credential-read PASS, not a checked upload/restore or an
+upgrade/rollback result. The guest installer hash was not independently
+reported. No public release or tag was created. A new attempt
+to install the official `govulncheck` tool remained BLOCKED because this
+host could not connect to `proxy.golang.org`; no Go vulnerability-scan PASS
+is claimed.
+
+After creating a VMware safety snapshot of the running 1.1.1 test profile,
+the owner followed the in-place binary-only rollback instructions with the
+local 1.1.0 comparison installer and reported **PASS** for the displayed
+1.1 version, existing synthetic game/file and local snapshots, protected
+Jianguoyun password still configured, and successful cloud browsing. Without
+restoring that VMware snapshot, the owner then reinstalled the 1.1.1
+candidate and reported the same checks **PASS** again, including the 1.1.1
+displayed version. This extends the earlier offline rollback exercise with
+owner-reported live credential-read checks. It does not independently prove
+the exact guest installer hashes, byte-level save equality, cloud upload or
+restore, or behavior on a fresh profile. The comparison installer on the
+host is 12,424,105 bytes, SHA-256
+`957728DA16A70BCEB3D593D8017944321DD39E3E3BDD40F50C87A76EA06BB8DF`;
+the candidate's host/download hash is recorded above. Neither guest file
+hash was supplied.
+
 ## Version identities
 
 - `v1.1.1` is the proposed **desktop product/release tag**. Existing manually
@@ -119,6 +265,13 @@ unexecuted checks with inferred passes.
   and remediation before a public release; production classification does not
   remove build-tool risk. The Go vulnerability check was **BLOCKED** because
   the official Go module proxy was unreachable while fetching `govulncheck`.
+- **PASS (release-finalization branch, 2026-09-29):** refreshed the frontend
+  build dependencies to Svelte 5, Vite 8 and Vitest 5. `npm ci`, all 117
+  frontend tests, the production build, and local Wails build passed with a
+  Node 24 runtime. Full `npm audit` now reports zero findings. The host's old
+  Node 20.10 cannot run the new toolchain; CI uses Node 22. A retry of the Go
+  vulnerability scan remains **BLOCKED** by a timeout reaching the official
+  Go module proxy. The complete `go test ./...` also passed, including e2e.
 - **PASS (local packaging only):** a local portable Wails candidate builds at
   `cmd/opensave-app/build/bin/GameSaveGo-preflight.exe` (23,127,552 bytes;
   SHA-256 `5BA60C3C8E6BE8ABD526426487E70456F10FB08D68FD43C08B34DC91600CA99B`).
@@ -201,7 +354,7 @@ Executed checks on this working tree:
 | Frontend `npm run build` | PASS |
 | `wails build -o GameSaveGo-preflight.exe` and `wails build -nsis` | PASS — unsigned portable and 1.1.1 NSIS installer built locally |
 | Historical 1.1.0 comparison installer | PASS — built from isolated commit `21fc0c0`; not an official prior release |
-| Clean VM install/upgrade/rollback and save/credential retention | PARTIAL — earlier owner-reported 1.1.0 → 1.1.1 → 1.1.0 → 1.1.1 retained snapshots, test file and the offline protected-password configured indicator, but that VM had existing user data. A later new-VM Chinese install/tray/uninstall check passed per the owner; clean-VM upgrade/rollback, independent guest hashes and live credential usability remain unverified |
+| Clean VM install/upgrade/rollback and save/credential retention | PARTIAL — earlier owner-reported 1.1.0 → 1.1.1 → 1.1.0 → 1.1.1 retained snapshots, test file and the offline protected-password configured indicator, but that VM had existing user data. A later new-VM Chinese install/tray/uninstall check passed per the owner. The 2026-09-30 in-place rollback/re-upgrade also retained live Jianguoyun browsing per the owner; independent guest hashes, byte-level save checks and a pristine-profile upgrade matrix remain unverified. |
 | `npm audit --omit=dev` / full `npm audit` | PASS — zero production-classified findings / FAIL — 12 development-build findings |
 | Go dependency vulnerability scan | BLOCKED — official module proxy connection failed before the scanner could run |
 

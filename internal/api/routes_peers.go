@@ -308,8 +308,14 @@ func (s *Server) handleResolveConflict(w http.ResponseWriter, r *http.Request) {
 	// minutes of transfer. Run it in the background and report the outcome
 	// via the "conflict-resolved" WS broadcast, so the modal's button click
 	// returns instantly instead of freezing the UI until the pull finishes.
+	backgroundCtx, accepted := s.beginBackgroundTask()
+	if !accepted {
+		writeError(w, http.StatusServiceUnavailable, "daemon is stopping")
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer s.backgroundJobs.Done()
+		ctx, cancel := context.WithTimeout(backgroundCtx, 15*time.Minute)
 		defer cancel()
 		branchName, err := s.Daemon.P2P.Sync.ResolveConflict(ctx, gameID, body.PeerID, body.Resolution)
 

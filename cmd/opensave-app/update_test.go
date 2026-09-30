@@ -222,6 +222,7 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		} `yaml:"on"`
 		Jobs map[string]struct {
 			If          string            `yaml:"if"`
+			Needs       []string          `yaml:"needs"`
 			Permissions map[string]string `yaml:"permissions"`
 			Steps       []struct {
 				Name string            `yaml:"name"`
@@ -321,6 +322,7 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 	}
 	if !strings.Contains(release.If, "github.event_name == 'push'") ||
 		!strings.Contains(release.If, "GAMESAVE_GO_PUBLIC_RELEASE_READY") ||
+		len(release.Needs) != 1 || release.Needs[0] != "windows" ||
 		release.Permissions["contents"] != "write" ||
 		release.Permissions["id-token"] != "write" ||
 		release.Permissions["attestations"] != "write" {
@@ -343,6 +345,12 @@ func TestReleaseWorkflowSeparatesDesktopAndPeerVersions(t *testing.T) {
 		!strings.Contains(releaseScripts.String(), "SHA256SUMS") || !sumsAttested ||
 		!strings.Contains(string(raw), "fail_on_unmatched_files: true") {
 		t.Fatal("public release must verify build provenance and publish exact checksums")
+	}
+	if !strings.Contains(string(raw), "windows/**/GameSaveGo.Setup.exe") ||
+		!strings.Contains(string(raw), "windows/**/GameSaveGo.exe") ||
+		strings.Contains(string(raw), "linux/*.tar.gz") ||
+		strings.Contains(string(raw), "flatpak/*.flatpak") {
+		t.Fatal("v1.1.1 must publish only the validated Windows desktop assets")
 	}
 	if strings.Contains(string(raw), "WINDOWS_CERT_BASE64") || strings.Contains(string(raw), "HAS_SIGNING") {
 		t.Fatal("unsigned open-source release policy must not depend on commercial signing secrets")

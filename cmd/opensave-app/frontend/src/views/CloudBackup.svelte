@@ -208,6 +208,19 @@
     }
   }
 
+  async function clearCustomHeaders() {
+    busy = true;
+    try {
+      settings.set(await api.post('/api/settings', { cloudSync: { clearHeaders: true } }));
+      await load();
+      toast($t('cloud.toast.headersRemoved'), 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
   // ── Your own OAuth app ───────────────────────────────────────────
   // The daemon has always supported a per-provider client id and secret;
   // nothing in the app set them, so the only route was a hand-written API
@@ -704,7 +717,7 @@
         </div>
         <div class="field">
           <label for="cb-pass">{$t('cloud.fields.password')}</label>
-          <input id="cb-pass" type="password" bind:value={config.password} />
+          <input id="cb-pass" type="password" autocomplete="new-password" bind:value={config.password} placeholder={config.passwordConfigured ? $t('cloud.fields.secretConfigured') : ''} />
         </div>
       </div>
     {:else if config.provider === 'baidu'}
@@ -716,7 +729,10 @@
       </div>
       <div class="field">
         <label for="cb-headers">{$t('cloud.fields.headers')}</label>
-        <input id="cb-headers" bind:value={config.headers} placeholder={'{"Authorization": "Bearer …"}'} />
+        <input id="cb-headers" bind:value={config.headers} placeholder={config.headersConfigured ? $t('cloud.fields.secretConfigured') : '{"Authorization": "Bearer …"}'} />
+        {#if config.headersConfigured}
+          <button class="btn small danger" disabled={busy} on:click={clearCustomHeaders}>{$t('cloud.fields.removeHeaders')}</button>
+        {/if}
       </div>
     {:else}
       <!-- OAuth providers -->
@@ -829,7 +845,7 @@
             </div>
             <div class="field">
               <label for="cb-clientsecret">{$t('cloud.ownApp.clientSecret')} <span class="quiet">— {$t('cloud.ownApp.secretHint')}</span></label>
-              <input id="cb-clientsecret" type="password" bind:value={ownAppSecret} spellcheck="false" />
+              <input id="cb-clientsecret" type="password" autocomplete="new-password" bind:value={ownAppSecret} spellcheck="false" placeholder={config.customClientSecretsConfigured?.[config.provider] ? $t('cloud.fields.secretConfigured') : ''} />
             </div>
             <div class="path-row">
               <button class="btn primary" disabled={busy} on:click={saveOwnApp}>{$t('cloud.ownApp.saveCredentials')}</button>

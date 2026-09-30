@@ -142,7 +142,10 @@ func (s *Service) config() (store.CloudConfig, error) {
 	if cfg.Provider == "jianguoyun" || cfg.Provider == "webdav" {
 		cfg.Password, err = s.Store.LoadCloudPassword(cfg)
 		if err != nil {
-			return store.CloudConfig{}, fmt.Errorf("Jianguoyun application password is not configured or unavailable: %w", err)
+			if cfg.Provider == "jianguoyun" {
+				return store.CloudConfig{}, fmt.Errorf("Jianguoyun application password is not configured or unavailable: %w", err)
+			}
+			return store.CloudConfig{}, fmt.Errorf("cloud password is unavailable: %w", err)
 		}
 	}
 	return cfg, nil
