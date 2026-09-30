@@ -95,8 +95,15 @@ context on this exact failure; it does not change the sync engine or count as
 a fix. Its focused non-race run and new full local Go suite
 (`go test ./... -p 2 -timeout 2700s`, E2E 578.203 s) passed. Frontend
 tests (118), frontend build and Wails build also passed on the current
-application source. The diagnostic commit's two Linux CI suites passed;
-its Windows race suites were still running when this record was updated.
+application source. The diagnostic commit's two frontend, two Linux race,
+and two Windows race CI suites passed in
+[runs 36672716058](https://github.com/lyx5710317/gamesave-go/actions/runs/36672716058)
+and [36672719691](https://github.com/lyx5710317/gamesave-go/actions/runs/36672719691).
+Those passes do not establish the cause of the earlier intermittent
+four-round relay-soak failure or prove that it is fixed; the diagnostic did
+not exercise its failure branch in these runs. Keep the risk open until a
+reproduced failure can be explained or a stronger repeated two-device check
+is completed.
 
 On 2026-09-30 the owner reported **PASS** for opening the homepage and for
 Chinese tray text on the replacement candidate in the VM. The owner had
