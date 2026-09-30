@@ -60,6 +60,23 @@ failed a Jianguoyun fixture credential read; the isolated case passed 20
 repetitions and the whole cloud package passed 5 repetitions. These failures
 remain in the evidence record rather than being rewritten as passes.
 
+The replacement branch candidate is [run 36663430295](https://github.com/lyx5710317/gamesave-go/actions/runs/36663430295)
+from commit `2f74f348429f21ba58a5703c3e8d0499d169a001`. Windows build,
+attestation, and independent downloaded-byte verification passed; public
+release jobs were skipped. Its 12,460,118-byte `GameSaveGo.Setup.exe` has
+SHA-256 `694F9F0D1AEACC5134C263D6B9BE66EF552780D75218A6238C6BAC1919760E0F`.
+The local download matched both the workflow's artifact ZIP digest and
+installer digest. Local GitHub attestation verification constrained to this
+repository, branch ref, commit and release workflow passed; Windows metadata
+shows GameSave Go 1.1.1 and the expected unsigned status. The source-tree
+regression test first failed on the old constructor call and passed after
+the `mount` change. Local checks: frontend `npm test` PASS (20 files,
+118 tests); frontend `npm run build` PASS; `go test ./... -p 2 -timeout 2700s`
+PASS; `wails build` PASS. On the pushed commit, two frontend and Linux CI
+suites and one Windows suite passed; the second Windows CI suite was pending
+when this record was written. **Installed VM startup, Chinese tray behavior,
+and user-data retention for this replacement candidate remain unverified.**
+
 ## Version identities
 
 - `v1.1.1` is the proposed **desktop product/release tag**. Existing manually
