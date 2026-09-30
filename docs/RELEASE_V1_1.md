@@ -32,7 +32,7 @@ downloaded and checked (SHA-256
 but it predates the shutdown fix and is **superseded**. Do not use it as the
 final VM candidate.
 
-The current branch candidate is [run 36589803878](https://github.com/lyx5710317/gamesave-go/actions/runs/36589803878),
+The branch candidate [run 36589803878](https://github.com/lyx5710317/gamesave-go/actions/runs/36589803878),
 built from `31f447fae570f35faac1a68884ab6b8966ab2763`. Its Windows
 build and independent verification jobs passed. The downloaded installer is
 `GameSaveGo.Setup.exe`, 12,458,199 bytes, SHA-256
@@ -40,8 +40,18 @@ build and independent verification jobs passed. The downloaded installer is
 the locally computed hash matches the verification job log, and local
 `gh attestation verify` with the source ref, commit and workflow constraints
 passed. Windows metadata shows GameSave Go 1.1.1 and `NotSigned` as expected.
-This is **not** a public Release or an installed-VM PASS. The owner has been
-asked to test this exact candidate in a synthetic-save VM; results are pending.
+This is **not** a public Release or an installed-VM PASS. On 2026-09-30, the
+owner's VM screenshot showed a fully black app window and English tray text
+after launching this candidate. Treat the installed-VM startup check as FAIL
+and this candidate as **superseded**. The frontend entry point still used
+Svelte 4's `new App(...)` class API after the Svelte 5 dependency upgrade;
+Svelte 5 removed that API. A regression test reproduced the outdated entry
+point, and the entry now uses `mount(App, ...)`. The black window is consistent
+with this startup failure; the screenshot does not prove a firewall block.
+The tray only receives the selected locale from the mounted UI, so English
+on this failed launch is also consistent with the same cause. A newly built
+candidate must be installed and checked on the VM before either behavior is
+claimed fixed there.
 On this commit, two Linux and two Windows race CI jobs passed, and local
 `go test ./... -p 2 -timeout 2700s`, 117 frontend tests, frontend build,
 Wails build and full `npm audit` passed. The default-timeout `go test ./...`
