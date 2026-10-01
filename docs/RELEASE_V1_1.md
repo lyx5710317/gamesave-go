@@ -234,8 +234,8 @@ Before enabling publication, verify on an isolated clean Windows VM:
    remain unverified. A checksum published alongside an asset is not
    independent provenance; verify its GitHub attestation as well.
    An older `1.1` development binary should see `v1.1.1` as newer, while a
-   source-built `1.1.1` copy should see the same-version release through the
-   absent release marker. Verify both paths on installed builds; unit tests
+   source-built or official `1.1.1` copy must not offer `v1.1.1` again,
+   regardless of its release marker. Verify both paths on installed builds; unit tests
    do not substitute for that upgrade test.
 4. Exercise rollback to the previous build **without** rolling back or
    deleting user data. If a schema migration makes rollback unsafe, document

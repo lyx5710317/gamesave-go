@@ -102,20 +102,13 @@ func releaseUpdateAssets(rel selfupdate.Release, requestedURL, goos string) (sel
 }
 
 // shouldOfferDesktopRelease keeps product updates separate from peer protocol
-// versions. A source-built copy at the same version may move to the matching
-// official release once; a tagged build never offers itself again.
-func shouldOfferDesktopRelease(rel selfupdate.Release, currentVersion, installedTag string) bool {
+// versions. Equal versions are never updates, even if a build's release
+// provenance marker is absent. Both detection and installation use this gate.
+func shouldOfferDesktopRelease(rel selfupdate.Release, currentVersion, _ string) bool {
 	if rel.TagName == "" {
 		return false
 	}
-	switch compareVersions(rel.Version(), currentVersion) {
-	case 1:
-		return true
-	case -1:
-		return false
-	default:
-		return installedTag == "" && rel.TagName == "v"+currentVersion
-	}
+	return compareVersions(rel.Version(), currentVersion) > 0
 }
 
 // releaseAsset is the subset of a GitHub release asset the updater needs.

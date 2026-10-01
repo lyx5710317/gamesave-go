@@ -64,7 +64,11 @@ func TestShouldOfferDesktopRelease(t *testing.T) {
 		want                                           bool
 	}{
 		{"legacy 1.1 development build", "v1.1.1", "1.1", "", true},
-		{"current development build", "v1.1.1", "1.1.1", "", true},
+		{"current build without release marker", "v1.1.1", "1.1.1", "", false},
+		{"equal version with different marker", "v1.1.1", "1.1.1", "v1.1", false},
+		{"equivalent version format", "v1.1.0", "1.1", "", false},
+		{"newer release without installed marker", "v1.1.2", "1.1.1", "", true},
+		{"stable release after prerelease", "v1.1.1", "1.1.1-beta.1", "", true},
 		{"matching installed release", "v1.1.1", "1.1.1", "v1.1.1", false},
 		{"newer release", "v1.1.2", "1.1.1", "v1.1.1", true},
 		{"older release", "v1.1.0", "1.1.1", "", false},

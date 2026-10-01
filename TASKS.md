@@ -1,5 +1,10 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Post-release — Equal-version update notice
+
+- [x] Require a strictly newer desktop version for both update detection and installation, independent of the release provenance marker. Add regression coverage for equal/missing/different markers, equivalent version formats, newer versions and prerelease-to-stable updates.
+- [x] 2026-10-01: focused update comparison tests PASS; `go test ./...` PASS; frontend tests PASS (129 tests); frontend production build PASS; Wails Windows build PASS. No installed-release/manual banner verification claimed.
+
 ## Post-release — FLiNG trainer search
 
 - [x] Resolve the English trainer-search title from the tracked Steam App ID (curated/bundled names, then bounded English Steam Store lookup), or exact common Chinese aliases. Do not rename the game or infer sync identity. Unresolved names expose a manual English search field rather than opening a Chinese query.
