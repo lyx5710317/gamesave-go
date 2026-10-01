@@ -1,5 +1,11 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Desktop release v1.2.0
+
+- [x] Set desktop, frontend, lockfile and Windows metadata to 1.2.0 while retaining the inherited core/peer version.
+- [x] Local Go/frontend/build/package checks PASS on 2026-10-01 (129 frontend tests). NSIS version 1.2.0; archive extraction and isolated original-payload/fresh-profile startup checks passed on repeat. Record initial transient startup failure and unavailable VM upgrade testing in docs/RELEASE_V1_2.md.
+- [ ] Build and verify the GitHub Actions Windows candidate, then publish the attested installer, portable app and SHA256SUMS under v1.2.0.
+
 ## Post-release — Equal-version update notice
 
 - [x] Require a strictly newer desktop version for both update detection and installation, independent of the release provenance marker. Add regression coverage for equal/missing/different markers, equivalent version formats, newer versions and prerelease-to-stable updates.
