@@ -233,6 +233,8 @@ export default {
   'game.date': 'Date',
   'game.size': 'Size',
   'game.configTitle': 'Launch and sync configuration',
+  'game.findTrainer': 'Find trainer',
+  'game.findTrainerHint': 'Open FLiNG game search in your browser and choose a version to download; translated or custom names may need a different search term.',
   'game.steamAppId': 'Steam App ID',
   'game.appIdPlaceholder': 'e.g. 1091500',
   'game.steamAppIdHint': 'The Steam App ID enables launch, cover art and cross-device matching when that setting is on. Saves under AppData may need the ID entered manually. It is the number in the game’s Steam store URL.',

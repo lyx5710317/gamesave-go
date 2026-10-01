@@ -6,3 +6,9 @@
 // never inside the app window.
 
 export { PRODUCT_REPOSITORY_URL as GITHUB_URL } from './branding.js';
+
+// Use the official search form rather than guessing a trainer page slug.
+export function flingTrainerSearchURL(name) {
+  const query = typeof name === 'string' ? name.trim() : '';
+  return query ? `https://flingtrainer.com/?s=${encodeURIComponent(query)}` : '';
+}

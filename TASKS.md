@@ -1,5 +1,12 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Post-release — FLiNG trainer search
+
+- [x] Add a localized game-detail action using the current tracked game name and the official FLiNG search URL, opened through the existing system-browser bridge.
+- [x] Cover search encoding, translated/custom names and empty names with focused automated tests. No snapshot requirement, schema change or download execution.
+- [x] 2026-10-01: focused baseline PASS (14 tests); frontend suite PASS (127 tests); `npm run build` PASS using bundled Node 24.19.0. Default Node is too old for the installed frontend toolchain.
+- [x] 2026-10-01: `go test ./...` PASS (including E2E, 597.329s); `wails build` PASS using the previously installed Go 1.26.4 and Wails 2.12.0 toolchains found outside PATH. Windows executable generated; manual browser-click verification remains unperformed.
+
 ## Phase 0 — Baseline / Repository Audit
 
 - [x] Read the supplied V2.1 execution document in full.

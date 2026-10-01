@@ -233,6 +233,8 @@ export default {
   'game.date': '日期',
   'game.size': '大小',
   'game.configTitle': '启动与同步配置',
+  'game.findTrainer': '查找修改器',
+  'game.findTrainerHint': '在系统浏览器中打开 FLiNG 游戏搜索，选择对应版本下载；中文或自定义名称可能需要调整搜索词。',
   'game.steamAppId': 'Steam 应用编号',
   'game.appIdPlaceholder': '例如 1091500',
   'game.steamAppIdHint': 'Steam 应用编号可用于启动游戏、获取封面，以及在设置中启用对应选项后跨设备匹配游戏。AppData 中的存档可能无法自动推断编号，需要手动填写；编号可从该游戏的 Steam 商店网址中找到。',

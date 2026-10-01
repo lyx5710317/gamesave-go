@@ -6,10 +6,12 @@
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
   import { peerRequiringSavePath } from '../lib/syncOutcome.js';
   import { t, locale } from '../lib/i18n.js';
+  import { flingTrainerSearchURL } from '../lib/links.js';
 
   export let params = {};
 
   $: game = $games[params.gameId];
+  $: trainerSearchURL = flingTrainerSearchURL(game?.name);
   $: activity = $syncActivity[params.gameId];
 
   let tab = 'snapshots';
@@ -493,6 +495,7 @@
       </div>
     </div>
     <div class="head-actions">
+      <button class="btn" disabled={!trainerSearchURL} title={$t('game.findTrainerHint')} on:click={() => native.openExternal(trainerSearchURL)}>{$t('game.findTrainer')}</button>
       {#if game.appId || game.exePath}
         <button class="btn" disabled={busy} on:click={launchGame}>▶ {$t('game.launch')}</button>
       {/if}
