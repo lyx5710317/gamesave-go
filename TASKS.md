@@ -4,7 +4,8 @@
 
 - [x] Set desktop, frontend, lockfile and Windows metadata to 1.2.0 while retaining the inherited core/peer version.
 - [x] Local Go/frontend/build/package checks PASS on 2026-10-01 (129 frontend tests). NSIS version 1.2.0; archive extraction and isolated original-payload/fresh-profile startup checks passed on repeat. Record initial transient startup failure and unavailable VM upgrade testing in docs/RELEASE_V1_2.md.
-- [ ] Build and verify the GitHub Actions Windows candidate, then publish the attested installer, portable app and SHA256SUMS under v1.2.0.
+- [x] Built and verified the Actions candidate, published v1.2.0 installer/portable/SHA256SUMS in run 36825016491, and verified downloaded hashes, exact-tag provenance and installer integrity. Public-release gate reset to false. See docs/RELEASE_V1_2.md for test results and limits.
+- [ ] Investigate intermittent Windows one-sided sync E2E assertion (push run 36822612296 failed; same-commit PR run 36822649461 passed).
 
 ## Post-release — Equal-version update notice
 

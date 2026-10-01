@@ -55,8 +55,13 @@ PASS: [PR CI run 36822649461](https://github.com/lyx5710317/gamesave-go/actions/
 
 PASS: browser interaction smoke checks using synthetic local API fixtures: Chinese title opened the encoded Black Myth: Wukong FLiNG URL; unknown title displayed manual input, Chinese input kept search disabled, and Elden Ring enabled the encoded English search.
 
-Pending: tagged Windows build, public release and
-downloaded-release verification.
+PASS: published [v1.2.0](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.2.0) from tag commit `60acb77ebd0eca695839fd0434d8c338a65034ca` in [release run 36825016491](https://github.com/lyx5710317/gamesave-go/actions/runs/36825016491). Windows build and public release jobs passed. Downloaded installer and portable app match SHA256SUMS and report ProductVersion 1.2.0. All three release assets passed provenance verification constrained to the repository, tag, exact commit and release workflow. NSIS archive integrity passed. The public-release variable was reset to false.
+
+Final SHA-256:
+
+- GameSaveGo.exe: `ee1c2d07692f33d8f9940fa72a2d8ffcfadf52adffb23332b18912e48f929242`
+- GameSaveGo.Setup.exe: `97eb56bcd8e16b86206058c233d7790ae588a8fb3b010c439244ce8c11850510`
+- SHA256SUMS: `7facf4f69edd5eacde45c28b64787d484b951ea4b7a37878c02e2607786db35e`
 Publish only the Actions-built Windows installer, portable app and SHA256SUMS.
 Windows binaries remain unsigned; disclose SmartScreen and the existing cloud,
 sync and dependency-scan limits. Linux/Steam Deck/CLI/P2P foundations remain intact.
