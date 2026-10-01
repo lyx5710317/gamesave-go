@@ -1,6 +1,7 @@
 package presets
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,8 +45,15 @@ var steamAPIClient = &http.Client{Timeout: 3 * time.Second}
 // fetchSteamAppName queries the Steam Store API for an AppID's title.
 // Returns "" on any failure — the caller keeps the placeholder name.
 func fetchSteamAppName(appID string) string {
+	return fetchSteamAppNameLanguage(context.Background(), appID, "")
+}
+
+func fetchSteamAppNameLanguage(ctx context.Context, appID, language string) string {
 	url := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&filters=basic", appID)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if language != "" {
+		url += "&l=" + language
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return ""
 	}

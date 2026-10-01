@@ -2,6 +2,11 @@
 
 ## Post-release — FLiNG trainer search
 
+- [x] Resolve the English trainer-search title from the tracked Steam App ID (curated/bundled names, then bounded English Steam Store lookup), or exact common Chinese aliases. Do not rename the game or infer sync identity. Unresolved names expose a manual English search field rather than opening a Chinese query.
+- [x] For other Chinese names, query Steam's localized Store search and accept only a unique exact app-title match; reject fuzzy matches, bundles and ambiguous IDs. Verified the official search response for 博德之门3; automated tests use mocked responses.
+- [x] Add resolver and API tests for Chinese aliases, identity precedence, invalid IDs, untranslated/failed Store responses, and unchanged tracked data; reject Chinese search queries in the frontend.
+- [x] English-name resolution verification on 2026-10-01: `go test ./...` PASS (E2E 602.836s); frontend tests PASS (129 tests); frontend production build PASS; Wails Windows build PASS. Live official Store queries confirmed 博德之门3 → 1086940 → Baldur's Gate 3. Native button-click verification remains unperformed.
+
 - [x] Add a localized game-detail action using the current tracked game name and the official FLiNG search URL, opened through the existing system-browser bridge.
 - [x] Cover search encoding, translated/custom names and empty names with focused automated tests. No snapshot requirement, schema change or download execution.
 - [x] 2026-10-01: focused baseline PASS (14 tests); frontend suite PASS (127 tests); `npm run build` PASS using bundled Node 24.19.0. Default Node is too old for the installed frontend toolchain.
