@@ -451,7 +451,12 @@ jobs:
           # block; if a tag is ever re-cut, tidy the release body by hand.
           generate_release_notes: true
           body: |
-            GameSave Go v1.1.1 是 Windows 优先的正式版。本次仅发布 Windows 安装包和便携版；Linux、Steam Deck、CLI 和中继源码仍在仓库中，但没有作为本次已验证的正式下载提供。
+            GameSave Go v1.2.0 是 Windows 优先的正式版。本次仅发布 Windows 安装包和便携版；Linux、Steam Deck、CLI 和中继源码仍在仓库中，但没有作为本次已验证的正式下载提供。
+
+            本次更新：
+            - 游戏详情新增“查找修改器”，在系统浏览器打开 FLiNG 官网搜索，由用户选择版本下载。
+            - 中文游戏名称先识别为英文名：优先使用 Steam 应用编号及本地名称资料，其他中文标题尝试 Steam 官网唯一精确匹配；未能确认时可手动填写英文名。
+            - 修复最新版反复提示同版本更新的问题，只有远端版本严格高于当前版本才提示更新。
 
             主要功能包括本地存档快照、手动恢复、设备配对同步，以及坚果云等自选存储的云备份。云备份不等于已完成安全的云端双向同步；远端 Vault 加入、可靠条件写入和自动冲突解决尚未完成。此前 Windows 自动测试曾偶发一次双设备文件未到达，后续重复检查通过但原因未完全查明；重要存档请保留独立备份。Go 依赖漏洞扫描因连接官方服务超时而未完成。
 

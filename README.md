@@ -8,7 +8,7 @@
 
 </div>
 
-> **Windows 正式版：v1.1.1。** 请从本仓库的 [GitHub Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.1.1) 下载。GitHub Actions 的候选构建不是正式安装包；本次没有发布经过同等验证的 Linux 或 Steam Deck 安装包。
+> **Windows 正式版：v1.2.0。** 请从本仓库的 [GitHub Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.2.0) 下载。GitHub Actions 的候选构建不是正式安装包；本次没有发布经过同等验证的 Linux 或 Steam Deck 安装包。
 
 GameSave Go 基于开源项目 OpenSave 开发。它不要求注册 GameSave Go 账户；游戏存档保存在本机、你选择的云存储，或与你配对的设备上。使用坚果云、Google Drive 等服务时，仍需拥有相应服务的账户。
 
@@ -19,6 +19,7 @@ GameSave Go 基于开源项目 OpenSave 开发。它不要求注册 GameSave Go 
 - **在设备间同步**：两台设备可在局域网发现、配对并同步；不同网络可使用房间码和中继。发生不确定的冲突时需要选择保留本机、对方或双方版本，不应按修改时间自动覆盖。
 - **备份到自己的存储**：可选择坚果云、Google Drive、本地文件夹、其他 WebDAV 或 HTTP Webhook。云端快照可以浏览、只读验证；支持读取的目标可在确认后恢复。各提供商的能力和限制见下文。
 - **查看运行状态**：游戏、云备份、活动和设置页面分别用于管理存档、查看传输结果及调整同步行为。界面支持简体中文和英语。
+- **查找修改器**：游戏详情中的“查找修改器”先通过 Steam 应用编号、本地名称资料及常见中文名对应关系识别英文名；其他中文标题会尝试 Steam 官网精确搜索，只有唯一匹配才采用。随后在系统浏览器打开 FLiNG 搜索，由你选择对应版本下载。未能识别时，可输入英文名或在游戏配置中补充 Steam 应用编号后重试。
 
 ## 从软件界面开始
 
@@ -55,7 +56,7 @@ Windows 版将坚果云应用密码保存在当前用户的 Windows 凭据管理
 
 ## 下载、校验与从源码构建
 
-**正式下载：**在 [GameSave Go v1.1.1 Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.1.1) 下载 `GameSaveGo.Setup.exe`（Windows 安装包）或 `GameSaveGo.exe`（便携版），并下载同页的 `SHA256SUMS` 核对文件。上游 OpenSave 网站、安装脚本及其发布页提供的不是 GameSave Go；GitHub Actions 候选文件仅供测试，不是正式安装包。
+**正式下载：**在 [GameSave Go v1.2.0 Release](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.2.0) 下载 `GameSaveGo.Setup.exe`（Windows 安装包）或 `GameSaveGo.exe`（便携版），并下载同页的 `SHA256SUMS` 核对文件。上游 OpenSave 网站、安装脚本及其发布页提供的不是 GameSave Go；GitHub Actions 候选文件仅供测试，不是正式安装包。
 
 由于个人开源项目暂未购买商业代码签名证书，**Windows 可能出现 SmartScreen 提示**。未签名安装包没有 Windows 已验证发布者身份；如果设备策略阻止运行，不要关闭安全防护强行安装。本次发布提供每个安装文件的 `SHA256SUMS` 和 GitHub Artifact Attestations。散列用于核对下载文件，来源证明用于核对构建仓库和提交；两者都不能保证软件没有漏洞，也不能替代 Windows 代码签名。
 

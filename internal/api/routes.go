@@ -31,6 +31,7 @@ func (s *Server) routes(r chi.Router) {
 	r.Delete("/api/games/{gameId}", s.handleUntrackGame)
 
 	r.Get("/api/games/{gameId}/aliases", s.handleListAliases)
+	r.Get("/api/games/{gameId}/trainer-name", s.handleTrainerName)
 	r.Post("/api/games/{gameId}/link", s.handleLinkGame)
 	r.Get("/api/games/{gameId}/roots", s.handleListGameRoots)
 	r.Post("/api/games/{gameId}/roots", s.handleAddGameRoot)

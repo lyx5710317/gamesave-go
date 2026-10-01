@@ -1,5 +1,28 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Desktop release v1.2.0
+
+- [x] Set desktop, frontend, lockfile and Windows metadata to 1.2.0 while retaining the inherited core/peer version.
+- [x] Local Go/frontend/build/package checks PASS on 2026-10-01 (129 frontend tests). NSIS version 1.2.0; archive extraction and isolated original-payload/fresh-profile startup checks passed on repeat. Record initial transient startup failure and unavailable VM upgrade testing in docs/RELEASE_V1_2.md.
+- [ ] Build and verify the GitHub Actions Windows candidate, then publish the attested installer, portable app and SHA256SUMS under v1.2.0.
+
+## Post-release — Equal-version update notice
+
+- [x] Require a strictly newer desktop version for both update detection and installation, independent of the release provenance marker. Add regression coverage for equal/missing/different markers, equivalent version formats, newer versions and prerelease-to-stable updates.
+- [x] 2026-10-01: focused update comparison tests PASS; `go test ./...` PASS; frontend tests PASS (129 tests); frontend production build PASS; Wails Windows build PASS. No installed-release/manual banner verification claimed.
+
+## Post-release — FLiNG trainer search
+
+- [x] Resolve the English trainer-search title from the tracked Steam App ID (curated/bundled names, then bounded English Steam Store lookup), or exact common Chinese aliases. Do not rename the game or infer sync identity. Unresolved names expose a manual English search field rather than opening a Chinese query.
+- [x] For other Chinese names, query Steam's localized Store search and accept only a unique exact app-title match; reject fuzzy matches, bundles and ambiguous IDs. Verified the official search response for 博德之门3; automated tests use mocked responses.
+- [x] Add resolver and API tests for Chinese aliases, identity precedence, invalid IDs, untranslated/failed Store responses, and unchanged tracked data; reject Chinese search queries in the frontend.
+- [x] English-name resolution verification on 2026-10-01: `go test ./...` PASS (E2E 602.836s); frontend tests PASS (129 tests); frontend production build PASS; Wails Windows build PASS. Live official Store queries confirmed 博德之门3 → 1086940 → Baldur's Gate 3. Native button-click verification remains unperformed.
+
+- [x] Add a localized game-detail action using the current tracked game name and the official FLiNG search URL, opened through the existing system-browser bridge.
+- [x] Cover search encoding, translated/custom names and empty names with focused automated tests. No snapshot requirement, schema change or download execution.
+- [x] 2026-10-01: focused baseline PASS (14 tests); frontend suite PASS (127 tests); `npm run build` PASS using bundled Node 24.19.0. Default Node is too old for the installed frontend toolchain.
+- [x] 2026-10-01: `go test ./...` PASS (including E2E, 597.329s); `wails build` PASS using the previously installed Go 1.26.4 and Wails 2.12.0 toolchains found outside PATH. Windows executable generated; manual browser-click verification remains unperformed.
+
 ## Phase 0 — Baseline / Repository Audit
 
 - [x] Read the supplied V2.1 execution document in full.

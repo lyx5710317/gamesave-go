@@ -24,11 +24,11 @@ import (
 
 // AppVersion is the GameSave Go desktop version shown in the UI. It is kept
 // separate from the inherited core/peer version in internal/version.
-var AppVersion = "1.1.1"
+var AppVersion = "1.2.0"
 
 // DesktopReleaseTag is empty in source-built/development binaries. Tagged
-// release builds stamp it with -ldflags, allowing an equal-version official
-// release to be offered once to a development build but not to itself.
+// release builds stamp it with -ldflags to record release provenance.
+// Update availability depends on a strictly newer desktop version.
 var DesktopReleaseTag = ""
 
 // productName is the user-facing name of this fork. Compatibility-sensitive

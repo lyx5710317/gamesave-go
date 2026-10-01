@@ -6,10 +6,31 @@
   import { manualUploadOutcome } from '../lib/uploadActivity.js';
   import { peerRequiringSavePath } from '../lib/syncOutcome.js';
   import { t, locale } from '../lib/i18n.js';
+  import { flingTrainerSearchURL } from '../lib/links.js';
 
   export let params = {};
 
   $: game = $games[params.gameId];
+  let trainerLoading = false;
+  let trainerManual = false;
+  let trainerName = '';
+  $: trainerSearchURL = flingTrainerSearchURL(trainerName);
+
+  async function findTrainer() {
+    const gameId = game.id;
+    trainerLoading = true;
+    try {
+      const result = await api.get(`/api/games/${encodeURIComponent(gameId)}/trainer-name`);
+      if (params.gameId !== gameId) return;
+      const url = flingTrainerSearchURL(result.name);
+      if (url) native.openExternal(url);
+      else trainerManual = true;
+    } catch {
+      if (params.gameId === gameId) trainerManual = true;
+    } finally {
+      if (params.gameId === gameId) trainerLoading = false;
+    }
+  }
   $: activity = $syncActivity[params.gameId];
 
   let tab = 'snapshots';
@@ -31,6 +52,9 @@
     browsing = null;
     cloudSnaps = null;
     cloudLoading = false;
+    trainerLoading = false;
+    trainerManual = false;
+    trainerName = '';
   }
 
   // Editable per-game configuration (loaded from the game, saved via PATCH).
@@ -493,12 +517,21 @@
       </div>
     </div>
     <div class="head-actions">
+      <button class="btn" disabled={trainerLoading} title={$t('game.findTrainerHint')} on:click={findTrainer}>{$t(trainerLoading ? 'game.findTrainerLoading' : 'game.findTrainer')}</button>
       {#if game.appId || game.exePath}
         <button class="btn" disabled={busy} on:click={launchGame}>▶ {$t('game.launch')}</button>
       {/if}
       <button class="btn primary" disabled={busy} on:click={syncNow}>⟳ {$t('game.syncNow')}</button>
     </div>
   </div>
+
+  {#if trainerManual}
+    <div class="trainer-search">
+      <label for="trainer-name">{$t('game.trainerNameNeeded')}</label>
+      <input id="trainer-name" bind:value={trainerName} placeholder={$t('game.trainerNamePlaceholder')} />
+      <button class="btn" disabled={!trainerSearchURL} on:click={() => native.openExternal(trainerSearchURL)}>{$t('game.findTrainer')}</button>
+    </div>
+  {/if}
 
   <div class="path-line">
     {#if editPath}
@@ -944,6 +977,14 @@
   .head-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
+  }
+  .trainer-search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 18px;
   }
   .path-line {
     display: flex;
