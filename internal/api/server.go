@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -269,8 +270,14 @@ func (s *Server) beginBackgroundTask() (context.Context, bool) {
 func corsLocalhost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err == nil && isLoopback(host) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin != "" && !trustedDashboardOrigin(origin) {
+			writeError(w, http.StatusForbidden, "browser origin denied")
+			return
+		}
+		if err == nil && isLoopback(host) && origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		}
@@ -291,8 +298,42 @@ func localhostOnly(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "external access denied")
 			return
 		}
+		// A rebinding website can resolve its own hostname to loopback.
+		// RemoteAddr alone does not establish a trusted dashboard request.
+		requestHost := r.Host
+		if h, _, err := net.SplitHostPort(requestHost); err == nil {
+			requestHost = h
+		}
+		// Older native clients use the literal wildcard listener address.
+		// This is safe only after the loopback RemoteAddr check above.
+		ip := net.ParseIP(requestHost)
+		if requestHost != "localhost" && !isLoopback(requestHost) && (ip == nil || !ip.IsUnspecified()) {
+			writeError(w, http.StatusForbidden, "dashboard host denied")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !trustedDashboardOrigin(origin) {
+			writeError(w, http.StatusForbidden, "browser origin denied")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Native CLI clients omit Origin. Browser clients must come from the Wails
+// asset server or an actual loopback host, never a hostname merely containing
+// "localhost". Reject opaque origins and URL components absent from origins.
+func trustedDashboardOrigin(origin string) bool {
+	if origin == "wails://wails" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return u.Hostname() == "wails.localhost" || u.Hostname() == "localhost" || isLoopback(u.Hostname())
 }
 
 func isLoopback(host string) bool {

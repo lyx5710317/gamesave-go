@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/opensave/opensave/internal/cloud"
 	"github.com/opensave/opensave/internal/snapshot"
 	"github.com/opensave/opensave/internal/vaultmeta"
@@ -20,6 +22,7 @@ var pendingPKCE = struct {
 	sync.Mutex
 	provider string
 	verifier string
+	state    string
 }{}
 
 func (s *Server) cloudRoutes(r chi.Router) {
@@ -168,16 +171,27 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	state := uuid.NewString()
+	u, err := url.Parse(authURL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid authorization URL")
+		return
+	}
+	query := u.Query()
+	query.Set("state", state)
+	u.RawQuery = query.Encode()
+	authURL = u.String()
 
 	pendingPKCE.Lock()
 	pendingPKCE.provider = body.Provider
 	pendingPKCE.verifier = verifier
+	pendingPKCE.state = state
 	pendingPKCE.Unlock()
 
 	// Try to catch the redirect automatically (the registered redirect URI
 	// is http://localhost/callback). When this works, sign-in completes
 	// with no copy/paste; otherwise the UI falls back to manual code entry.
-	auto := s.startAuthCallback()
+	auto := s.startAuthCallback(state)
 
 	writeJSON(w, http.StatusOK, map[string]any{"authUrl": authURL, "autoCallback": auto})
 }
@@ -196,6 +210,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	pendingPKCE.Lock()
 	provider, verifier := pendingPKCE.provider, pendingPKCE.verifier
 	pendingPKCE.provider, pendingPKCE.verifier = "", ""
+	pendingPKCE.state = ""
 	pendingPKCE.Unlock()
 	if provider == "" {
 		writeError(w, http.StatusBadRequest, "no auth flow in progress — call /api/auth/start first")

@@ -124,8 +124,8 @@ func TestCORSPreflight(t *testing.T) {
 		if resp.StatusCode != http.StatusNoContent {
 			t.Errorf("preflight %s status = %d, want 204", path, resp.StatusCode)
 		}
-		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
-			t.Errorf("preflight %s Allow-Origin = %q, want *", path, got)
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://wails.localhost" {
+			t.Errorf("preflight %s Allow-Origin = %q, want Wails origin", path, got)
 		}
 		if got := resp.Header.Get("Access-Control-Allow-Methods"); got == "" {
 			t.Errorf("preflight %s missing Allow-Methods", path)
