@@ -16,8 +16,8 @@ import (
 )
 
 func TestDesktopProductVersion(t *testing.T) {
-	if AppVersion != "1.2.0" {
-		t.Fatalf("desktop version = %q, want 1.2.0", AppVersion)
+	if AppVersion != "1.2.1" {
+		t.Fatalf("desktop version = %q, want 1.2.1", AppVersion)
 	}
 	if got := NewApp().AppInfo()["version"]; got != AppVersion {
 		t.Fatalf("About version = %q, want %q", got, AppVersion)
@@ -25,11 +25,11 @@ func TestDesktopProductVersion(t *testing.T) {
 	for _, tc := range []struct {
 		path, section, field, want string
 	}{
-		{"frontend/package.json", "", "version", "1.2.0"},
-		{"frontend/package-lock.json", "", "version", "1.2.0"},
-		{"wails.json", "info", "productVersion", "1.2.0"},
-		{"build/windows/info.json", "fixed", "file_version", "1.2.0.0"},
-		{"build/windows/info.json", "0000", "ProductVersion", "1.2.0"},
+		{"frontend/package.json", "", "version", "1.2.1"},
+		{"frontend/package-lock.json", "", "version", "1.2.1"},
+		{"wails.json", "info", "productVersion", "1.2.1"},
+		{"build/windows/info.json", "fixed", "file_version", "1.2.1.0"},
+		{"build/windows/info.json", "0000", "ProductVersion", "1.2.1"},
 	} {
 		data, err := os.ReadFile(tc.path)
 		if err != nil {
@@ -77,6 +77,9 @@ func TestShouldOfferDesktopRelease(t *testing.T) {
 		{"upgrade previous official release", "v1.2.0", "1.1.1", "v1.1.1", true},
 		{"new release never offers itself", "v1.2.0", "1.2.0", "v1.2.0", false},
 		{"new source build never offers itself", "v1.2.0", "1.2.0", "", false},
+		{"patch release upgrades 1.2.0", "v1.2.1", "1.2.0", "v1.2.0", true},
+		{"patch release never offers itself", "v1.2.1", "1.2.1", "v1.2.1", false},
+		{"patch source build never offers itself", "v1.2.1", "1.2.1", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,5 +1,12 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Desktop release v1.2.1
+
+- [x] Prepare Windows desktop/frontend/lockfile/resource version 1.2.1, preserving inherited core/peer identities; include this round's audit fixes and update public release notes.
+- [ ] Complete versioned local checks, candidate provenance/metadata/integrity verification and release CI; publish Actions-built installer/portable/SHA256SUMS, verify exact tagged downloads, then reset the public-release gate.
+- [ ] Save a Chinese version-update article with verified v1.2.1 download links in the existing InkPage draft vault; do not publish the article.
+- [ ] Preserve disclosed audit/installed-VM/provider/multi-root limitations and investigate intermittent Windows credential/sync test failures.
+
 ## Post-release — Repository audit 2026-10-05
 
 - [x] Recheck repository rules, clean working tree/development branch, architecture boundaries, REST/WebSocket exposure, OAuth, SQLite paths, local/cloud archive validation, incoming-sync safety and deletion reporting; inspect frontend, CLI/Decky and release boundaries and run repository-wide automated checks. This is a source/test audit, not a proof that every execution path is defect-free or an installed-device/provider certification.
