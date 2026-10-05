@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"github.com/opensave/opensave/internal/archivepaths"
 	"github.com/opensave/opensave/internal/store"
 )
 
@@ -141,6 +143,9 @@ func UnzipTo(zipPath, targetPath string) error {
 		return fmt.Errorf("open zip archive: %w", err)
 	}
 	defer r.Close()
+	if err := archivepaths.Validate(r.File, runtime.GOOS == "windows"); err != nil {
+		return ErrRestoreArchive
+	}
 
 	isFile := false
 	if info, statErr := os.Stat(targetPath); statErr == nil {

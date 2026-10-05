@@ -192,14 +192,16 @@ func (e *Engine) syncOneRoot(ctx context.Context, gameID string, game store.Game
 	// and keeps the safety rule identical to the primary save path.
 	if atRisk := filesAtRisk(local, decision); len(atRisk) > 0 {
 		comment := fmt.Sprintf("Before sync replaced local files in the %q save location", sr.root.Name)
-		if _, err := e.Snapshots.Create(gameID, comment, true); err != nil {
+		if err := e.Snapshots.CreateVerifiedSafety(gameID, comment); err != nil {
 			return fmt.Errorf(
 				"refusing to replace %d local file(s) in the %q save location of %q: they could not be snapshotted first: %w",
 				len(atRisk), sr.root.Name, game.Name, err)
 		}
 	}
 
-	e.applyLocalDeletions(sr.root, decision)
+	if err := e.applyLocalDeletions(sr.root, decision); err != nil {
+		return err
+	}
 	if err := e.propagateDeletions(ctx, peer, gameID, sr.root, decision); err != nil {
 		return err
 	}

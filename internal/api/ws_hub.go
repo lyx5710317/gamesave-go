@@ -56,8 +56,13 @@ func (h *Hub) Broadcast(msgType string, data any) {
 // ServeHTTP upgrades the request to a WebSocket and services it until the
 // client disconnects.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && !trustedDashboardOrigin(origin) {
+		writeError(w, http.StatusForbidden, "browser origin denied")
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Local dashboard only; the daemon binds localhost.
+		// Origins were checked above; cross-origin Wails/loopback clients
+		// cannot use the library's same-host default.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {

@@ -448,7 +448,7 @@ func (e *Engine) SyncWithPeer(ctx context.Context, gameID string, peer Peer) (Re
 	// fixable — a full disk, a missing backups folder — where overwriting a
 	// save with no copy behind it is neither.
 	if len(atRisk) > 0 {
-		if _, err := e.Snapshots.Create(gameID, "before sync replaced local files", true); err != nil {
+		if err := e.Snapshots.CreateVerifiedSafety(gameID, "before sync replaced local files"); err != nil {
 			e.Log("error", fmt.Sprintf(
 				"not syncing %q with %q: %d local file(s) would be replaced and they could not be snapshotted first: %v",
 				game.Name, peer.Name, len(atRisk), err))
@@ -459,7 +459,9 @@ func (e *Engine) SyncWithPeer(ctx context.Context, gameID string, peer Peer) (Re
 	}
 
 	// 6. Apply deletions (locally + propagate to peer).
-	e.applyLocalDeletions(primaryRootOf(game), decision)
+	if err := e.applyLocalDeletions(primaryRootOf(game), decision); err != nil {
+		return Result{}, err
+	}
 	if err := e.propagateDeletions(ctx, peer, gameID, primaryRootOf(game), decision); err != nil {
 		return Result{}, err
 	}
@@ -839,16 +841,18 @@ func primaryRootOf(game store.Game) syncRoot {
 	return syncRoot{Name: delta.PrimaryRoot, Path: game.SavePath}
 }
 
-func (e *Engine) applyLocalDeletions(root syncRoot, d Decision) {
+func (e *Engine) applyLocalDeletions(root syncRoot, d Decision) error {
 	for _, relPath := range d.FilesToDeleteLocally {
 		if !delta.IsSafePath(root.Path, relPath) {
 			e.Log("warn", "path traversal deletion denied: "+relPath)
-			continue
+			return fmt.Errorf("unsafe local deletion path")
 		}
 		full := filepath.Join(root.Path, filepath.FromSlash(relPath))
 		_ = os.Chmod(full, 0o666)
 		if err := os.Remove(full); err == nil {
 			e.Log("info", "deleted locally (peer deleted): "+relPath)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("could not apply local file deletion: %w", err)
 		}
 	}
 
@@ -866,6 +870,7 @@ func (e *Engine) applyLocalDeletions(root syncRoot, d Decision) {
 			}
 		}
 	}
+	return nil
 }
 
 func (e *Engine) propagateDeletions(ctx context.Context, peer Peer, gameID string, root syncRoot, d Decision) error {

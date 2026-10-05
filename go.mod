@@ -1,6 +1,6 @@
 module github.com/opensave/opensave
 
-go 1.26.4
+go 1.26.6
 
 require (
 	fyne.io/systray v1.12.2

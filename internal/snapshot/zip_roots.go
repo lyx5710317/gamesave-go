@@ -195,6 +195,9 @@ func rootOfEntry(entry string) (string, bool) {
 // restore — the operation someone reaches for when things have already gone
 // wrong.
 func UnzipRoots(zipPath, primary string, extra map[string]string) (unplaced []string, err error) {
+	if err := verifyRestorePayload(zipPath); err != nil {
+		return nil, err
+	}
 	roots, err := ArchivedRoots(zipPath)
 	if err != nil {
 		return nil, err

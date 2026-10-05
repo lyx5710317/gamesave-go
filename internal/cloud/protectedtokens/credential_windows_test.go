@@ -83,6 +83,39 @@ func TestWindowsCredentialCorruptionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestWindowsPasswordDeletionIsImmediateAndIsolated(t *testing.T) {
+	installationID := "test_" + uuid.NewString()
+	password, err := NewPasswordStore("request-headers", installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewPasswordStore("client-secrets", installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = password.Delete(); _ = other.Delete() })
+	if err := other.Save("synthetic-retained-secret"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		if err := password.Save("synthetic-header-secret"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := password.Load(); err != nil {
+			t.Fatal(err)
+		}
+		if err := password.Delete(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := password.Load(); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("deleted application secret still available: %v", err)
+		}
+		if value, err := other.Load(); err != nil || value != "synthetic-retained-secret" {
+			t.Fatalf("deletion changed another credential: %v", err)
+		}
+	}
+}
+
 func assertTokens(t *testing.T, s *Store, want Tokens) {
 	t.Helper()
 	got, err := s.Load()

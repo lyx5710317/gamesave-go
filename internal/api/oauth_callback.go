@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"sync"
@@ -23,6 +24,7 @@ type authListener struct {
 	sync.Mutex
 	servers []*http.Server
 	done    bool
+	state   string
 }
 
 var activeAuthListener = &authListener{}
@@ -30,7 +32,7 @@ var activeAuthListener = &authListener{}
 // startAuthCallback binds localhost:80 (v4 and v6 loopback) and completes
 // the pending PKCE flow when the provider redirects back. Returns false if
 // no loopback listener could be bound.
-func (s *Server) startAuthCallback() bool {
+func (s *Server) startAuthCallback(state string) bool {
 	// A fresh sign-in supersedes any listener from a previous attempt.
 	activeAuthListener.stop()
 
@@ -54,20 +56,32 @@ func (s *Server) startAuthCallback() bool {
 	activeAuthListener.Lock()
 	activeAuthListener.servers = servers
 	activeAuthListener.done = false
+	activeAuthListener.state = state
 	activeAuthListener.Unlock()
 
 	// Don't hold port 80 forever if the user abandons the sign-in.
 	go func() {
 		time.Sleep(authCallbackTimeout)
-		activeAuthListener.stop()
+		activeAuthListener.stopState(state)
 	}()
 	return true
 }
 
 func (l *authListener) stop() {
+	l.stopState("")
+}
+
+// A timeout or completed callback belongs to one attempt. It must not stop
+// the replacement listener if the user starts another sign-in meanwhile.
+func (l *authListener) stopState(state string) {
 	l.Lock()
+	if state != "" && l.state != state {
+		l.Unlock()
+		return
+	}
 	servers := l.servers
 	l.servers = nil
+	l.state = ""
 	l.done = true
 	l.Unlock()
 	for _, srv := range servers {
@@ -84,14 +98,23 @@ func (s *Server) handleBrowserCallback(w http.ResponseWriter, r *http.Request) {
 	oauthErr := r.URL.Query().Get("error")
 
 	pendingPKCE.Lock()
+	state := r.URL.Query().Get("state")
+	if state == "" || pendingPKCE.state == "" || state != pendingPKCE.state {
+		pendingPKCE.Unlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		writeCallbackPage(w, false, "This sign-in callback does not match the pending authorization. Return to the app and try again.")
+		return
+	}
 	provider, verifier := pendingPKCE.provider, pendingPKCE.verifier
 	pendingPKCE.provider, pendingPKCE.verifier = "", ""
+	pendingPKCE.state = ""
 	pendingPKCE.Unlock()
 
 	fail := func(msg string) {
 		s.Hub.Broadcast("cloud-auth", map[string]any{"success": false, "error": msg})
 		writeCallbackPage(w, false, msg)
-		go activeAuthListener.stop()
+		go activeAuthListener.stopState(state)
 	}
 
 	if provider == "" {
@@ -116,12 +139,13 @@ func (s *Server) handleBrowserCallback(w http.ResponseWriter, r *http.Request) {
 	s.Hub.Broadcast("cloud-auth", map[string]any{"success": true, "userEmail": cfg.UserEmail})
 	s.Daemon.Log.Log("success", "cloud: connected as "+cfg.UserEmail)
 	writeCallbackPage(w, true, cfg.UserEmail)
-	go activeAuthListener.stop()
+	go activeAuthListener.stopState(state)
 }
 
 // writeCallbackPage renders the little page the user's browser lands on.
 func writeCallbackPage(w http.ResponseWriter, ok bool, detail string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	detail = html.EscapeString(detail)
 	icon, title, sub := "✅", "Connected to OpenSave", "Signed in as <strong>"+detail+"</strong>. You can close this tab and return to the app."
 	if !ok {
 		icon, title, sub = "⚠️", "Sign-in didn't complete", detail+" You can close this tab and try again from OpenSave."
