@@ -46,12 +46,53 @@ Version metadata, package/lockfile roots, Windows resources and update-ordering
 tests are updated together. PASS: versioned `go test ./...` (unchanged packages
 reuse audited results), 129 frontend tests, frontend build, and Wails Windows
 build in 21.379s. Linker-stamped v1.2.1 identity and update-ordering tests PASS.
-Actions candidate provenance, tagged build, published download hashes and
-installer integrity are pending.
+PASS: [candidate run 37266456455](https://github.com/lyx5710317/gamesave-go/actions/runs/37266456455)
+from `658adc8fc11f688a9c21ee5ef9a013e61c73d5b8`. Both its independent workflow
+verification job and local `gh attestation verify` checked all four Windows
+executables against that exact branch, commit, repository and release workflow.
+Candidate installer and portable ProductVersion are 1.2.1; the NSIS payload
+extracted without errors. These candidate bytes are not the tagged download.
+
+PASS: [push CI 37266213547](https://github.com/lyx5710317/gamesave-go/actions/runs/37266213547)
+and [PR CI 37266463608](https://github.com/lyx5710317/gamesave-go/actions/runs/37266463608):
+frontend, Linux race suite and Windows race suite. The push Windows E2E result
+was 1135.604s. Hosted builds use Go 1.26.8; local audit scans remain Go 1.26.6.
+These CI passes do not establish an installed Linux/Steam Deck UI check or explain
+the earlier intermittent Windows failures.
+
+## Published release verification
+
+PASS: [v1.2.1](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.2.1)
+was published on 2026-10-05 from tag commit
+`23b020423d18b1e5d1dda5f6974494a346d2de1c` in
+[release run 37268557484](https://github.com/lyx5710317/gamesave-go/actions/runs/37268557484).
+The merged tag tree is identical to the tested candidate tree. The complete tag
+workflow passed, including Windows, Linux, relay and Flatpak builds and the
+Windows public-release job. No Linux or Flatpak packages are presented as
+validated public downloads in this release; build/linked-library checks do not
+establish an installed Linux or Steam Deck UI check.
+
+PASS: independently downloaded installer and portable files match SHA256SUMS and
+report ProductVersion 1.2.1. All three published assets passed local provenance
+verification constrained to the repository, `refs/tags/v1.2.1`, exact tag commit
+and release workflow. The installer payload extracted successfully; its Go build
+metadata confirms Go 1.26.8 and the official `DesktopReleaseTag=v1.2.1` stamp.
+This is package integrity/source verification, not an installed-VM smoke test.
+
+Final SHA-256:
+
+- GameSaveGo.exe: `2ff5025287802a6cc0e6909acd52ca6554cd7984af550e1dc0f7e348a0ed4546`
+- GameSaveGo.Setup.exe: `d935897787323149e6ee6a93054a2829497b54482592ba8ab82e4648726c6ead`
+- SHA256SUMS: `322a1c877d8eed75a1475fb22787c681de1075766fc0c7fead7012d89b238a21`
+
+PASS: the intended-tag publication gate was returned to false after the public
+release job completed. A Chinese update article with the actual three download
+URLs was saved in the existing InkPage draft vault with draft=true. It was not
+synced to the published article directory or deployed to the website.
 
 Official downloads must come from the repository's Actions-built Windows release.
 Publish only GameSaveGo.Setup.exe, GameSaveGo.exe and SHA256SUMS, with exact
 repository/workflow/ref/commit provenance verification. Binaries are unsigned;
 the README and release notes disclose SmartScreen and device-policy restrictions.
-The existing publication gate will be enabled for the intended tag run only and
-returned to false after publication. No InkPage website publication is requested.
+The existing publication gate was enabled for the intended tag run only and
+returned to false after publication. No InkPage website publication was requested.

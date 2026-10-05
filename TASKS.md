@@ -3,8 +3,8 @@
 ## Desktop release v1.2.1
 
 - [x] Prepare Windows desktop/frontend/lockfile/resource version 1.2.1, preserving inherited core/peer identities; include this round's audit fixes and update public release notes.
-- [ ] Complete versioned local checks, candidate provenance/metadata/integrity verification and release CI; publish Actions-built installer/portable/SHA256SUMS, verify exact tagged downloads, then reset the public-release gate.
-- [ ] Save a Chinese version-update article with verified v1.2.1 download links in the existing InkPage draft vault; do not publish the article.
+- [x] Complete versioned local checks; candidate run 37266456455 provenance/metadata/integrity PASS; push and PR CI Windows/Linux race suites PASS. Publish Actions-built installer/portable/SHA256SUMS in run 37268557484 from tag commit 23b020423d18b1e5d1dda5f6974494a346d2de1c; exact tagged downloads match hashes, metadata, official linker stamp and constrained attestations. Reset public-release gate to false. See docs/RELEASE_V1_2_1.md.
+- [x] Save a Chinese version-update article with verified v1.2.1 download links in the existing InkPage draft vault as gamesave-go-v1-2-1.md, draft=true; the article remains unpublished.
 - [ ] Preserve disclosed audit/installed-VM/provider/multi-root limitations and investigate intermittent Windows credential/sync test failures.
 
 ## Post-release — Repository audit 2026-10-05
