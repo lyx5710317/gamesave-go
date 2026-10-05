@@ -66,10 +66,11 @@ PASS: [v1.2.1](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.2.1)
 was published on 2026-10-05 from tag commit
 `23b020423d18b1e5d1dda5f6974494a346d2de1c` in
 [release run 37268557484](https://github.com/lyx5710317/gamesave-go/actions/runs/37268557484).
-The merged tag tree is identical to the tested candidate tree. Windows build,
-Linux build, relay build and Windows public-release jobs passed. Flatpak was still
-running during the initial download verification; no Linux or Flatpak packages
-are presented as validated public downloads in this release.
+The merged tag tree is identical to the tested candidate tree. The complete tag
+workflow passed, including Windows, Linux, relay and Flatpak builds and the
+Windows public-release job. No Linux or Flatpak packages are presented as
+validated public downloads in this release; build/linked-library checks do not
+establish an installed Linux or Steam Deck UI check.
 
 PASS: independently downloaded installer and portable files match SHA256SUMS and
 report ProductVersion 1.2.1. All three published assets passed local provenance
