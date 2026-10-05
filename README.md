@@ -60,7 +60,7 @@ Windows 版将坚果云应用密码保存在当前用户的 Windows 凭据管理
 
 由于个人开源项目暂未购买商业代码签名证书，**Windows 可能出现 SmartScreen 提示**。未签名安装包没有 Windows 已验证发布者身份；如果设备策略阻止运行，不要关闭安全防护强行安装。本次发布提供每个安装文件的 `SHA256SUMS` 和 GitHub Artifact Attestations。散列用于核对下载文件，来源证明用于核对构建仓库和提交；两者都不能保证软件没有漏洞，也不能替代 Windows 代码签名。
 
-需要自行构建当前源码时，在 Windows 上准备 Go **1.26.4 或更新版本**、Node.js **22.12 或更新版本**和 Wails **2.12.0**。在仓库根目录运行：
+需要自行构建当前源码时，在 Windows 上准备 Go **1.26.6 或更新版本**、Node.js **22.12 或更新版本**和 Wails **2.12.0**。在仓库根目录运行：
 
 ```powershell
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
