@@ -7,6 +7,8 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -30,7 +32,18 @@ func Open(path string) (*Store, error) {
 	// _pragma params ensure foreign keys are enforced (SQLite defaults them
 	// off per-connection) and busy_timeout avoids spurious SQLITE_BUSY
 	// errors from the watcher/api/p2p goroutines all touching the DB.
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", path)
+	// Treat the supplied path as a literal filename, not SQLite URI syntax.
+	// In particular #, ? and percent escapes must not select a different DB
+	// or inject connection options. Keep the special in-memory database.
+	dsnPath := ":memory:"
+	if path != ":memory:" {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve sqlite database path: %w", err)
+		}
+		dsnPath = "file:" + (&url.URL{Path: filepath.ToSlash(absolute)}).EscapedPath()
+	}
+	dsn := dsnPath + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	db, err := sqlx.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
