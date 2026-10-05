@@ -9,7 +9,10 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/opensave/opensave/internal/archivepaths"
 )
 
 // Fixed categories deliberately omit archive entry names and local paths.
@@ -45,6 +48,9 @@ func restoreArchiveInventory(zipPath string) (map[string]restoreFingerprint, err
 		return nil, ErrRestoreArchive
 	}
 	defer r.Close()
+	if err := archivepaths.Validate(r.File, runtime.GOOS == "windows"); err != nil {
+		return nil, ErrRestoreArchive
+	}
 	entries := map[string]restoreFingerprint{}
 	for _, entry := range r.File {
 		if _, exists := entries[entry.Name]; exists {
@@ -179,6 +185,37 @@ func readRestoreRegularFile(path string, expected os.FileInfo) (restoreFingerpri
 
 func sameRestoreCurrentState(a, b restoreCurrentState) bool {
 	return maps.Equal(a.Entries, b.Entries) && maps.Equal(a.Kinds, b.Kinds)
+}
+
+// CreateVerifiedSafety reuses the restore capture gate for incoming sync.
+// Create is intentionally best-effort for ordinary history; successful
+// creation alone cannot authorize destruction of the current save.
+func (m *Manager) CreateVerifiedSafety(gameID, comment string) error {
+	game, err := m.Store.GetGame(gameID)
+	if err != nil {
+		return err
+	}
+	roots, err := m.Store.GameRootPaths(gameID)
+	if err != nil {
+		return err
+	}
+	before, err := m.captureVerifiedCurrent(gameID, game.SavePath, roots, comment)
+	if err != nil {
+		return err
+	}
+	currentGame, err := m.Store.GetGame(gameID)
+	if err != nil || currentGame.SavePath != game.SavePath {
+		return ErrRestoreChanged
+	}
+	currentRoots, err := m.Store.GameRootPaths(gameID)
+	if err != nil || !maps.Equal(roots, currentRoots) {
+		return ErrRestoreChanged
+	}
+	after, err := readRestoreCurrentState(game.SavePath, roots)
+	if err != nil || !sameRestoreCurrentState(before, after) {
+		return ErrRestoreChanged
+	}
+	return nil
 }
 
 // Destructive operations share this capture gate. A valid ZIP alone cannot

@@ -53,7 +53,7 @@ func (e *Engine) ResolveConflict(ctx context.Context, gameID, peerID, resolution
 		// can always be undone from the Snapshots tab. (merge-branch gets
 		// this for free via SwitchBranch's safety snapshot; this path
 		// otherwise wouldn't.)
-		if _, err := e.Snapshots.Create(gameID, fmt.Sprintf("This device's version (before keeping %s's)", peer.Name), true); err != nil {
+		if err := e.Snapshots.CreateVerifiedSafety(gameID, fmt.Sprintf("This device's version (before keeping %s's)", peer.Name)); err != nil {
 			e.Log("error", fmt.Sprintf("refusing keep-remote because its safety snapshot failed: %v", err))
 			return "", fmt.Errorf(
 				"could not back up this device's save before keeping %s's version, so nothing was changed: %w",
@@ -214,7 +214,9 @@ func (e *Engine) overwriteLocalWithRemote(ctx context.Context, gameID string, pe
 		}
 		full := filepath.Join(game.SavePath, filepath.FromSlash(relPath))
 		_ = os.Chmod(full, 0o666)
-		_ = os.Remove(full)
+		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("could not delete local-only file while adopting remote state: %w", err)
+		}
 	}
 
 	// Pull everything that's new or different.

@@ -146,7 +146,7 @@ func (e *Engine) ResolveRootConflict(ctx context.Context, gameID, peerID, root, 
 
 	case "keep-remote":
 		comment := fmt.Sprintf("Before keeping %s's %q save location", peer.Name, root)
-		if _, err := e.Snapshots.Create(gameID, comment, true); err != nil {
+		if err := e.Snapshots.CreateVerifiedSafety(gameID, comment); err != nil {
 			e.Log("error", fmt.Sprintf("refusing keep-remote for the %q save location because its safety snapshot failed: %v", root, err))
 			return fmt.Errorf(
 				"could not back up the %q save location before keeping %s's version, so nothing was changed: %w",
