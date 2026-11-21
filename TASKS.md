@@ -10,6 +10,7 @@
 - [x] Full Windows Go suite PASS with a 20-minute package timeout (167 end-to-end tests, 587.254s). Earlier default-timeout runs failed the old re-track fixture and exceeded the 10-minute package limit. The revised fixture verifies separate local save folders, retained saves on untrack, an agreed base on re-track and subsequent file delivery.
 - [ ] Validate Google Drive authorization, quotas, interrupted upload, objectively identified remote objects and restore using synthetic data and a dedicated real test account. Verify retry using stable remote identity before adding an automatic or persisted queue.
 - [x] Reserve one Google Drive file ID per ZIP upload. For indeterminate completion, check the reserved object's identity and SHA-256 before accepting it. If initialization is uncertain or the session expired and the object remains absent, allow one new session with the same ID. Mock tests cover 409, expiry, mismatches and the session limit. Real-account verification remains listed above.
+- [x] Drive recovery validation: focused cloud/API tests PASS; full Windows Go suite PASS (167 end-to-end tests, 593.350s test binary time); frontend 130 tests, frontend production build, and Wails Windows build PASS. Live Drive tests SKIPPED because this run had no authorized isolated test account.
 - [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
 
 ## Desktop release v1.2.1
