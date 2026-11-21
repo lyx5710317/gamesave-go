@@ -534,15 +534,9 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 	return nil
 }
 
-// uploadDriveResumable uses Drive's resumable protocol for every size:
-// one code path, streaming chunks, and no request carries more than
-// driveChunkSize bytes (multipart uploads are capped at 5 MB by the API).
-func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) (string, error) {
-	if size <= 0 || driveChunkSize <= 0 {
-		return "", fmt.Errorf("Google Drive snapshot has no uploadable content")
-	}
+func (s *Service) startDriveUpload(token, folderID, fileName, fileID string, size int64) (string, error) {
 	meta, _ := json.Marshal(map[string]any{
-		"name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
+		"id": fileID, "name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
 	})
 	initReq, err := http.NewRequest(http.MethodPost,
 		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,parents", bytes.NewReader(meta))
@@ -556,18 +550,26 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 
 	resp, err := s.doTransfer(initReq)
 	if err != nil {
-		return "", err
+		return "", errDriveSessionUnavailable
 	}
 	session := resp.Header.Get("Location")
 	err = transferOK(resp)
 	resp.Body.Close()
 	if err != nil {
+		if resp.StatusCode >= 500 {
+			return "", errDriveSessionUnavailable
+		}
 		return "", fmt.Errorf("start resumable upload: %w", err)
 	}
 	if session == "" {
-		return "", fmt.Errorf("resumable upload: no session URL returned")
+		return "", errDriveSessionUnavailable
 	}
+	return session, nil
+}
 
+// uploadDriveSession streams chunks from the open archive. The caller owns
+// the reserved file ID and decides whether to create another session.
+func (s *Service) uploadDriveSession(session, folderID, fileName string, f *os.File, size int64) (string, error) {
 	uncertain := 0
 	for offset := int64(0); offset < size; {
 		n := driveChunkSize
@@ -615,10 +617,13 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 			if resultErr != nil {
 				return "", errors.Join(errUploadUnconfirmed, resultErr)
 			}
-			return fileID, resultErr
+			return fileID, nil
 		}
 		if status != 308 {
 			resp.Body.Close()
+			if status == http.StatusNotFound {
+				return "", errDriveSessionExpired
+			}
 			return "", fmt.Errorf("Google Drive upload chunk returned HTTP %d: %w", status, errUploadUnconfirmed)
 		}
 		next, rangeErr := driveUploadedOffset(resp.Header.Get("Range"), size)
@@ -650,6 +655,8 @@ func (s *Service) driveUploadStatus(session string, size int64, fileName, folder
 	case 308:
 		next, err := driveUploadedOffset(resp.Header.Get("Range"), size)
 		return next, "", err
+	case http.StatusNotFound:
+		return 0, "", errDriveSessionExpired
 	default:
 		return 0, "", fmt.Errorf("Google Drive upload status returned HTTP %d; inspect the remote snapshot", resp.StatusCode)
 	}

@@ -242,6 +242,8 @@ func TestGoogleDriveProviderWithTokenRefresh(t *testing.T) {
 			// Resumable initiation: hand back the session URL.
 			w.Header().Set("Location", driveURL+"/resumable-session")
 			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/drive/v3/files/generateIds":
+			fmt.Fprint(w, `{"ids":["file123"]}`)
 		case r.URL.Path == "/drive/v3/files":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"files": []map[string]any{
@@ -416,6 +418,8 @@ func TestGoogleDriveInterruptedUploadQueriesSessionBeforeResuming(t *testing.T) 
 	statusChecks := 0
 	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/drive/v3/files/generateIds":
+			fmt.Fprint(w, `{"ids":["created"]}`)
 		case "/upload/drive/v3/files":
 			w.Header().Set("Location", driveURL+"/session")
 		case "/session":
@@ -461,6 +465,8 @@ func TestGoogleDriveCompletedUploadStatusIsNotReplayed(t *testing.T) {
 	chunks, statusChecks := 0, 0
 	drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/drive/v3/files/generateIds":
+			fmt.Fprint(w, `{"ids":["created"]}`)
 		case "/upload/drive/v3/files":
 			w.Header().Set("Location", driveURL+"/session")
 		case "/session":
@@ -505,6 +511,8 @@ func TestGoogleDrivePostUploadRejectsDuplicateOrChangedObject(t *testing.T) {
 			var driveURL string
 			drive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
+				case "/drive/v3/files/generateIds":
+					fmt.Fprint(w, `{"ids":["created"]}`)
 				case "/upload/drive/v3/files":
 					w.Header().Set("Location", driveURL+"/session")
 				case "/session":
@@ -1545,6 +1553,10 @@ func TestChunkedUploads(t *testing.T) {
 			}
 			if r.URL.Path == "/drive/v3/files" {
 				fmt.Fprintf(w, `{"files":[{"id":"file123","name":"big__main__snap_1.zip","size":"%d"}]}`, len(payload))
+				return
+			}
+			if r.URL.Path == "/drive/v3/files/generateIds" {
+				fmt.Fprint(w, `{"ids":["file123"]}`)
 				return
 			}
 			w.Header().Set("Location", driveURL+"/session")

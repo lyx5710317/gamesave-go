@@ -1,8 +1,8 @@
 # Google Drive backup safety
 
-Status (2026-09-25): conservative snapshot backup, **not** verified atomic
-multi-device cloud sync. All current contract tests use mock HTTP servers; no
-new real-account compatibility result is claimed.
+Status (2026-11-21): conservative snapshot backup with bounded recovery within
+one upload. The current contract tests use mock HTTP servers. A disposable
+Google account and two isolated desktop profiles are needed for live validation.
 
 ## Documented API behavior and current safeguards
 
@@ -24,6 +24,15 @@ new real-account compatibility result is claimed.
   then checks a fresh complete folder listing for exactly one matching name,
   ID, and size. Unknown completion is reported as failure; no remote object
   is automatically deleted or overwritten.
+- Each ZIP upload reserves one object ID with [files.generateIds](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/generateIds)
+  using the current `drive.file` permission. Session creation can be attempted
+  at most twice and always uses the original ID. After an expired session or
+  indeterminate result, the client asks Drive for that exact ID before retrying.
+  In particular, a create response of `409` can be recovered only by confirming
+  the object through [files.get](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get).
+  The ID, name, folder, type, live status, byte count and SHA-256 must match, then
+  the original complete-list check still runs. A missing checksum or mismatched
+  object stays unconfirmed. The ZIP is hashed from disk using bounded memory.
 
 These checks detect ambiguity but cannot prove that two devices cannot create
 the same name concurrently, nor that a post-upload listing is instantly
@@ -32,6 +41,11 @@ post-upload check may leave a valid remote object; inspect the folder before
 retrying. Do not infer ancestry, Vault identity, or permission to restore from
 matching names or sizes.
 
+The reserved ID lives only for one upload operation. A later manual attempt or
+a restart begins a new operation. A persistent retry queue would need to retain
+and revalidate the reserved ID, destination and local content identity across
+restarts and account changes. The same-name checks remain in effect.
+
 ## Manual release checks (disposable account, synthetic ZIPs only)
 
 | Check | Result | Evidence needed |
@@ -39,9 +53,11 @@ matching names or sizes.
 | Existing unique `OpenSave` folder and paged folder listing | BLOCKED | Record sanitized page/status sequence and whether the selected ID stays stable; do not record the ID itself. |
 | Duplicate root folders and concurrent folder creation | BLOCKED | Confirm the client stops and never silently chooses one. |
 | Resumable upload interrupted after an accepted chunk | BLOCKED | Confirm status-query `Range` and no blind replay of already accepted bytes. |
+| Session expiry or create response lost | BLOCKED | Confirm the retry reuses the same reserved ID and at most one object is created by that upload. Verify that a `409` recovery checks the existing object's SHA-256. |
 | Final response ID/size and fresh listing | BLOCKED | Confirm requested fields are returned and a unique remote object is visible. |
 | Two-device same-name creation | BLOCKED | Confirm duplicate detection and manual recovery; do not claim atomic create-only even if one trial appears to pass. |
 | Delayed listing, expired session, quota, and rate limit | BLOCKED | Record controlled failure and ensure no automatic duplicate retry. |
+| Download, verify and restore a synthetic snapshot | BLOCKED | Verify from a second isolated profile, confirm the current-save safety snapshot, then compare the restored files against the fixture hashes. |
 
 Do not record OAuth tokens, account email, folder IDs, Authorization headers,
 remote response bodies, or save contents in test evidence or the repository.
