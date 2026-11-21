@@ -324,7 +324,8 @@ func TestUnpairNotifiesPeer(t *testing.T) {
 // TestUntrackPropagatesAndRecovers covers the full track/untrack lifecycle
 // across two devices: untracking on one removes it on both (propagation),
 // it does NOT bounce back, and re-tracking on one restores it on both
-// (retrack clears tombstones + sync-on-track re-populates).
+// (retrack clears tombstones and sync-on-track uses the receiver's explicit
+// path mapping).
 func TestUntrackPropagatesAndRecovers(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "Untrack-A")
 	b := testutil.NewTestDaemon(t, "Untrack-B")
@@ -337,6 +338,7 @@ func TestUntrackPropagatesAndRecovers(t *testing.T) {
 	if !testutil.WaitFor(30*time.Second, func() bool { return b.ReadSave("slot1.sav") == "shared save" }) {
 		t.Fatal("initial sync failed")
 	}
+	b.MapPeerSave(a.SaveDir, b.SaveDir)
 
 	// A untracks → propagates → B loses it too.
 	a.API(http.MethodDelete, "/api/games/"+gameID, nil, nil)
@@ -359,21 +361,31 @@ func TestUntrackPropagatesAndRecovers(t *testing.T) {
 		t.Fatal("game bounced back on A after untrack")
 	}
 
-	// Re-tracking on A restores it on BOTH (retrack clears B's tombstone,
-	// sync-on-track re-populates B).
-	a.WriteSave("slot1.sav", "re-tracked save")
+	// Re-tracking has no agreed history yet. Keep the identical on-disk saves
+	// until both devices can establish a fresh base.
+	if b.ReadSave("slot1.sav") != "shared save" {
+		t.Fatal("untracking altered the receiver's save file")
+	}
+
+	// Re-tracking on A clears B's tombstone. B uses its own approved path.
 	newID := a.TrackGame("Untrack Game")
 	if _, err := a.Daemon.Store.GetGame(newID); err != nil {
 		t.Fatalf("re-tracking after untrack failed: %v", err)
 	}
+	if !testutil.WaitFor(10*time.Second, func() bool { return !b.Daemon.Store.IsUntracked(newID) }) {
+		t.Fatal("the receiver's untrack record did not clear")
+	}
+	a.API(http.MethodPost, "/api/games/"+newID+"/sync", nil, nil)
 	if !testutil.WaitFor(20*time.Second, func() bool {
 		g, err := b.Daemon.Store.GetGame(newID)
-		if err != nil {
-			return false
-		}
-		data, _ := os.ReadFile(filepath.Join(g.SavePath, "slot1.sav"))
-		return string(data) == "re-tracked save"
+		return err == nil && g.SavePath == b.SaveDir && a.Daemon.Store.GetAgreedHash(newID, b.NodeID()) != ""
 	}) {
-		t.Error("re-tracked game did not come back on B — recovery broken")
+		t.Fatal("re-tracked game did not establish an agreed save at B's approved path")
+	}
+	testutil.SettleSync(t, newID, a, b)
+	a.WriteSave("slot2.sav", "re-tracked save")
+	a.API(http.MethodPost, "/api/games/"+newID+"/sync", nil, nil)
+	if !testutil.WaitFor(20*time.Second, func() bool { return b.ReadSave("slot2.sav") == "re-tracked save" }) {
+		t.Fatal("new save did not reach B after re-tracking")
 	}
 }
