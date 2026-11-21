@@ -1,6 +1,6 @@
 # GameSave Cloud MVP V2.1 Tasks
 
-## Next desktop release — upstream safety and cloud activity
+## Desktop v1.3.0 — upstream safety and cloud activity
 
 - [x] Review upstream 2.4.1 (`346d9bd`) and 2.5.0-beta.1 (`1fb85e4`) against the fork. Adapt directory and pairing checks as separate changes; evaluate cold startup, watcher and higher-cost sync improvements independently.
 - [x] Backport the on-disk path containment check from OpenSave `2288306`. Require exact, existing local path approval for a peer's newly tracked game. Bind pairing confirmation to locally initiated intent and prevent replacement of a pinned key before unpairing. Keep the existing protocol version and tracked save paths.
@@ -14,6 +14,8 @@
 - [x] Drive recovery validation: focused cloud/API tests PASS; full Windows Go suite PASS (167 end-to-end tests, 593.350s test binary time); frontend 130 tests, frontend production build, and Wails Windows build PASS. Live Drive tests SKIPPED because this run had no authorized isolated test account.
 - [x] After the concurrent-upload fix, the Windows Go suite passed with a 20-minute package timeout (167 end-to-end tests, 600.440s test binary time). The full rerun also passed (571.928s end-to-end package time), and the focused concurrency regression passed 20 consecutive runs. Frontend 130 tests, frontend production build, and Wails Windows build passed.
 - [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
+- [x] Set Windows desktop, frontend and package metadata to 1.3.0 and prepare the Chinese GitHub release notes.
+- [ ] Verify the GitHub candidate and tagged Windows release, including the installer, portable executable and checksum manifest.
 
 ## Desktop release v1.2.1
 

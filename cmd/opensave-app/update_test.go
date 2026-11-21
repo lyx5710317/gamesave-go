@@ -16,8 +16,9 @@ import (
 )
 
 func TestDesktopProductVersion(t *testing.T) {
-	if AppVersion != "1.2.1" {
-		t.Fatalf("desktop version = %q, want 1.2.1", AppVersion)
+	const wantVersion = "1.3.0"
+	if AppVersion != wantVersion {
+		t.Fatalf("desktop version = %q, want %s", AppVersion, wantVersion)
 	}
 	if got := NewApp().AppInfo()["version"]; got != AppVersion {
 		t.Fatalf("About version = %q, want %q", got, AppVersion)
@@ -25,11 +26,11 @@ func TestDesktopProductVersion(t *testing.T) {
 	for _, tc := range []struct {
 		path, section, field, want string
 	}{
-		{"frontend/package.json", "", "version", "1.2.1"},
-		{"frontend/package-lock.json", "", "version", "1.2.1"},
-		{"wails.json", "info", "productVersion", "1.2.1"},
-		{"build/windows/info.json", "fixed", "file_version", "1.2.1.0"},
-		{"build/windows/info.json", "0000", "ProductVersion", "1.2.1"},
+		{"frontend/package.json", "", "version", wantVersion},
+		{"frontend/package-lock.json", "", "version", wantVersion},
+		{"wails.json", "info", "productVersion", wantVersion},
+		{"build/windows/info.json", "fixed", "file_version", wantVersion + ".0"},
+		{"build/windows/info.json", "0000", "ProductVersion", wantVersion},
 	} {
 		data, err := os.ReadFile(tc.path)
 		if err != nil {
@@ -48,6 +49,12 @@ func TestDesktopProductVersion(t *testing.T) {
 		value := section.(map[string]any)[tc.field]
 		if value != tc.want {
 			t.Errorf("%s %s = %v, want %s", tc.path, tc.field, value, tc.want)
+		}
+		if tc.path == "frontend/package-lock.json" {
+			root := metadata["packages"].(map[string]any)[""].(map[string]any)
+			if got := root["version"]; got != wantVersion {
+				t.Errorf("%s root package version = %v, want %s", tc.path, got, wantVersion)
+			}
 		}
 	}
 }
@@ -80,6 +87,9 @@ func TestShouldOfferDesktopRelease(t *testing.T) {
 		{"patch release upgrades 1.2.0", "v1.2.1", "1.2.0", "v1.2.0", true},
 		{"patch release never offers itself", "v1.2.1", "1.2.1", "v1.2.1", false},
 		{"patch source build never offers itself", "v1.2.1", "1.2.1", "", false},
+		{"1.3.0 upgrades 1.2.1", "v1.3.0", "1.2.1", "v1.2.1", true},
+		{"1.3.0 never offers itself", "v1.3.0", "1.3.0", "v1.3.0", false},
+		{"1.3.0 source build never offers itself", "v1.3.0", "1.3.0", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
