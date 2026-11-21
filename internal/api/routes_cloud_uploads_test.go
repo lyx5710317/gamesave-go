@@ -132,6 +132,34 @@ func TestCloudSyncLocalReportsTransferFailures(t *testing.T) {
 	}
 }
 
+func TestCloudSyncLocalRecordsAuthorizationFailureBeforeUpload(t *testing.T) {
+	ts := startTestServer(t)
+	cfg, err := ts.daemon.Store.GetCloudConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled, cfg.Provider = true, "google_drive"
+	if err := ts.daemon.Store.UpdateCloudConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.daemon.Store.CreateGame(store.Game{ID: "game", Name: "Game", SavePath: ts.saveDir}); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := ts.do(t, http.MethodPost, "/api/cloud/sync-local/game", nil)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("unexpected manual backup response: %d", resp.StatusCode)
+	}
+	resp, body := ts.do(t, http.MethodGet, "/api/cloud/uploads", nil)
+	var entries []cloud.UploadRecord
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body["uploads"], &entries) != nil || len(entries) != 1 {
+		t.Fatalf("unexpected backup activity: %d %s", resp.StatusCode, body["uploads"])
+	}
+	entry := entries[0]
+	if entry.GameID != "game" || entry.Provider != "google_drive" || entry.Status != "failed" || entry.Failure != "authentication" {
+		t.Fatalf("unexpected authentication failure: %+v", entry)
+	}
+}
+
 func TestCloudSyncLocalBlocksListedRemoteName(t *testing.T) {
 	for _, size := range []int64{7, 3, 0} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {

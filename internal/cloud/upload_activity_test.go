@@ -99,6 +99,30 @@ func TestUploadActivityClassifiesMissingAuthWithoutRawError(t *testing.T) {
 	}
 }
 
+func TestGoogleDriveUploadActivityKeepsOnlyActionableCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{errCloudAuthorization, "authentication"},
+		{&providerHTTPError{status: http.StatusForbidden, response: `{"error":{"errors":[{"reason":"storageQuotaExceeded"}],"message":"private-provider-detail"}}`}, "quota"},
+		{&providerHTTPError{status: http.StatusTooManyRequests}, "rate_limit"},
+		{errors.Join(errUploadUnconfirmed, errIncompleteDriveInventory), "unconfirmed"},
+	} {
+		svc := &Service{}
+		id := svc.beginUpload("google_drive", "game__main__snap.zip")
+		svc.finishUpload(id, tc.err)
+		entry := svc.UploadActivity()[0]
+		if entry.Status != "failed" || entry.Failure != tc.want {
+			t.Fatalf("want %q, got %#v", tc.want, entry)
+		}
+		raw, err := json.Marshal(entry)
+		if err != nil || strings.Contains(string(raw), "private-provider-detail") {
+			t.Fatal("activity must serialize without provider details")
+		}
+	}
+}
+
 func TestJianguoyunUploadActivityClassifiesWithoutRawSecrets(t *testing.T) {
 	for _, tc := range []struct {
 		err  error

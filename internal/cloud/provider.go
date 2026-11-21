@@ -93,6 +93,40 @@ func (s *Service) UploadIfAbsent(filePath, fileName string) error {
 		return err
 	}
 	id := s.beginUpload(name, fileName)
+	if name == "google_drive" {
+		err = s.uploadDriveIfAbsent(provider, filePath, fileName)
+	} else {
+		err = uploadIfAbsent(provider, filePath, fileName)
+	}
+	s.finishUpload(id, err)
+	return err
+}
+
+type driveUploadAttempt struct {
+	done chan struct{}
+	err  error
+}
+
+// Drive permits duplicate names. Automatic and manual backups of the same
+// name in one process must share the outcome of the in-flight check and write.
+// An overlapping call must not try again after an unconfirmed completion.
+func (s *Service) uploadDriveIfAbsent(provider Provider, filePath, fileName string) error {
+	attempt := &driveUploadAttempt{done: make(chan struct{})}
+	if existing, loaded := s.driveUploads.LoadOrStore(fileName, attempt); loaded {
+		previous := existing.(*driveUploadAttempt)
+		<-previous.done
+		if previous.err == nil {
+			return ErrRemoteSnapshotConflict
+		}
+		return previous.err
+	}
+	defer s.driveUploads.Delete(fileName)
+	defer close(attempt.done)
+	attempt.err = uploadIfAbsent(provider, filePath, fileName)
+	return attempt.err
+}
+
+func uploadIfAbsent(provider Provider, filePath, fileName string) error {
 	files, err := provider.List()
 	if err == nil {
 		for _, file := range files {
@@ -105,7 +139,6 @@ func (s *Service) UploadIfAbsent(filePath, fileName string) error {
 	if err == nil {
 		err = provider.Upload(filePath, fileName)
 	}
-	s.finishUpload(id, err)
 	return err
 }
 

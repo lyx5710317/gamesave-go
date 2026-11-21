@@ -296,6 +296,9 @@ func (w *WanClient) routeRequest(ctx context.Context, msg RelayMessage) (int, an
 		if err := json.Unmarshal(msg.Body, &body); err != nil || body.PeerID == "" {
 			return 400, map[string]string{"error": "peerId is required"}
 		}
+		if body.PeerID != from {
+			return 400, map[string]string{"error": "Pairing request identity does not match its sender."}
+		}
 		w.engine.Pairing.RecordIncoming(pairing.IncomingRequest{
 			PeerID: body.PeerID, DeviceName: body.DeviceName,
 			DeviceType: orDefault(body.DeviceType, "desktop"),
@@ -314,7 +317,7 @@ func (w *WanClient) routeRequest(ctx context.Context, msg RelayMessage) (int, an
 		if err := json.Unmarshal(msg.Body, &body); err != nil || body.PeerID == "" {
 			return 400, map[string]string{"error": "peerId is required"}
 		}
-		if !w.engine.Pairing.ValidateConfirm(body.PeerID, "relay", body.Port, isPaired) {
+		if body.PeerID != from || !w.engine.Pairing.ValidateConfirm(body.PeerID, "relay", body.Port) {
 			w.engine.Log("warn", "blocked unsolicited WAN approve-confirm from "+body.PeerID)
 			return 400, map[string]string{"error": "Pairing confirmation rejected: no matching handshake initiated."}
 		}
@@ -420,14 +423,11 @@ func (w *WanClient) serveBlocks(route string, rawBody json.RawMessage) (int, any
 	if err != nil {
 		return 404, map[string]string{"error": "Game not found."}
 	}
-	if !delta.IsSafePath(game.SavePath, body.RelPath) {
+	fullPath, err := delta.ResolveSaveEntryPath(game.SavePath, body.RelPath)
+	if err != nil {
 		return 403, map[string]string{"error": "Access denied: path traversal attempt detected."}
 	}
 
-	fullPath := filepath.Join(game.SavePath, filepath.FromSlash(body.RelPath))
-	if isFile, _ := delta.ResolveLocalSaveFilePath(game.SavePath); isFile {
-		fullPath = game.SavePath
-	}
 	blocks, err := delta.ReadBlocks(fullPath, body.BlockIndices, body.BlockSize)
 	if err != nil {
 		return 500, map[string]string{"error": err.Error()}

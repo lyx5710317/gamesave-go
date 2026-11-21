@@ -1,9 +1,11 @@
 <script>
   import { logEntries } from '../lib/stores.js';
   import { locale, t } from '../lib/i18n.js';
+  import CloudUploadActivity from '../components/CloudUploadActivity.svelte';
 
   export let params = {};
   $: params;
+  let currentTab = 'cloud';
 
   const colors = { info: 'var(--text-dim)', warn: 'var(--warn)', error: 'var(--danger)', success: 'var(--success)' };
   const levelKeys = {
@@ -27,8 +29,15 @@
 
 <div class="head">
   <h2 class="page-title">{$t('activity.title')}</h2>
+  <div class="activity-tabs" role="group" aria-label={$t('activity.title')}>
+    <button class="btn small" class:primary={currentTab === 'cloud'} aria-pressed={currentTab === 'cloud'} on:click={() => currentTab = 'cloud'}>{$t('activity.cloud')}</button>
+    <button class="btn small" class:primary={currentTab === 'log'} aria-pressed={currentTab === 'log'} on:click={() => currentTab = 'log'}>{$t('activity.log')}</button>
+  </div>
 </div>
 
+{#if currentTab === 'cloud'}
+  <CloudUploadActivity onActivityPage />
+{:else}
 <div class="card log" use:autoscroll={$logEntries.length}>
   {#if $logEntries.length === 0}
     <div class="empty"><h3>{$t('activity.empty.title')}</h3><p>{$t('activity.empty.body')}</p></div>
@@ -44,13 +53,15 @@
     {/each}
   {/if}
 </div>
+{/if}
 
 <style>
   .head {
     margin-bottom: 18px;
   }
+  .activity-tabs { display: flex; gap: 8px; margin-top: 10px; }
   .log {
-    height: calc(100vh - var(--titlebar-h) - var(--statusbar-h) - 130px);
+    height: calc(100vh - var(--titlebar-h) - var(--statusbar-h) - 172px);
     overflow-y: auto;
     font-family: 'Cascadia Code', 'Consolas', monospace;
     font-size: 0.8rem;

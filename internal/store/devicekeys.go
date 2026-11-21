@@ -56,8 +56,16 @@ func (s *Store) SetPeerPublicKey(peerID, publicKey string) error {
 	if _, err := e2ee.DecodeKey(publicKey); err != nil {
 		return fmt.Errorf("refusing to pin an unusable key for %s: %w", peerID, err)
 	}
-	if _, err := s.db.Exec(`UPDATE peers SET public_key = ? WHERE id = ?`, publicKey, peerID); err != nil {
+	result, err := s.db.Exec(`UPDATE peers SET public_key = ? WHERE id = ? AND (public_key = '' OR public_key = ?)`, publicKey, peerID, publicKey)
+	if err != nil {
 		return fmt.Errorf("pin public key for %s: %w", peerID, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("verify pinned public key: %w", err)
+	}
+	if updated == 0 {
+		return fmt.Errorf("pin public key for %s: unpair before changing a device key", peerID)
 	}
 	return nil
 }

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/opensave/opensave/internal/store"
 )
@@ -59,6 +61,85 @@ func TestUploadIfAbsentFailsClosedOnCollisionOrListingFailure(t *testing.T) {
 			records := svc.UploadActivity()
 			if len(records) != 1 || records[0].Failure != tc.failure {
 				t.Fatalf("activity = %#v", records)
+			}
+		})
+	}
+}
+
+type concurrentDriveProvider struct {
+	guardedProvider
+	mu        sync.Mutex
+	listed    chan struct{}
+	started   chan struct{}
+	commit    chan struct{}
+	commitErr error
+}
+
+func (p *concurrentDriveProvider) List() ([]CloudFile, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.listed <- struct{}{}
+	return p.files, nil
+}
+
+func (p *concurrentDriveProvider) Upload(_, name string) error {
+	p.mu.Lock()
+	p.uploads++
+	if p.uploads == 1 {
+		close(p.started)
+	}
+	p.mu.Unlock()
+	<-p.commit
+	if p.commitErr != nil {
+		return p.commitErr
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.files = append(p.files, CloudFile{Name: name})
+	return nil
+}
+
+func TestGoogleDriveConcurrentLocalBackupStartsOneUpload(t *testing.T) {
+	for _, firstErr := range []error{nil, errUploadUnconfirmed} {
+		label := "confirmed"
+		if firstErr != nil {
+			label = "unconfirmed"
+		}
+		t.Run(label, func(t *testing.T) {
+			svc, db := newTestService(t)
+			provider := &concurrentDriveProvider{
+				listed: make(chan struct{}, 2), started: make(chan struct{}),
+				commit: make(chan struct{}), commitErr: firstErr,
+			}
+			svc.providers["google_drive"] = provider
+			setCloudConfig(t, db, func(c *store.CloudConfig) { c.Enabled, c.Provider = true, "google_drive" })
+			first, second := make(chan error, 1), make(chan error, 1)
+			const name = "game__main__snap.zip"
+			go func() { first <- svc.UploadIfAbsent("source.zip", name) }()
+			select {
+			case <-provider.started:
+			case err := <-first:
+				t.Fatalf("first backup never reached the provider: %v", err)
+			case <-time.After(5 * time.Second):
+				close(provider.commit)
+				t.Fatal("first backup did not start")
+			}
+			<-provider.listed
+			go func() { second <- svc.UploadIfAbsent("another-source.zip", name) }()
+			var overlappingPreflight bool
+			select {
+			case <-provider.listed:
+				overlappingPreflight = true
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(provider.commit)
+			wantSecond := ErrRemoteSnapshotConflict
+			if firstErr != nil {
+				wantSecond = firstErr
+			}
+			gotFirst, gotSecond := <-first, <-second
+			if overlappingPreflight || provider.uploads != 1 || !errors.Is(gotFirst, firstErr) || !errors.Is(gotSecond, wantSecond) {
+				t.Fatalf("overlapping preflight=%v, uploads=%d, first=%v, second=%v", overlappingPreflight, provider.uploads, gotFirst, gotSecond)
 			}
 		})
 	}

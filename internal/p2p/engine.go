@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -643,7 +644,15 @@ func (e *Engine) InitiatePair(ctx context.Context, address string, port int) err
 		return err
 	}
 
-	e.Pairing.RecordSent(address, fmt.Sprintf("%s:%d", address, port))
+	// Resolve hostnames before recording the address: the confirmation comes
+	// back from the IP that handled the handshake.
+	addresses, err := net.DefaultResolver.LookupHost(ctx, address)
+	if err != nil {
+		return fmt.Errorf("resolve pairing address %s: %w", address, err)
+	}
+	for _, ip := range addresses {
+		e.Pairing.RecordSent(fmt.Sprintf("lan:%s:%d", ip, port))
+	}
 
 	err = postHandshake(ctx, address, port, e.pairingIdentity(settings))
 	if err != nil {
@@ -659,8 +668,7 @@ func (e *Engine) InitiatePairWan(ctx context.Context, peerID string) error {
 	if err != nil {
 		return err
 	}
-	// "relay" is the JS grace-window key for WAN-initiated handshakes.
-	e.Pairing.RecordSent(peerID, "relay")
+	e.Pairing.RecordSent("relay:" + peerID)
 
 	_, err = e.Wan.Request(ctx, peerID, "/handshake", "POST", e.pairingIdentity(settings))
 	if err != nil {
@@ -676,6 +684,9 @@ func (e *Engine) ApprovePairing(ctx context.Context, peerID string) error {
 	req, ok := e.Pairing.TakeIncoming(peerID)
 	if !ok {
 		return fmt.Errorf("no pending pairing request from %q", peerID)
+	}
+	if existing, err := e.Store.GetPeer(peerID); err == nil && existing.PublicKey != "" && !req.IsWan && req.PublicKey != existing.PublicKey {
+		return fmt.Errorf("the device pairing key changed; unpair this device before pairing it again")
 	}
 	settings, err := e.Store.GetSettings()
 	if err != nil {

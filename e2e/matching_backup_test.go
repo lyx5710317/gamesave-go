@@ -75,6 +75,7 @@ func TestMatching_AppIDLinksDifferentlyNamedGames(t *testing.T) {
 func TestMatching_AppIDIgnoredWhenDisabled(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "NoMatch-A")
 	b := testutil.NewTestDaemon(t, "NoMatch-B")
+	b.MapPeerSave(a.SaveDir, testutil.TempDir(t))
 	a.PairWith(b)
 
 	a.WriteSave("slot1.sav", "A progress")

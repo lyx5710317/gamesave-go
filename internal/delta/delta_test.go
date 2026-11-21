@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -107,7 +109,7 @@ func TestHashFile_DeterministicAndBlockAligned(t *testing.T) {
 
 func TestDiffManifests_AddedChangedDeleted(t *testing.T) {
 	local := Manifest{Files: map[string]FileEntry{
-		"unchanged.dat": {Hash: "same"},
+		"unchanged.dat":  {Hash: "same"},
 		"only_local.dat": {Hash: "local-only"},
 		"changed.dat": {
 			Hash:      "old",
@@ -119,14 +121,14 @@ func TestDiffManifests_AddedChangedDeleted(t *testing.T) {
 		},
 	}}
 	remote := Manifest{Files: map[string]FileEntry{
-		"unchanged.dat": {Hash: "same"},
+		"unchanged.dat":  {Hash: "same"},
 		"new_remote.dat": {Hash: "new", Blocks: []Block{{Index: 0, Hash: "x", Length: 5}}},
 		"changed.dat": {
 			Hash:      "new",
 			BlockSize: defaultBlockSize,
 			Blocks: []Block{
 				{Index: 0, Hash: "a", Length: defaultBlockSize}, // unchanged block
-				{Index: 1, Hash: "c", Length: 12},                // changed block
+				{Index: 1, Hash: "c", Length: 12},               // changed block
 			},
 		},
 	}}
@@ -181,6 +183,47 @@ func TestIsSafePath_BlocksTraversal(t *testing.T) {
 	}
 	if IsSafePath(base, "../../etc/passwd") {
 		t.Error("deep parent traversal should be blocked")
+	}
+}
+
+func TestIsSafePathRejectsLinkedDirectoriesBelowSaveRoot(t *testing.T) {
+	root := t.TempDir()
+	plain := filepath.Join(root, "saves")
+	if err := os.Mkdir(plain, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "shortcut")
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", link, plain).CombinedOutput(); err != nil {
+			t.Fatalf("make test junction: %v %s", err, out)
+		}
+	} else if err := os.Symlink(plain, link); err != nil {
+		t.Fatal(err)
+	}
+	if !IsSafePath(root, "saves/slot.dat") {
+		t.Fatal("normal destination should be allowed")
+	}
+	if IsSafePath(root, "shortcut/slot.dat") {
+		t.Fatal("a linked directory must be excluded from sync")
+	}
+	if _, err := ResolveSaveEntryPath(root, "shortcut/slot.dat"); err == nil {
+		t.Fatal("resolving a save entry must also reject a linked directory")
+	}
+}
+
+func TestResolveSaveEntryPathForSingleFile(t *testing.T) {
+	savePath := filepath.Join(t.TempDir(), "local.sav")
+	if err := os.WriteFile(savePath, []byte("save"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveSaveEntryPath(savePath, "remote.sav")
+	if err != nil || got != savePath {
+		t.Fatalf("resolving a single-file save gave %q, %v", got, err)
+	}
+	for _, invalid := range []string{"", ".", "..", "sub/slot.sav", "../slot.sav", "/slot.sav"} {
+		if _, err := ResolveSaveEntryPath(savePath, invalid); err == nil {
+			t.Errorf("accepted invalid single-file entry %q", invalid)
+		}
 	}
 }
 

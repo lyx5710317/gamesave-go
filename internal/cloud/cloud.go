@@ -78,6 +78,7 @@ type Service struct {
 	uploads             []UploadRecord
 	nextUploadID        uint64
 	driveFolderMu       sync.Mutex
+	driveUploads        sync.Map // snapshot name -> *driveUploadAttempt
 	jianguoyunMu        sync.Mutex
 	jianguoyunNext      time.Time
 	jianguoyunProbeMu   sync.Mutex
@@ -302,7 +303,16 @@ func transferOK(resp *http.Response) error {
 		return nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-	return fmt.Errorf("HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	return &providerHTTPError{status: resp.StatusCode, response: strings.TrimSpace(string(raw))}
+}
+
+type providerHTTPError struct {
+	status   int
+	response string
+}
+
+func (e *providerHTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d - %s", e.status, e.response)
 }
 
 // fetchToFile streams a response body to localPath.
@@ -472,7 +482,7 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 		// result; it is not an atomic create-only guarantee across devices.
 		files, err := s.listGoogleDriveFiles(token, folderID)
 		if err != nil {
-			return err
+			return fmt.Errorf("Google Drive upload readback failed: %w", errors.Join(errUploadUnconfirmed, err))
 		}
 		var match *CloudFile
 		for _, remote := range files {
@@ -486,7 +496,7 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 			match = &copy
 		}
 		if match == nil || match.ID != fileID || match.SizeBytes != size {
-			return fmt.Errorf("Google Drive upload identity or size is unverified; inspect the remote snapshot before retrying")
+			return fmt.Errorf("Google Drive upload identity or size is unverified; inspect the remote snapshot before retrying: %w", errUploadUnconfirmed)
 		}
 
 	case "dropbox":
@@ -525,15 +535,9 @@ func (s *Service) uploadLegacy(filePath, fileName string) error {
 	return nil
 }
 
-// uploadDriveResumable uses Drive's resumable protocol for every size:
-// one code path, streaming chunks, and no request carries more than
-// driveChunkSize bytes (multipart uploads are capped at 5 MB by the API).
-func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.File, size int64) (string, error) {
-	if size <= 0 || driveChunkSize <= 0 {
-		return "", fmt.Errorf("Google Drive snapshot has no uploadable content")
-	}
+func (s *Service) startDriveUpload(token, folderID, fileName, fileID string, size int64) (string, error) {
 	meta, _ := json.Marshal(map[string]any{
-		"name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
+		"id": fileID, "name": fileName, "mimeType": "application/zip", "parents": []string{folderID},
 	})
 	initReq, err := http.NewRequest(http.MethodPost,
 		s.Endpoints.GoogleUpload+"/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,parents", bytes.NewReader(meta))
@@ -547,18 +551,26 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 
 	resp, err := s.doTransfer(initReq)
 	if err != nil {
-		return "", err
+		return "", errDriveSessionUnavailable
 	}
 	session := resp.Header.Get("Location")
 	err = transferOK(resp)
 	resp.Body.Close()
 	if err != nil {
+		if resp.StatusCode >= 500 {
+			return "", errDriveSessionUnavailable
+		}
 		return "", fmt.Errorf("start resumable upload: %w", err)
 	}
 	if session == "" {
-		return "", fmt.Errorf("resumable upload: no session URL returned")
+		return "", errDriveSessionUnavailable
 	}
+	return session, nil
+}
 
+// uploadDriveSession streams chunks from the open archive. The caller owns
+// the reserved file ID and decides whether to create another session.
+func (s *Service) uploadDriveSession(session, folderID, fileName string, f *os.File, size int64) (string, error) {
 	uncertain := 0
 	for offset := int64(0); offset < size; {
 		n := driveChunkSize
@@ -584,17 +596,17 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 			// session for its offset instead of blindly replaying the chunk.
 			uncertain++
 			if uncertain > 3 {
-				return "", fmt.Errorf("Google Drive upload remains uncertain after three status checks; inspect the remote snapshot")
+				return "", fmt.Errorf("Google Drive upload remains uncertain after three status checks: %w", errUploadUnconfirmed)
 			}
 			next, fileID, statusErr := s.driveUploadStatus(session, size, fileName, folderID)
 			if statusErr != nil {
-				return "", statusErr
+				return "", errors.Join(errUploadUnconfirmed, statusErr)
 			}
 			if fileID != "" {
 				return fileID, nil
 			}
 			if next < offset {
-				return "", fmt.Errorf("Google Drive upload session moved backwards; inspect the remote snapshot")
+				return "", fmt.Errorf("Google Drive upload session moved backwards: %w", errUploadUnconfirmed)
 			}
 			offset = next
 			continue
@@ -603,21 +615,27 @@ func (s *Service) uploadDriveResumable(token, folderID, fileName string, f *os.F
 		if status == http.StatusOK || status == http.StatusCreated {
 			fileID, resultErr := driveUploadResult(resp.Body, fileName, folderID, size)
 			resp.Body.Close()
-			return fileID, resultErr
+			if resultErr != nil {
+				return "", errors.Join(errUploadUnconfirmed, resultErr)
+			}
+			return fileID, nil
 		}
 		if status != 308 {
 			resp.Body.Close()
-			return "", fmt.Errorf("Google Drive upload chunk returned HTTP %d; inspect the remote snapshot before retrying", status)
+			if status == http.StatusNotFound {
+				return "", errDriveSessionExpired
+			}
+			return "", fmt.Errorf("Google Drive upload chunk returned HTTP %d: %w", status, errUploadUnconfirmed)
 		}
 		next, rangeErr := driveUploadedOffset(resp.Header.Get("Range"), size)
 		resp.Body.Close()
 		if rangeErr != nil || next <= offset || next > offset+n {
-			return "", fmt.Errorf("Google Drive upload session reported invalid progress; inspect the remote snapshot")
+			return "", fmt.Errorf("Google Drive upload session reported invalid progress: %w", errUploadUnconfirmed)
 		}
 		offset = next
 		uncertain = 0
 	}
-	return "", fmt.Errorf("Google Drive upload ended without a completion response; inspect the remote snapshot")
+	return "", fmt.Errorf("Google Drive upload ended without a completion response: %w", errUploadUnconfirmed)
 }
 
 func (s *Service) driveUploadStatus(session string, size int64, fileName, folderID string) (int64, string, error) {
@@ -638,6 +656,8 @@ func (s *Service) driveUploadStatus(session string, size int64, fileName, folder
 	case 308:
 		next, err := driveUploadedOffset(resp.Header.Get("Range"), size)
 		return next, "", err
+	case http.StatusNotFound:
+		return 0, "", errDriveSessionExpired
 	default:
 		return 0, "", fmt.Errorf("Google Drive upload status returned HTTP %d; inspect the remote snapshot", resp.StatusCode)
 	}
@@ -1085,7 +1105,7 @@ func (s *Service) listGoogleDriveFiles(token, folderID string) ([]CloudFile, err
 			return nil, googleDriveErr(err)
 		}
 		if out.IncompleteSearch {
-			return nil, fmt.Errorf("Google Drive file listing was incomplete")
+			return nil, fmt.Errorf("Google Drive file listing was incomplete: %w", errIncompleteDriveInventory)
 		}
 		for _, f := range out.Files {
 			size, _ := strconv.ParseInt(f.Size, 10, 64)
@@ -1095,12 +1115,12 @@ func (s *Service) listGoogleDriveFiles(token, folderID string) ([]CloudFile, err
 			return files, nil
 		}
 		if seenTokens[out.NextPageToken] {
-			return nil, fmt.Errorf("Google Drive file listing repeated a page token")
+			return nil, fmt.Errorf("Google Drive file listing repeated a page token: %w", errIncompleteDriveInventory)
 		}
 		seenTokens[out.NextPageToken] = true
 		params.Set("pageToken", out.NextPageToken)
 	}
-	return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages")
+	return nil, fmt.Errorf("Google Drive file listing exceeded 1000 pages: %w", errIncompleteDriveInventory)
 }
 
 // Download fetches a remote snapshot to localPath.
@@ -1502,7 +1522,7 @@ func sortByCreatedDesc(files []CloudFile) {
 func googleDriveErr(err error) error {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "insufficient") && (strings.Contains(msg, "403") || strings.Contains(msg, "permission")) {
-		return fmt.Errorf("Google Drive access was not granted for this account — open Cloud Backup, Disconnect, then sign in again and TICK THE CHECKBOX that allows OpenSave to access its own Drive files")
+		return fmt.Errorf("Google Drive access was not granted for this account — open Cloud Backup, Disconnect, then sign in again and TICK THE CHECKBOX that allows OpenSave to access its own Drive files: %w", errCloudAuthorization)
 	}
 	return fmt.Errorf("Google Drive: %w", err)
 }
@@ -1535,7 +1555,7 @@ func (s *Service) doJSON(req *http.Request, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("HTTP %d - %s", resp.StatusCode, raw)
+		return &providerHTTPError{status: resp.StatusCode, response: string(raw)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

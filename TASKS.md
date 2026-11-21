@@ -1,5 +1,23 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Desktop v1.3.0 — upstream safety and cloud activity
+
+- [x] Review upstream 2.4.1 (`346d9bd`) and 2.5.0-beta.1 (`1fb85e4`) against the fork. Adapt directory and pairing checks as separate changes; evaluate cold startup, watcher and higher-cost sync improvements independently.
+- [x] Backport the on-disk path containment check from OpenSave `2288306`. Require exact, existing local path approval for a peer's newly tracked game. Bind pairing confirmation to locally initiated intent and prevent replacement of a pinned key before unpairing. Keep the existing protocol version and tracked save paths.
+- [ ] Design and test signed save-data requests with mixed-version clients and legacy pairings. This batch changes confirmation and file boundaries without adding a signed transport.
+- [x] Show current-session uploads and actionable failure categories in Activity and Cloud Backup. Record a failed manual inventory check or a rejected same-name snapshot; preserve generic logs in a separate Activity tab.
+- [x] Verify frontend (130 tests), production frontend and Wails developer builds. Check the failure filter, system-log tab and Cloud Backup navigation in an isolated browser fixture. Verify Windows junction handling, LAN and relay pairing, local-path auto-tracking and re-tracking, and cloud error redaction with focused tests. Linux core test binaries cross-compiled; Linux runtime testing remains separate.
+- [x] Full Windows Go suite PASS with a 20-minute package timeout (167 end-to-end tests, 587.254s). Earlier default-timeout runs failed the old re-track fixture and exceeded the 10-minute package limit. The revised fixture verifies separate local save folders, retained saves on untrack, an agreed base on re-track and subsequent file delivery.
+- [x] Validate Google Drive backup and restore with synthetic saves, a dedicated account and two isolated Windows profiles (2026-11-21). Authorization, refresh, quota metadata, interrupted upload, reserved-ID retry and checksum-verified 409 recovery passed. The second profile verified and restored the snapshot with matching hashes and a verified pre-restore safety snapshot. Two independent clients reproduced duplicate remote names and restore refused the ambiguous source. See `docs/GOOGLE_DRIVE_BACKUP_SAFETY.md` for the remaining coverage gaps.
+- [x] Share the in-flight Google Drive result when manual and automatic backups target the same snapshot name within one daemon. The overlapping request starts no additional upload, including when the first upload is unconfirmed. A focused regression covers both outcomes.
+- [x] Reserve one Google Drive file ID per ZIP upload. For indeterminate completion, check the reserved object's identity and SHA-256 before accepting it. If initialization is uncertain or the session expired and the object remains absent, allow one new session with the same ID. Mock tests cover 409, expiry, mismatches and the session limit. Real-account verification remains listed above.
+- [x] Drive recovery validation: focused cloud/API tests PASS; full Windows Go suite PASS (167 end-to-end tests, 593.350s test binary time); frontend 130 tests, frontend production build, and Wails Windows build PASS. Live Drive tests SKIPPED because this run had no authorized isolated test account.
+- [x] After the concurrent-upload fix, the Windows Go suite passed with a 20-minute package timeout (167 end-to-end tests, 600.440s test binary time). The full rerun also passed (571.928s end-to-end package time), and the focused concurrency regression passed 20 consecutive runs. Frontend 130 tests, frontend production build, and Wails Windows build passed.
+- [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
+- [x] Set Windows desktop, frontend and package metadata to 1.3.0 and prepare the Chinese GitHub release notes.
+- [x] Fix the release CI regression where Linux treated a single-file save as a directory during restore and peer sync. Existing Linux CI cases caught both failures. Keep rejecting linked entries inside directory save locations.
+- [ ] Verify the GitHub candidate and tagged Windows release, including the installer, portable executable and checksum manifest.
+
 ## Desktop release v1.2.1
 
 - [x] Prepare Windows desktop/frontend/lockfile/resource version 1.2.1, preserving inherited core/peer identities; include this round's audit fixes and update public release notes.
