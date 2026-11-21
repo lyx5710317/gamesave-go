@@ -92,3 +92,24 @@ func ResolveLocalSaveFilePath(savePath string) (isFile bool, err error) {
 	}
 	return !info.IsDir(), nil
 }
+
+// ResolveSaveEntryPath maps a manifest file to its configured save location.
+// A single-file location maps a bare entry name to the configured file, even
+// when the name differs between the two devices.
+func ResolveSaveEntryPath(savePath, relPath string) (string, error) {
+	isFile, err := ResolveLocalSaveFilePath(savePath)
+	if err != nil {
+		return "", err
+	}
+	rel := filepath.FromSlash(relPath)
+	if isFile {
+		if rel == "" || rel == "." || rel == ".." || rel != filepath.Base(rel) || filepath.VolumeName(rel) != "" {
+			return "", fmt.Errorf("invalid single-file save entry")
+		}
+		return savePath, nil
+	}
+	if !IsSafePath(savePath, rel) {
+		return "", fmt.Errorf("invalid save entry path")
+	}
+	return filepath.Join(savePath, rel), nil
+}

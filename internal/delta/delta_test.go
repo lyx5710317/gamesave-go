@@ -206,6 +206,25 @@ func TestIsSafePathRejectsLinkedDirectoriesBelowSaveRoot(t *testing.T) {
 	if IsSafePath(root, "shortcut/slot.dat") {
 		t.Fatal("a linked directory must be excluded from sync")
 	}
+	if _, err := ResolveSaveEntryPath(root, "shortcut/slot.dat"); err == nil {
+		t.Fatal("resolving a save entry must also reject a linked directory")
+	}
+}
+
+func TestResolveSaveEntryPathForSingleFile(t *testing.T) {
+	savePath := filepath.Join(t.TempDir(), "local.sav")
+	if err := os.WriteFile(savePath, []byte("save"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveSaveEntryPath(savePath, "remote.sav")
+	if err != nil || got != savePath {
+		t.Fatalf("resolving a single-file save gave %q, %v", got, err)
+	}
+	for _, invalid := range []string{"", ".", "..", "sub/slot.sav", "../slot.sav", "/slot.sav"} {
+		if _, err := ResolveSaveEntryPath(savePath, invalid); err == nil {
+			t.Errorf("accepted invalid single-file entry %q", invalid)
+		}
+	}
 }
 
 func TestPatchFile_ReconstructsAndVerifiesHash(t *testing.T) {

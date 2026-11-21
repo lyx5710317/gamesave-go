@@ -574,14 +574,10 @@ func (e *Engine) handleBlocks(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusNotFound, "This device has no save location named "+strconv.Quote(body.Root)+" for that game.")
 		return
 	}
-	if !delta.IsSafePath(base, body.RelPath) {
+	fullPath, err := delta.ResolveSaveEntryPath(base, body.RelPath)
+	if err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid path")
 		return
-	}
-
-	fullPath := filepath.Join(base, filepath.FromSlash(body.RelPath))
-	if isFile, _ := delta.ResolveLocalSaveFilePath(base); isFile {
-		fullPath = base
 	}
 
 	blocks, err := delta.ReadBlocks(fullPath, body.BlockIndices, body.BlockSize)

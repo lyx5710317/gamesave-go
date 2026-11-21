@@ -123,12 +123,11 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 		}
 		target = path
 	}
-	if !delta.IsSafePath(target, snapshot.ArchiveEntryRelPath(body.RelPath)) {
+	dest, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath))
+	if errors.Is(err, errUnsafeFileRestorePath) {
 		writeError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
-
-	dest, err := singleFileRestoreTarget(target, snapshot.ArchiveEntryRelPath(body.RelPath))
 	if err != nil {
 		writeFileRestoreError(w, "target")
 		return
@@ -217,12 +216,14 @@ func writeFileRestoreError(w http.ResponseWriter, category string) {
 	})
 }
 
+var errUnsafeFileRestorePath = errors.New("invalid restore target")
+
 // Resolve from the mapped relative path, never from the archive's root prefix.
 // A missing configured save path remains a directory, matching delta's rule.
 func singleFileRestoreTarget(savePath, rel string) (string, error) {
 	rel = strings.ReplaceAll(rel, "\\", "/")
-	if rel == "" || rel == "." || strings.HasPrefix(rel, "/") || filepath.IsAbs(filepath.FromSlash(rel)) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))) != rel || strings.HasSuffix(rel, "/") || !delta.IsSafePath(savePath, rel) || (runtime.GOOS == "windows" && strings.ContainsAny(rel, ":<>\"|?*")) {
-		return "", errors.New("invalid restore target")
+	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "/") || filepath.IsAbs(filepath.FromSlash(rel)) || filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))) != rel || strings.HasSuffix(rel, "/") || (runtime.GOOS == "windows" && strings.ContainsAny(rel, ":<>\"|?*")) {
+		return "", errUnsafeFileRestorePath
 	}
 	dest := filepath.Join(savePath, filepath.FromSlash(rel))
 	if info, err := os.Lstat(savePath); err == nil && !info.IsDir() {
@@ -232,6 +233,8 @@ func singleFileRestoreTarget(savePath, rel string) (string, error) {
 		dest = savePath
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", err
+	} else if !delta.IsSafePath(savePath, rel) {
+		return "", errUnsafeFileRestorePath
 	}
 	// Do not follow a symlink/junction into another save location.
 	for p := dest; ; p = filepath.Dir(p) {

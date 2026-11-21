@@ -1021,16 +1021,13 @@ func (e *Engine) pullFiles(ctx context.Context, peer Peer, gameID string, game s
 	}
 
 	for _, relPath := range filesToPull {
-		if !delta.IsSafePath(root.Path, relPath) {
-			return fmt.Errorf("path traversal attempt on pulled file %s", relPath)
+		localFilePath, err := delta.ResolveSaveEntryPath(root.Path, relPath)
+		if err != nil {
+			return fmt.Errorf("could not resolve pulled file path: %w", err)
 		}
 		remoteFile := remoteData.Manifest.Files[relPath]
 		indices := changedBlocks[relPath]
 
-		localFilePath := filepath.Join(root.Path, filepath.FromSlash(relPath))
-		if isFile, _ := delta.ResolveLocalSaveFilePath(root.Path); isFile {
-			localFilePath = root.Path // single-file save mode
-		}
 		if err := e.pullFile(ctx, peer, FileRef{GameID: gameID, Root: root.Name, RelPath: relPath}, localFilePath,
 			remoteFile, indices, throttle, tracker, reportProgress); err != nil {
 			return err

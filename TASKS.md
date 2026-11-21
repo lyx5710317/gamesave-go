@@ -15,6 +15,7 @@
 - [x] After the concurrent-upload fix, the Windows Go suite passed with a 20-minute package timeout (167 end-to-end tests, 600.440s test binary time). The full rerun also passed (571.928s end-to-end package time), and the focused concurrency regression passed 20 consecutive runs. Frontend 130 tests, frontend production build, and Wails Windows build passed.
 - [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
 - [x] Set Windows desktop, frontend and package metadata to 1.3.0 and prepare the Chinese GitHub release notes.
+- [x] Fix the release CI regression where Linux treated a single-file save as a directory during restore and peer sync. Existing Linux CI cases caught both failures. Keep rejecting linked entries inside directory save locations.
 - [ ] Verify the GitHub candidate and tagged Windows release, including the installer, portable executable and checksum manifest.
 
 ## Desktop release v1.2.1
