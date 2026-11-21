@@ -20,6 +20,7 @@ import (
 
 	"github.com/opensave/opensave/internal/api"
 	"github.com/opensave/opensave/internal/daemon"
+	"github.com/opensave/opensave/internal/store"
 )
 
 // TestDaemon is one running daemon + API server.
@@ -249,6 +250,19 @@ func (td *TestDaemon) NodeID() string {
 		td.T.Fatal(err)
 	}
 	return settings.NodeID
+}
+
+// MapPeerSave approves one exact source and destination for sync tests.
+func (td *TestDaemon) MapPeerSave(source, destination string) {
+	td.T.Helper()
+	settings, err := td.Daemon.Store.GetSettings()
+	if err != nil {
+		td.T.Fatal(err)
+	}
+	settings.PathTranslations = append(settings.PathTranslations, store.TranslationRule{FromPattern: source, ToPattern: destination})
+	if err := td.Daemon.Store.UpdateSettings(settings); err != nil {
+		td.T.Fatal(err)
+	}
 }
 
 // PairWith performs the full handshake dance: td initiates, other

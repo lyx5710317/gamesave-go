@@ -99,22 +99,11 @@ func (m *Manager) RecordSent(keys ...string) {
 	}
 }
 
-// ValidateConfirm decides whether an /approve-confirm may be accepted:
-// we initiated a handshake to this peer/address within the grace window,
-// OR they have an active incoming handshake here (simultaneous initiation),
-// OR they're already paired (idempotent re-confirm). alreadyPaired is
-// supplied by the caller from the store. Valid confirms consume the sent
-// entries.
-func (m *Manager) ValidateConfirm(peerID, clientIP string, port int, alreadyPaired bool) bool {
+// ValidateConfirm accepts only a locally initiated handshake and consumes it.
+// Incoming approval requests require their own explicit user confirmation.
+func (m *Manager) ValidateConfirm(peerID, clientIP string, port int) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if alreadyPaired {
-		return true
-	}
-	if _, ok := m.incoming[peerID]; ok {
-		return true
-	}
 
 	now := m.now()
 	fresh := func(key string) bool {
@@ -122,7 +111,11 @@ func (m *Manager) ValidateConfirm(peerID, clientIP string, port int, alreadyPair
 		return ok && now.Sub(t) < graceWindow
 	}
 
-	keys := candidateKeys(peerID, clientIP, port)
+	keys := candidateKeys(clientIP, port)
+	if clientIP == "relay" {
+		// Relay peers share the same transport address. Bind to the peer ID.
+		keys = []string{"relay:" + peerID}
+	}
 	for _, k := range keys {
 		if fresh(k) {
 			// Consume every candidate entry to prevent replay.
@@ -135,19 +128,18 @@ func (m *Manager) ValidateConfirm(peerID, clientIP string, port int, alreadyPair
 	return false
 }
 
-// candidateKeys covers peer-id, plain-ip, ip:port, and the
+// candidateKeys covers LAN addresses and the
 // localhost/127.0.0.1 alias cross-checks from the JS implementation.
-func candidateKeys(peerID, clientIP string, port int) []string {
-	keys := []string{
-		peerID,
-		clientIP,
-		hostPort(clientIP, port),
+func candidateKeys(clientIP string, port int) []string {
+	if port <= 0 {
+		return nil
 	}
+	keys := []string{"lan:" + hostPort(clientIP, port)}
 	switch clientIP {
 	case "localhost":
-		keys = append(keys, "127.0.0.1", hostPort("127.0.0.1", port))
+		keys = append(keys, "lan:"+hostPort("127.0.0.1", port))
 	case "127.0.0.1", "::1":
-		keys = append(keys, "localhost", hostPort("localhost", port))
+		keys = append(keys, "lan:"+hostPort("localhost", port), "lan:"+hostPort("::1", port), "lan:"+hostPort("127.0.0.1", port))
 	}
 	return keys
 }

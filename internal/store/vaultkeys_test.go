@@ -19,6 +19,44 @@ func vaultTestStore(t *testing.T) *Store {
 	return s
 }
 
+func TestPinnedPeerKeyRequiresUnpairBeforeReplacement(t *testing.T) {
+	s := openTestStore(t)
+	peer := Peer{ID: "fixture", Name: "Fixture"}
+	if err := s.UpsertPeer(peer); err != nil {
+		t.Fatal(err)
+	}
+	newPublicKey := func() string {
+		t.Helper()
+		id, err := e2ee.GenerateIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e2ee.EncodeKey(id.Public)
+	}
+	first, second := newPublicKey(), newPublicKey()
+	for _, key := range []string{first, first} {
+		if err := s.SetPeerPublicKey(peer.ID, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetPeerPublicKey(peer.ID, second); err == nil {
+		t.Fatal("expected an established pin to be preserved")
+	}
+	stored, err := s.GetPeer(peer.ID)
+	if err != nil || stored.PublicKey != first {
+		t.Fatal("the original pin was not preserved")
+	}
+	if err := s.UnpairPeer(peer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertPeer(peer); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerPublicKey(peer.ID, second); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNoVaultUntilAsked(t *testing.T) {
 	s := vaultTestStore(t)
 	if _, err := s.LoadKeyring(); !errors.Is(err, ErrNoVault) {

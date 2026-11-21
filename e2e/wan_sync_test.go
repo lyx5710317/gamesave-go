@@ -212,21 +212,19 @@ func TestWanAutoTrackFromPeer(t *testing.T) {
 		t.Fatal("pairing failed")
 	}
 
-	// A tracks a game B has NEVER tracked. Only A adds it.
+	// Only A tracks the game. B explicitly approves its own save location.
+	b.MapPeerSave(a.SaveDir, b.SaveDir)
 	a.WriteSave("save.dat", "content from A")
 	gameID := a.TrackGame("AutoTrack Game")
 	if _, err := b.Daemon.Store.GetGame(gameID); err == nil {
 		t.Fatal("precondition: B should not have the game yet")
 	}
 
-	// A syncs → B must auto-track and receive the save over the relay.
-	// (Single-machine test: path translation is identity, so B's
-	// auto-tracked save path equals A's — read the file from B's actual
-	// tracked path rather than assuming b.SaveDir.)
+	// A syncs → B tracks the approved destination and receives the save.
 	a.API(http.MethodPost, "/api/games/"+gameID+"/sync", nil, nil)
 	if !testutil.WaitFor(45*time.Second, func() bool {
 		g, err := b.Daemon.Store.GetGame(gameID)
-		if err != nil {
+		if err != nil || g.SavePath != b.SaveDir {
 			return false
 		}
 		data, _ := os.ReadFile(filepath.Join(g.SavePath, "save.dat"))

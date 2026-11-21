@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -178,14 +177,13 @@ func (e *Engine) handleApproveConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := clientIP(r)
 
-	_, alreadyPaired := func() (store.Peer, bool) {
-		p, err := e.Store.GetPeer(body.PeerID)
-		return p, err == nil
-	}()
-
-	if !e.Pairing.ValidateConfirm(body.PeerID, ip, body.Port, alreadyPaired) {
+	if !e.Pairing.ValidateConfirm(body.PeerID, ip, body.Port) {
 		e.Log("warn", fmt.Sprintf("blocked unsolicited approve-confirm from %s (peer %s)", ip, body.PeerID))
 		jsonError(w, http.StatusBadRequest, "Pairing confirmation rejected: no matching handshake initiated.")
+		return
+	}
+	if existing, err := e.Store.GetPeer(body.PeerID); err == nil && existing.PublicKey != "" && body.PublicKey != existing.PublicKey {
+		jsonError(w, http.StatusConflict, "The device pairing key changed. Unpair this device before pairing it again.")
 		return
 	}
 
@@ -439,41 +437,17 @@ func (e *Engine) ensureManifestGame(gameID string, q manifestGameQuery) (store.G
 	if e.Store.IsUntracked(gameID) {
 		return store.Game{}, fmt.Errorf("Game not found.")
 	}
-	rules := make([]delta.TranslationRule, len(settings.PathTranslations))
-	for i, tr := range settings.PathTranslations {
-		rules[i] = delta.TranslationRule{FromPattern: tr.FromPattern, ToPattern: tr.ToPattern}
+	// An unknown game may only use an exact mapping configured on this device.
+	// Prefix translation lets the peer choose a suffix, so it is not approval
+	// to track a new location. Existing local games and links resolve above.
+	localPath, ok := approvedPeerSavePath(q.SavePath, settings.PathTranslations, q.IsFile)
+	if !ok {
+		return store.Game{}, errors.New("save location needs local approval — track this game on the receiving device or configure an exact path mapping")
 	}
-	localPath := delta.TranslatePathToLocal(q.SavePath, rules)
-	// A peer's temporary directory is not a portable save location. The
-	// built-in user-profile substitution can otherwise turn, for example,
-	// C:\Users\Alice\AppData\Local\Temp\test-saves into a NEW empty folder
-	// under Bob's profile and silently track that instead of Bob's real save.
-	// An explicit translation rule is an intentional mapping and may opt in.
-	// Keep the legacy same-machine case (including test daemons): a temporary
-	// path that already exists *unchanged* on this machine is not a guess.
-	if (temporaryAutoTrackPath(q.SavePath) || temporaryAutoTrackPath(localPath)) &&
-		!hasExplicitPathTranslation(q.SavePath, rules) {
-		// On Windows the runner (and some user profiles) can spell the same
-		// temporary directory through a different profile/home alias. Prefer
-		// the original path only when it is already inside THIS process's temp
-		// root and exists; never create a guessed translated temp folder.
-		if rel, err := filepath.Rel(os.TempDir(), q.SavePath); err == nil &&
-			rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			if _, err := os.Stat(q.SavePath); err == nil {
-				localPath = q.SavePath
-			}
-		}
-		_, statErr := os.Stat(localPath)
-		if !strings.EqualFold(filepath.Clean(q.SavePath), filepath.Clean(localPath)) || statErr != nil {
-			return store.Game{}, fmt.Errorf("cannot auto-track %q from an unmapped temporary save path — set the save path on this device manually or add a path translation rule", q.Name)
-		}
-	}
-
-	// Never auto-track at a profile/system-level folder: syncing it would
-	// hash the user's whole profile. Send the requester a clear reason
-	// instead of a mysterious walk error.
-	if reason := delta.DangerousSyncRoot(localPath); reason != "" {
-		return store.Game{}, fmt.Errorf("cannot auto-track %q at %q: %s — set the game's save path on this device manually", q.Name, localPath, reason)
+	if existing, err := e.Store.FindGameBySavePath(localPath); err == nil && existing.ID != gameID {
+		return store.Game{}, errors.New("save location is already tracked — link the games on the receiving device")
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.Game{}, errors.New("could not verify whether the save location is already tracked")
 	}
 
 	game := store.Game{
@@ -498,49 +472,39 @@ func (e *Engine) ensureManifestGame(gameID string, q manifestGameQuery) (store.G
 			return e.backfillCover(linked, q), nil
 		}
 	}
-	if q.IsFile {
-		_ = os.MkdirAll(filepath.Dir(localPath), 0o777)
-	} else {
-		_ = os.MkdirAll(localPath, 0o777)
-	}
 	e.Log("info", fmt.Sprintf("auto-tracked %q at %q from peer manifest request", q.Name, localPath))
 	e.notifyGamesUpdate()
 	return game, nil
 }
 
-func hasExplicitPathTranslation(remotePath string, rules []delta.TranslationRule) bool {
+func approvedPeerSavePath(remotePath string, rules []store.TranslationRule, isFile bool) (string, bool) {
+	var path string
 	for _, rule := range rules {
-		if rule.FromPattern != "" && strings.HasPrefix(remotePath, rule.FromPattern) {
-			return true
+		if rule.FromPattern != remotePath || !filepath.IsAbs(rule.ToPattern) {
+			continue
 		}
-	}
-	return false
-}
-
-// temporaryAutoTrackPath is deliberately narrower than DangerousSyncRoot:
-// users may manually track a save in a temporary directory, but an unknown
-// peer game must not create and sync a guessed ephemeral destination there.
-func temporaryAutoTrackPath(path string) bool {
-	p := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(path), `\`, "/"))
-	p = strings.TrimRight(p, "/")
-	for _, root := range []string{"/tmp", "/var/tmp", "/private/tmp"} {
-		if p == root || strings.HasPrefix(p, root+"/") {
-			return true
+		target := filepath.Clean(rule.ToPattern)
+		if path != "" && path != target {
+			return "", false
 		}
+		path = target
 	}
-	parts := strings.Split(p, "/")
-	if len(parts) >= 6 && len(parts[0]) == 2 && parts[0][1] == ':' &&
-		parts[1] == "users" && parts[2] != "" && parts[3] == "appdata" &&
-		parts[4] == "local" && parts[5] == "temp" {
-		return true
+	if path == "" || delta.DangerousSyncRoot(path) != "" {
+		return "", false
 	}
-	return len(parts) >= 3 && len(parts[0]) == 2 && parts[0][1] == ':' &&
-		parts[1] == "windows" && parts[2] == "temp"
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || delta.DangerousSyncRoot(resolved) != "" {
+		return "", false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !(info.IsDir() && !isFile || info.Mode().IsRegular() && isFile) {
+		return "", false
+	}
+	return path, true
 }
 
 // handleManifest serves a game's manifest + branch + latest-snapshot info.
-// If the game isn't tracked here yet, it is auto-tracked using the
-// requester's supplied name/savePath (translated to local conventions).
+// An untracked game must have an exact locally configured path mapping.
 func (e *Engine) handleManifest(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 

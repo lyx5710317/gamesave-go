@@ -264,6 +264,7 @@ func TestPeerInitiatedDetectionOfRemoteChange(t *testing.T) {
 func TestCoverArtPropagatesOnSync(t *testing.T) {
 	a := testutil.NewTestDaemon(t, "Device-A")
 	b := testutil.NewTestDaemon(t, "Device-B")
+	b.MapPeerSave(a.SaveDir, b.SaveDir)
 	a.PairWith(b)
 
 	gameID := a.TrackGame("Cover Game")

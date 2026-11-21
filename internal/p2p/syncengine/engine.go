@@ -136,7 +136,9 @@ func isPathMappingRequired(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "unmapped temporary save path") ||
+	return strings.Contains(message, "save location needs local approval") ||
+		strings.Contains(message, "save location is already tracked") ||
+		strings.Contains(message, "unmapped temporary save path") ||
 		strings.Contains(message, "set the game's save path on this device manually")
 }
 

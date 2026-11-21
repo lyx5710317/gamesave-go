@@ -296,6 +296,9 @@ func (w *WanClient) routeRequest(ctx context.Context, msg RelayMessage) (int, an
 		if err := json.Unmarshal(msg.Body, &body); err != nil || body.PeerID == "" {
 			return 400, map[string]string{"error": "peerId is required"}
 		}
+		if body.PeerID != from {
+			return 400, map[string]string{"error": "Pairing request identity does not match its sender."}
+		}
 		w.engine.Pairing.RecordIncoming(pairing.IncomingRequest{
 			PeerID: body.PeerID, DeviceName: body.DeviceName,
 			DeviceType: orDefault(body.DeviceType, "desktop"),
@@ -314,7 +317,7 @@ func (w *WanClient) routeRequest(ctx context.Context, msg RelayMessage) (int, an
 		if err := json.Unmarshal(msg.Body, &body); err != nil || body.PeerID == "" {
 			return 400, map[string]string{"error": "peerId is required"}
 		}
-		if !w.engine.Pairing.ValidateConfirm(body.PeerID, "relay", body.Port, isPaired) {
+		if body.PeerID != from || !w.engine.Pairing.ValidateConfirm(body.PeerID, "relay", body.Port) {
 			w.engine.Log("warn", "blocked unsolicited WAN approve-confirm from "+body.PeerID)
 			return 400, map[string]string{"error": "Pairing confirmation rejected: no matching handshake initiated."}
 		}
