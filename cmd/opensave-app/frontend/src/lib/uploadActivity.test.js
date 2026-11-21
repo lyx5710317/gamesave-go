@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from './i18n.js';
-import { manualUploadOutcome, summarizeUploadActivity, uploadStatusText } from './uploadActivity.js';
+import { filterUploadActivity, manualUploadOutcome, summarizeUploadActivity, uploadNextStep, uploadStatusText } from './uploadActivity.js';
 
 describe('cloud upload activity', () => {
+  it('filters by result without hiding an unconfirmed upload from failures', () => {
+    const unconfirmed = { provider: 'google_drive', status: 'failed', failure: 'unconfirmed' };
+    const records = [{ status: 'running' }, unconfirmed, { status: 'succeeded' }];
+    expect(filterUploadActivity(records, true)).toEqual([unconfirmed]);
+    const zh = (key) => translate('zh-CN', key);
+    expect(uploadStatusText(unconfirmed, zh)).toContain('无法确认');
+    expect(uploadNextStep(unconfirmed, zh)).toContain('先查看');
+    expect(uploadNextStep({ status: 'failed', failure: 'authentication' }, zh)).toContain('重新连接');
+    expect(uploadNextStep({ status: 'failed', failure: 'quota' }, zh)).toContain('剩余空间');
+    expect(uploadNextStep(records[2], zh)).toBe('');
+  });
   it('separates running, succeeded, and failed transfers', () => {
     expect(summarizeUploadActivity([
       { status: 'running' }, { status: 'succeeded' }, { status: 'failed' }, { status: 'failed' }

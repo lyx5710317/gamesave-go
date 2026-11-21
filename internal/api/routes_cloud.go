@@ -558,7 +558,8 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 
 	remote, err := s.Daemon.Cloud.List()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		s.Daemon.Cloud.RecordUploadPreflightFailure(gameID, "", err)
+		writeError(w, http.StatusBadGateway, "could not read the backup destination; check cloud transfer activity")
 		return
 	}
 	remoteNames := map[string]struct{}{}
@@ -593,6 +594,7 @@ func (s *Server) handleCloudSyncLocal(w http.ResponseWriter, r *http.Request) {
 				// provider supports an account-bound, conditional object write
 				// and trusted content verification, require explicit resolution.
 				conflicts++
+				s.Daemon.Cloud.RecordUploadPreflightFailure(gameID, snap.ID, cloud.ErrRemoteSnapshotConflict)
 				continue
 			}
 			pending = append(pending, pendingUpload{zipPath: snap.ZipPath, remoteName: remoteName, snapID: snap.ID})

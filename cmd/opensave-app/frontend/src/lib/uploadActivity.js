@@ -33,5 +33,25 @@ export function uploadStatusText(record, translate) {
   if (record.provider === 'jianguoyun' && ['authentication', 'permission', 'quota', 'rate_limit', 'network', 'incomplete_inventory', 'integrity'].includes(record.failure)) {
     return translate(`cloud.activity.jianguoyun.${record.failure}`);
   }
+  if (['authentication', 'permission', 'quota', 'rate_limit', 'network', 'unconfirmed', 'incomplete_inventory'].includes(record.failure)) {
+    return translate(`cloud.activity.${record.failure}`);
+  }
   return translate('cloud.activity.failed');
+}
+
+const uploadNextSteps = {
+  configuration: 'setup', authentication: 'setup', permission: 'permissions',
+  quota: 'space', rate_limit: 'wait', conflict: 'inspect', network: 'inspect',
+  unconfirmed: 'inspect', integrity: 'inspect', incomplete_inventory: 'inspect',
+  unsafe_condition: 'destination'
+};
+
+export function uploadNextStep(record, translate) {
+  if (record.status !== 'failed') return '';
+  const step = Object.hasOwn(uploadNextSteps, record.failure) ? uploadNextSteps[record.failure] : 'inspect';
+  return translate(`cloud.activity.next.${step}`);
+}
+
+export function filterUploadActivity(records, failedOnly) {
+  return failedOnly ? records.filter(({status}) => status === 'failed') : records;
 }

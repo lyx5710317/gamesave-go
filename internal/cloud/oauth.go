@@ -221,13 +221,13 @@ func (s *Service) getOrRefreshAccessToken(provider string) (string, error) {
 		return "", err
 	}
 	if cfg.AccessToken == "" {
-		return "", fmt.Errorf("cloud sync not authenticated")
+		return "", fmt.Errorf("cloud sync not authenticated: %w", errCloudAuthorization)
 	}
 	if cfg.ExpiryTimeMs > 0 && time.Now().UnixMilli() < cfg.ExpiryTimeMs-60_000 {
 		return cfg.AccessToken, nil
 	}
 	if cfg.RefreshToken == "" {
-		return "", fmt.Errorf("no refresh token available; re-authentication required")
+		return "", fmt.Errorf("no refresh token available; re-authentication required: %w", errCloudAuthorization)
 	}
 
 	clientID, secret, viaProxy, err := s.tokenCreds(provider)
@@ -263,7 +263,7 @@ func (s *Service) getOrRefreshAccessToken(provider string) (string, error) {
 			cfg.ExpiryTimeMs = 0
 			cfg.UserEmail = ""
 			_ = s.Store.UpdateCloudConfig(cfg)
-			return "", fmt.Errorf("your %s session has expired — reconnect under Cloud Backup to sign in again", providerLabel(provider))
+			return "", fmt.Errorf("your %s session has expired — reconnect under Cloud Backup to sign in again: %w", providerLabel(provider), errCloudAuthorization)
 		}
 		return "", fmt.Errorf("failed to refresh token: %w", err)
 	}
