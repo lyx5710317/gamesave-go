@@ -1,5 +1,16 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Next desktop release — upstream safety and cloud activity
+
+- [x] Review upstream 2.4.1 (`346d9bd`) and 2.5.0-beta.1 (`1fb85e4`) against the fork. Adapt directory and pairing checks as separate changes; evaluate cold startup, watcher and higher-cost sync improvements independently.
+- [x] Backport the on-disk path containment check from OpenSave `2288306`. Require exact, existing local path approval for a peer's newly tracked game. Bind pairing confirmation to locally initiated intent and prevent replacement of a pinned key before unpairing. Keep the existing protocol version and tracked save paths.
+- [ ] Design and test signed save-data requests with mixed-version clients and legacy pairings. This batch changes confirmation and file boundaries without adding a signed transport.
+- [x] Show current-session uploads and actionable failure categories in Activity and Cloud Backup. Record a failed manual inventory check or a rejected same-name snapshot; preserve generic logs in a separate Activity tab.
+- [x] Verify frontend (130 tests), production frontend and Wails developer builds. Check the failure filter, system-log tab and Cloud Backup navigation in an isolated browser fixture. Verify Windows junction handling, LAN and relay pairing, local-path auto-tracking and re-tracking, and cloud error redaction with focused tests. Linux core test binaries cross-compiled; Linux runtime testing remains separate.
+- [x] Full Windows Go suite PASS with a 20-minute package timeout (167 end-to-end tests, 587.254s). Earlier default-timeout runs failed the old re-track fixture and exceeded the 10-minute package limit. The revised fixture verifies separate local save folders, retained saves on untrack, an agreed base on re-track and subsequent file delivery.
+- [ ] Validate Google Drive authorization, quotas, interrupted upload, objectively identified remote objects and restore using synthetic data and a dedicated real test account. Verify retry using stable remote identity before adding an automatic or persisted queue.
+- [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
+
 ## Desktop release v1.2.1
 
 - [x] Prepare Windows desktop/frontend/lockfile/resource version 1.2.1, preserving inherited core/peer identities; include this round's audit fixes and update public release notes.
