@@ -1,8 +1,8 @@
 # Google Drive backup safety
 
 Status (2026-11-21): conservative snapshot backup with bounded recovery within
-one upload. The current contract tests use mock HTTP servers. A disposable
-Google account and two isolated desktop profiles are needed for live validation.
+one upload. Automated contract tests use mock HTTP servers. The live checks
+below used a dedicated account and two isolated Windows profiles.
 
 ## Documented API behavior and current safeguards
 
@@ -41,23 +41,32 @@ post-upload check may leave a valid remote object; inspect the folder before
 retrying. Do not infer ancestry, Vault identity, or permission to restore from
 matching names or sizes.
 
-The reserved ID lives only for one upload operation. A later manual attempt or
-a restart begins a new operation. A persistent retry queue would need to retain
-and revalidate the reserved ID, destination and local content identity across
-restarts and account changes. The same-name checks remain in effect.
+Overlapping automatic and manual backups for the same name share one in-flight
+attempt within a daemon. The later caller receives a name conflict if the
+first attempt succeeds, or receives the first attempt's error. Once the attempt
+ends, a later manual retry or restart begins a new operation with its own
+reserved ID. A persistent queue would need to retain and revalidate the
+reserved ID, destination and local content identity across restarts and
+account changes.
 
 ## Manual release checks (disposable account, synthetic ZIPs only)
 
-| Check | Result | Evidence needed |
+The first grant omitted the requested `drive.file` permission and the app
+rejected it. Two later attempts expired while awaiting consent. In the final
+run both profiles obtained the Drive permission, refreshed credentials and
+read account quota metadata. Both profiles were disconnected locally after
+the run.
+
+| Check | Result | Evidence and remaining coverage |
 | --- | --- | --- |
-| Existing unique `OpenSave` folder and paged folder listing | BLOCKED | Record sanitized page/status sequence and whether the selected ID stays stable; do not record the ID itself. |
-| Duplicate root folders and concurrent folder creation | BLOCKED | Confirm the client stops and never silently chooses one. |
-| Resumable upload interrupted after an accepted chunk | BLOCKED | Confirm status-query `Range` and no blind replay of already accepted bytes. |
-| Session expiry or create response lost | BLOCKED | Confirm the retry reuses the same reserved ID and at most one object is created by that upload. Verify that a `409` recovery checks the existing object's SHA-256. |
-| Final response ID/size and fresh listing | BLOCKED | Confirm requested fields are returned and a unique remote object is visible. |
-| Two-device same-name creation | BLOCKED | Confirm duplicate detection and manual recovery; do not claim atomic create-only even if one trial appears to pass. |
-| Delayed listing, expired session, quota, and rate limit | BLOCKED | Record controlled failure and ensure no automatic duplicate retry. |
-| Download, verify and restore a synthetic snapshot | BLOCKED | Verify from a second isolated profile, confirm the current-save safety snapshot, then compare the restored files against the fixture hashes. |
+| Existing unique `OpenSave` folder and snapshot pagination | PASS | Both profiles selected the same folder. Snapshot listing followed multiple real Drive pages. Folder discovery pagination has mock coverage. |
+| Duplicate folders and concurrent folder creation | PASS | Both reads refused to choose among duplicate folders after concurrent creation under an isolated parent. |
+| Resumable upload interrupted after an accepted chunk | PASS | The test dropped the accepted chunk response and observed a real Drive status-query `Range`. The accepted chunk was sent once. |
+| Session expiry or lost response | PASS | Controlled faults around real requests verified that retry reused the reserved ID. A real Drive 409 was recovered through exact-ID and SHA-256 verification. |
+| Final response and fresh listing | PASS | Automatic and manual backups in one daemon produced one remote object. A later same-name attempt was refused. |
+| Concurrent same-name writes from independent clients | PASS for restore rejection | The race left two same-name files. Restore refused the ambiguous source and preserved the current save. |
+| Delayed listing, quota and rate limit | PASS with injected responses | Controlled faults verified that the client reported failure without starting a duplicate upload. Natural session expiry, account exhaustion and service throttling were skipped. |
+| Download, verify and restore a synthetic snapshot | PASS | The second profile verified the remote snapshot and restored matching bytes. The displaced current save was verified in the safety snapshot. |
 
 Do not record OAuth tokens, account email, folder IDs, Authorization headers,
 remote response bodies, or save contents in test evidence or the repository.

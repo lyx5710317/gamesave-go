@@ -78,6 +78,7 @@ type Service struct {
 	uploads             []UploadRecord
 	nextUploadID        uint64
 	driveFolderMu       sync.Mutex
+	driveUploads        sync.Map // snapshot name -> *driveUploadAttempt
 	jianguoyunMu        sync.Mutex
 	jianguoyunNext      time.Time
 	jianguoyunProbeMu   sync.Mutex
