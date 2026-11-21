@@ -16,7 +16,9 @@
 - [ ] Plan Drive device join, verified ancestry and concurrent-write tests before enabling automatic cloud handoff. Keep the existing backup/verify/restore flow for Drive in this batch.
 - [x] Set Windows desktop, frontend and package metadata to 1.3.0 and prepare the Chinese GitHub release notes.
 - [x] Fix the release CI regression where Linux treated a single-file save as a directory during restore and peer sync. Existing Linux CI cases caught both failures. Keep rejecting linked entries inside directory save locations.
-- [ ] Verify the GitHub candidate and tagged Windows release, including the installer, portable executable and checksum manifest.
+- [x] Validate v1.3.0 after the single-file fix. Local Windows Go suite PASS (E2E 611.265s), frontend 130 tests, frontend production build, Wails build and focused Linux race tests PASS. The first Linux CI run failed single-file restore and sync; the corrected [push CI](https://github.com/lyx5710317/gamesave-go/actions/runs/44916183035) and [PR CI](https://github.com/lyx5710317/gamesave-go/actions/runs/44916188351) passed on Linux and Windows.
+- [x] Verify the [Windows candidate](https://github.com/lyx5710317/gamesave-go/actions/runs/44916184622) from `0683abaf4f88d2465bb1025a3b7a4ed1b8d040b9`. Downloaded the artifacts and verified their exact source attestations, Windows desktop version and extracted NSIS payload. The merged release tree matches the tested candidate tree.
+- [x] Publish [v1.3.0](https://github.com/lyx5710317/gamesave-go/releases/tag/v1.3.0) from `a5226be2cf3056ce191dea2bffa3260289c3ed22`. The [tagged workflow](https://github.com/lyx5710317/gamesave-go/actions/runs/44918455857) passed, including its Linux, relay and Flatpak build jobs. Independently downloaded all three public Windows assets and verified matching SHA-256 digests, exact repository/workflow/tag/commit attestations, ProductVersion 1.3.0 on both executables and the official linker stamp on the portable app and installer payload. Verified the Chinese release notes and reset the publication gate to false. Clean-VM installation and upgrade were skipped.
 
 ## Desktop release v1.2.1
 
