@@ -14,7 +14,66 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/opensave/opensave/internal/snapshot"
+	"github.com/opensave/opensave/internal/store"
 )
+
+func TestFailedBackupExportPreservesExistingFile(t *testing.T) {
+	ts := startTestServer(t)
+	const gameID = "export-failure"
+	if err := ts.daemon.Store.CreateGame(store.Game{ID: gameID, Name: gameID, SavePath: ts.saveDir}); err != nil {
+		t.Fatal(err)
+	}
+	// Opening a directory succeeds, but reading it as an archive fails.
+	if err := ts.daemon.Store.CreateSnapshot(store.Snapshot{
+		ID: "unreadable", GameID: gameID, BranchName: "main", ZipPath: ts.saveDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, mode := range []string{"legacy", "selected"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			out := filepath.Join(dir, "existing.sscb")
+			const previous = "existing backup bytes"
+			if err := os.WriteFile(out, []byte(previous), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if mode == "legacy" {
+				_, err = ts.server.exportAllSnapshots(out)
+			} else {
+				_, _, err = ts.server.exportSelectedSaves(out, []backupManifestGame{{ID: strings.Repeat("x", 65536), SavePath: ts.saveDir}})
+			}
+			if err == nil {
+				t.Fatal("failed export reported success")
+			}
+			data, err := os.ReadFile(out)
+			if err != nil || string(data) != previous {
+				t.Fatalf("existing backup changed: size=%d, err=%v", len(data), err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("failed export left temporary files: %v, err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestSelectedBackupExportRefusesFileInsideSaveFolder(t *testing.T) {
+	ts := startTestServer(t)
+	const previous = "game-owned file"
+	out := filepath.Join(ts.saveDir, "backup.sscb")
+	if err := os.WriteFile(out, []byte(previous), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ts.server.exportSelectedSaves(out, []backupManifestGame{{ID: "selected", SavePath: ts.saveDir}}); err == nil {
+		t.Fatal("export was allowed to replace a file within the selected save")
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || string(data) != previous {
+		t.Fatalf("game-owned file changed: size=%d, err=%v", len(data), err)
+	}
+}
 
 // setHome points every home-derived env var at dir so portable-path
 // helpers resolve against a controlled location on either OS.
@@ -79,6 +138,9 @@ func TestPortablePathTokenizeResolve(t *testing.T) {
 func exportV2(t *testing.T, ts *testServer, games []map[string]string) string {
 	t.Helper()
 	exportPath := filepath.Join(t.TempDir(), "export.sscb")
+	if err := os.WriteFile(exportPath, []byte("previous export"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	resp, body := ts.do(t, http.MethodPost, "/api/backup/export", map[string]any{
 		"targetPath": exportPath, "games": games,
 	})

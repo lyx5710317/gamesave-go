@@ -510,16 +510,37 @@ func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
 // exportSelectedSaves zips each game's live save and writes the v2
 // archive: saves/<gameID>.zip entries plus the manifest.
 func (s *Server) exportSelectedSaves(outPath string, games []backupManifestGame) (exported []backupManifestGame, skipped []skippedGame, err error) {
-	out, err := os.Create(outPath)
+	destination, err := filepath.Abs(outPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create export file: %w", err)
+		return nil, nil, err
 	}
-	defer out.Close()
-
-	bw := brotli.NewWriterLevel(out, 9)
-	defer bw.Close()
-	zw := zip.NewWriter(bw)
-	defer zw.Close()
+	parent, err := filepath.EvalSymlinks(filepath.Dir(destination))
+	if err != nil {
+		return nil, nil, err
+	}
+	destination = filepath.Join(parent, filepath.Base(destination))
+	rootsByGame := make([]map[string]string, len(games))
+	for i, game := range games {
+		roots, err := s.Daemon.Store.GameRootPaths(game.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if exportWithinSave(game.SavePath, destination) {
+			return nil, nil, errors.New("choose a backup file outside the selected game save locations")
+		}
+		for _, root := range roots {
+			if exportWithinSave(root, destination) {
+				return nil, nil, errors.New("choose a backup file outside the selected game save locations")
+			}
+		}
+		rootsByGame[i] = roots
+	}
+	archive, err := startBackupExport(destination)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer archive.discard()
+	zw := archive.zip
 
 	for i, g := range games {
 		s.Hub.Broadcast("backup-progress", map[string]any{
@@ -532,11 +553,7 @@ func (s *Server) exportSelectedSaves(outPath string, games []backupManifestGame)
 		tmpPath := tmp.Name()
 		tmp.Close()
 
-		gameRoots, rootsErr := s.Daemon.Store.GameRootPaths(g.ID)
-		if rootsErr != nil {
-			gameRoots = nil
-		}
-		skippedFiles, zipErr := snapshot.ZipRoots(g.SavePath, gameRoots, tmpPath)
+		skippedFiles, zipErr := snapshot.ZipRoots(g.SavePath, rootsByGame[i], tmpPath)
 		if zipErr != nil {
 			os.Remove(tmpPath)
 			skipped = append(skipped, skippedGame{g.ID, g.Name, zipErr.Error()})
@@ -580,23 +597,19 @@ func (s *Server) exportSelectedSaves(outPath string, games []backupManifestGame)
 	if _, err := mEntry.Write(raw); err != nil {
 		return exported, skipped, err
 	}
-	return exported, skipped, nil
+	return exported, skipped, archive.publish(destination)
 }
 
 // exportAllSnapshots writes an inner ZIP (one entry per snapshot zip,
 // named gameId__branch__snapId.zip, mirroring the cloud naming scheme)
 // compressed with Brotli.
 func (s *Server) exportAllSnapshots(outPath string) (int, error) {
-	out, err := os.Create(outPath)
+	archive, err := startBackupExport(outPath)
 	if err != nil {
-		return 0, fmt.Errorf("create export file: %w", err)
+		return 0, err
 	}
-	defer out.Close()
-
-	bw := brotli.NewWriterLevel(out, 9)
-	defer bw.Close()
-	zw := zip.NewWriter(bw)
-	defer zw.Close()
+	defer archive.discard()
+	zw := archive.zip
 
 	games, err := s.Daemon.Store.ListGames()
 	if err != nil {
@@ -635,7 +648,58 @@ func (s *Server) exportAllSnapshots(outPath string) (int, error) {
 			}
 		}
 	}
-	return count, nil
+	return count, archive.publish(outPath)
+}
+
+func exportWithinSave(savePath, destination string) bool {
+	path, err := filepath.Abs(savePath)
+	if err != nil || savePath == "" {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	rel, err := filepath.Rel(path, destination)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+type backupExport struct {
+	file   *os.File
+	brotli *brotli.Writer
+	zip    *zip.Writer
+}
+
+func startBackupExport(path string) (*backupExport, error) {
+	file, err := os.CreateTemp(filepath.Dir(path), ".opensave-export-*.part")
+	if err != nil {
+		return nil, fmt.Errorf("stage backup export: %w", err)
+	}
+	compressed := brotli.NewWriterLevel(file, 9)
+	return &backupExport{file: file, brotli: compressed, zip: zip.NewWriter(compressed)}, nil
+}
+
+func (a *backupExport) discard() {
+	_ = a.file.Close()
+	_ = os.Remove(a.file.Name())
+}
+
+func (a *backupExport) publish(path string) error {
+	if err := a.zip.Close(); err != nil {
+		return fmt.Errorf("finish backup archive: %w", err)
+	}
+	if err := a.brotli.Close(); err != nil {
+		return fmt.Errorf("finish backup compression: %w", err)
+	}
+	if err := a.file.Sync(); err != nil {
+		return fmt.Errorf("flush backup export: %w", err)
+	}
+	if err := a.file.Close(); err != nil {
+		return fmt.Errorf("close backup export: %w", err)
+	}
+	if err := os.Rename(a.file.Name(), path); err != nil {
+		return fmt.Errorf("publish backup export: %w", err)
+	}
+	return nil
 }
 
 // handleBackupRestore imports an .sscb export. v2 archives (with a
