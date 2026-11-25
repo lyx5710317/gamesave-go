@@ -1,5 +1,15 @@
 # GameSave Cloud MVP V2.1 Tasks
 
+## Repository audit — 2026-11-25
+
+- [x] Review the Go services and CLI, Windows desktop UI, Decky plugin, dependency manifests, and build/release entry points. Prioritize backup and restore, filesystem changes, remote input, credential handling, and response validation. The tracked-source credential marker scan and installer script syntax checks passed.
+- [x] Stage legacy and selected-game backup exports beside the destination. Publish after ZIP and Brotli finalization and file flush. Refuse selected-game export destinations inside the selected save locations. Regression tests cover preserving an existing export after both kinds of failure and replacing it after a successful export.
+- [x] Validate a size-bounded Ludusavi download before replacing the manifest cache. Regression tests confirm that a successful HTTP response with malformed or empty YAML preserves the previous cache.
+- [x] Report interrupted daemon responses as errors in the CLI. Report malformed success responses and preserve HTTP error status in the desktop client. Add focused coverage for both clients.
+- [x] Verify Windows credential writes and removals before saving related settings. Retry an unconfirmed change at most three times and include uncertain changes in settings rollback. Before the repair, the Webhook upload test missed the configured header 7 times in 100 runs and the protected cloud settings test also reproduced intermittent failures. Both focused Windows paths passed 30 repetitions after the repair.
+- [x] Update Go to 1.26.11, Brotli to 1.2.7, and the affected desktop and Decky toolchain dependencies. The `govulncheck` source scans reported zero symbol and imported-package findings on Windows and for the Linux core, CLI and relay. The scans list 21 Windows and 20 Linux advisories in required modules outside the imported packages. Desktop `npm audit` and Decky `npm audit --omit=dev` reported zero findings. The Decky development dependency chain still reports four moderate findings with no compatible automatic fix. Decky build, Python syntax checks and Linux CLI/relay cross-build passed.
+- [x] Verify focused Go tests, all 133 desktop frontend tests, the frontend production build, and the Wails Windows build.
+
 ## Desktop v1.3.0 — upstream safety and cloud activity
 
 - [x] Review upstream 2.4.1 (`346d9bd`) and 2.5.0-beta.1 (`1fb85e4`) against the fork. Adapt directory and pairing checks as separate changes; evaluate cold startup, watcher and higher-cost sync improvements independently.
