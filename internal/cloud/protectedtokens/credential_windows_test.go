@@ -11,6 +11,39 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestCredentialMutationMustBeVisibleBeforeSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		expected     []byte
+		visibleAfter int
+		wantAttempts int
+		wantError    bool
+	}{
+		{name: "retry lost write", expected: []byte("fixture"), visibleAfter: 2, wantAttempts: 2},
+		{name: "retry unobserved delete", visibleAfter: 2, wantAttempts: 2},
+		{name: "unconfirmed write fails", expected: []byte("fixture"), visibleAfter: 4, wantAttempts: 3, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempts := 0
+			err := confirmCredentialChange(tc.expected, func() ([]byte, error) {
+				if attempts >= tc.visibleAfter && tc.expected != nil {
+					return append([]byte(nil), tc.expected...), nil
+				}
+				if attempts < tc.visibleAfter && tc.expected == nil {
+					return []byte("old fixture"), nil
+				}
+				return nil, ErrNotFound
+			}, func() error {
+				attempts++
+				return nil
+			})
+			if attempts != tc.wantAttempts || (err != nil) != tc.wantError {
+				t.Fatalf("credential confirmation: attempts=%d, error=%v", attempts, err)
+			}
+		})
+	}
+}
+
 func TestWindowsCredentialRoundTripRotationAndIsolation(t *testing.T) {
 	installationID := "test_" + uuid.NewString()
 	s, err := New("baidu_netdisk", installationID)

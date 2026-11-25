@@ -195,6 +195,9 @@ func (s *Store) DisconnectJianguoyun() error {
 		return err
 	}
 	if err := secret.Delete(); err != nil {
+		if old != "" {
+			return errors.Join(err, secret.Save(old))
+		}
 		return err
 	}
 	if _, err := s.db.Exec(`UPDATE cloud_config SET enabled = 0, username = '', password = '' WHERE id = 1`); err != nil {
@@ -232,17 +235,17 @@ func replaceProtectedPassword(secret *protectedtokens.PasswordStore, password st
 	if err != nil && !errors.Is(err, protectedtokens.ErrNotFound) {
 		return err
 	}
+	rollback := func() error {
+		if old == "" {
+			return secret.Delete()
+		}
+		return secret.Save(old)
+	}
 	if err := secret.Save(password); err != nil {
-		return err
+		return errors.Join(err, rollback())
 	}
 	if err := writeRow(); err != nil {
-		var rollbackErr error
-		if old == "" {
-			rollbackErr = secret.Delete()
-		} else {
-			rollbackErr = secret.Save(old)
-		}
-		return errors.Join(err, rollbackErr)
+		return errors.Join(err, rollback())
 	}
 	return nil
 }

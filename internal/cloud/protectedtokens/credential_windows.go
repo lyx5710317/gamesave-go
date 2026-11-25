@@ -3,10 +3,12 @@
 package protectedtokens
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -57,14 +59,16 @@ func writeCredential(target string, raw []byte) error {
 		CredentialBlobSize: uint32(len(raw)), CredentialBlob: &raw[0],
 		Persist: credentialPersistLocal, UserName: user,
 	}
-	result, _, callErr := procCredWrite.Call(uintptr(unsafe.Pointer(&credential)), 0)
-	runtime.KeepAlive(raw)
-	runtime.KeepAlive(name)
-	runtime.KeepAlive(user)
-	if result == 0 {
-		return fmt.Errorf("write Windows credential: %w", winCallErr(callErr))
-	}
-	return nil
+	return confirmCredentialChange(raw, func() ([]byte, error) { return readCredential(target) }, func() error {
+		result, _, callErr := procCredWrite.Call(uintptr(unsafe.Pointer(&credential)), 0)
+		runtime.KeepAlive(raw)
+		runtime.KeepAlive(name)
+		runtime.KeepAlive(user)
+		if uint32(result) == 0 {
+			return fmt.Errorf("write Windows credential: %w", winCallErr(callErr))
+		}
+		return nil
+	})
 }
 
 func readCredential(target string) ([]byte, error) {
@@ -78,7 +82,7 @@ func readCredential(target string) ([]byte, error) {
 		uintptr(unsafe.Pointer(&credential)),
 	)
 	runtime.KeepAlive(name)
-	if result == 0 {
+	if uint32(result) == 0 {
 		if errors.Is(callErr, windows.ERROR_NOT_FOUND) {
 			return nil, ErrNotFound
 		}
@@ -102,12 +106,39 @@ func deleteCredential(target string) error {
 	if err != nil {
 		return errors.New("invalid Windows credential target")
 	}
-	result, _, callErr := procCredDelete.Call(uintptr(unsafe.Pointer(name)), credentialTypeGeneric, 0)
-	runtime.KeepAlive(name)
-	if result == 0 && !errors.Is(callErr, windows.ERROR_NOT_FOUND) {
-		return fmt.Errorf("delete Windows credential: %w", winCallErr(callErr))
+	return confirmCredentialChange(nil, func() ([]byte, error) { return readCredential(target) }, func() error {
+		result, _, callErr := procCredDelete.Call(uintptr(unsafe.Pointer(name)), credentialTypeGeneric, 0)
+		runtime.KeepAlive(name)
+		if uint32(result) == 0 && !errors.Is(callErr, windows.ERROR_NOT_FOUND) {
+			return fmt.Errorf("delete Windows credential: %w", winCallErr(callErr))
+		}
+		return nil
+	})
+}
+
+// The native operation can acknowledge a change before a subsequent read
+// observes it. Confirm the stored state before committing related settings.
+func confirmCredentialChange(expected []byte, load func() ([]byte, error), change func() error) error {
+	const attempts = 3
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := change(); err != nil {
+			return err
+		}
+		actual, err := load()
+		missing := errors.Is(err, ErrNotFound)
+		matched := (expected == nil && missing) || (expected != nil && err == nil && bytes.Equal(expected, actual))
+		clear(actual)
+		if matched {
+			return nil
+		}
+		if err != nil && !missing {
+			return err
+		}
+		if attempt < attempts-1 {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
-	return nil
+	return errors.New("Windows credential change could not be confirmed")
 }
 
 func winCallErr(err error) error {

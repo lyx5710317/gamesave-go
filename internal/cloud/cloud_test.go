@@ -1400,17 +1400,19 @@ func TestOneDriveMissingValueStopsUpload(t *testing.T) {
 }
 
 func TestWebhookUpload(t *testing.T) {
-	var gotFileName string
-	var gotHeader string
+	type receivedUpload struct{ fileName, customHeader string }
+	received := make(chan receivedUpload, 1)
 	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotHeader = r.Header.Get("X-Custom")
+		result := receivedUpload{customHeader: r.Header.Get("X-Custom")}
+		defer func() { received <- result }()
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			t.Errorf("expected multipart form: %v", err)
 			return
 		}
-		_, header, err := r.FormFile("file")
+		file, header, err := r.FormFile("file")
 		if err == nil {
-			gotFileName = header.Filename
+			file.Close()
+			result.fileName = header.Filename
 		}
 	}))
 	defer hook.Close()
@@ -1422,15 +1424,21 @@ func TestWebhookUpload(t *testing.T) {
 		c.URL = hook.URL
 		c.HeadersJSON = `{"X-Custom":"secret-token"}`
 	})
+	t.Cleanup(func() {
+		setCloudConfig(t, s, func(c *store.CloudConfig) { c.HeadersJSON = "{}" })
+	})
 
 	if err := svc.Upload(writeTempZip(t, "hook data"), "game__main__snap_2.zip"); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
-	if gotFileName != "game__main__snap_2.zip" {
-		t.Errorf("multipart filename = %q", gotFileName)
+	upload := <-received
+	if upload.fileName != "game__main__snap_2.zip" {
+		t.Errorf("multipart filename = %q", upload.fileName)
 	}
-	if gotHeader != "secret-token" {
-		t.Errorf("custom header = %q", gotHeader)
+	if upload.customHeader != "secret-token" {
+		config, err := s.GetCloudConfig()
+		t.Errorf("custom header did not match: sent=%t configured=%t readable=%t err=%v",
+			upload.customHeader != "", config.HeadersConfigured, strings.Contains(config.HeadersJSON, "X-Custom"), err)
 	}
 }
 

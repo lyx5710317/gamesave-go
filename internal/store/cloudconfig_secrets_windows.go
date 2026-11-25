@@ -193,10 +193,10 @@ func (s *Store) protectAdditionalCloudSecrets(c *CloudConfig, writeRow func() er
 		} else {
 			err = changes[i].store.Save(changes[i].value)
 		}
-		if err != nil {
-			return errors.Join(err, rollback(i-1))
-		}
 		changes[i].apply = true
+		if err != nil {
+			return errors.Join(err, rollback(i))
+		}
 	}
 	if err := writeRow(); err != nil {
 		return errors.Join(err, rollback(len(changes)-1))
