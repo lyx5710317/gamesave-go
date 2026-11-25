@@ -1,10 +1,10 @@
 module github.com/opensave/opensave
 
-go 1.26.6
+go 1.26.11
 
 require (
 	fyne.io/systray v1.12.2
-	github.com/andybalholm/brotli v1.2.2
+	github.com/andybalholm/brotli v1.2.7
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-chi/chi/v5 v5.3.0
