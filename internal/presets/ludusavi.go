@@ -33,6 +33,7 @@ import (
 const ludusaviManifestURL = "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml"
 
 const manifestMaxAge = 7 * 24 * time.Hour
+const manifestMaxBytes = 64 << 20
 
 // manifestFileEntry / manifestGame model just the YAML we care about.
 type manifestFileEntry struct {
@@ -623,18 +624,17 @@ func (sc *Scanner) downloadManifest(yamlPath string) {
 		return
 	}
 
-	tmp := yamlPath + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.CreateTemp(filepath.Dir(yamlPath), ".ludusavi-manifest-*.tmp")
 	if err != nil {
 		return
 	}
-	_, copyErr := io.Copy(f, resp.Body)
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	written, copyErr := io.Copy(f, io.LimitReader(resp.Body, manifestMaxBytes+1))
 	closeErr := f.Close()
-	if copyErr != nil || closeErr != nil {
-		os.Remove(tmp)
+	if copyErr != nil || closeErr != nil || written > manifestMaxBytes || len(buildManifestIndex(tmp)) == 0 {
 		return
 	}
-	_ = os.Remove(yamlPath)
 	_ = os.Rename(tmp, yamlPath)
 }
 

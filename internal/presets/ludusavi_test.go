@@ -4,10 +4,42 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestLudusaviRefreshPreservesCacheOnInvalidResponse(t *testing.T) {
+	const previous = "Previous:\n  files:\n    <home>/some/save:\n      tags: [save]\n"
+	const replacement = "Replacement:\n  files:\n    <home>/other/save:\n      tags: [save]\n"
+	for _, tc := range []struct{ name, response, want string }{
+		{"malformed", "broken: [", previous},
+		{"empty", "{}", previous},
+		{"valid", replacement, replacement},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := manifestScanner(t, previous)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer server.Close()
+			sc.ManifestURL = server.URL
+			path, _ := sc.manifestPaths()
+			sc.downloadManifest(path)
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != tc.want {
+				t.Fatalf("cached manifest = %q, err=%v", data, err)
+			}
+			entries, err := os.ReadDir(filepath.Dir(path))
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("manifest refresh left temporary files: %v, err=%v", entries, err)
+			}
+		})
+	}
+}
 
 // writeManifest drops a fixture manifest where the scanner expects it and
 // returns a Scanner wired to that directory (no network).
