@@ -68,7 +68,10 @@ func daemonRequest(method, path string, body any) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read daemon response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		var errBody struct {
 			Error string `json:"error"`

@@ -2,6 +2,9 @@ package cliapp
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,27 @@ import (
 
 	"github.com/opensave/opensave/internal/presets"
 )
+
+func TestDaemonRequestRejectsInterruptedResponse(t *testing.T) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, `{"success":`)
+	}))
+	defer daemon.Close()
+	profile := t.TempDir()
+	t.Setenv("USERPROFILE", profile)
+	t.Setenv("HOME", profile)
+	home := filepath.Join(profile, ".opensave")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "daemon.addr"), []byte(strings.TrimPrefix(daemon.URL, "http://")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := daemonRequest(http.MethodPost, "/fixture", nil); err == nil || len(raw) != 0 {
+		t.Fatalf("interrupted response returned %q, err=%v", raw, err)
+	}
+}
 
 // TestJSONFlag pins that --json can appear anywhere in the arguments and is
 // stripped before positional parsing, so `sync --json <id>` and
